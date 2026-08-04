@@ -37,6 +37,15 @@ struct AppConfig
     int heartbeatIntervalMinutes = 60;
     bool heartbeatSendOnStartup = false;
 
+    bool brokerMonitoringEnabled = true;
+    int brokerDisconnectGraceSeconds = 60;
+    bool brokerAlertEmailEnabled = true;
+    bool brokerRecoveryEmailEnabled = true;
+    std::vector<std::wstring> brokerDisconnectPatterns;
+    std::vector<std::wstring> brokerReconnectingPatterns;
+    std::vector<std::wstring> brokerConnectedPatterns;
+    std::wstring universalApplicationMapperPath;
+
     int windowLeft = -1;
     int windowTop = -1;
     int windowWidth = 980;

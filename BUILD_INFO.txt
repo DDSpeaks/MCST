@@ -1,11 +1,9 @@
-MCST-Watchdog Build Information
-Version: 1.0
-Release channel: Production Candidate
-Build date: 2026-08-04
+Product: MCST-Watchdog
+Version: 1.01
+Release type: Production Candidate with Broker Monitor Foundation
 Bridge protocol: V155
-Compatibility framework: Enabled
-Verified AutoTrading profile: MC16-Charting-6A5684BF
-Runtime binary installation directory: C:\MCExtras
-
-Build note:
-The duplicate ReadRemotePeTimestamp implementation and the remaining variable-shadowing warning reported in 0.588 were corrected. A Windows Visual Studio rebuild is still required before production deployment.
+Compatibility database: MCST-Compatibility.ini
+Verified AutoTrading profile: Charting.dll PE timestamp 0x6A5684BF, image size 18493440
+Verified AutoTrading reader: vtable RVA 0xA457B8, offset 0x142
+Runtime EXE/DLL installation directory: C:\MCExtras
+Documentation and source location: user selectable

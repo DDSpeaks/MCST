@@ -1,0 +1,12 @@
+MCST-Watchdog 1.01
+==================
+
+- Added Broker Monitor Foundation based on MultiCharts Recent Logs events.
+- Added a configurable 60-second broker reconnection grace period.
+- A short disconnect that recovers during the grace period is logged without email.
+- A broker alert is sent only if the connection remains unavailable after the grace period.
+- Added one recovery email after a previously alerted broker outage recovers.
+- Added configurable disconnect, reconnecting and connected text patterns.
+- Added a configurable integration path for the Universal Application Mapper.
+- Added English integration documentation for the standalone Mapper tool.
+- Kept Bridge Protocol V155 unchanged.

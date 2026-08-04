@@ -10,6 +10,7 @@
 #include "Email.h"
 #include "AlertService.h"
 #include "ScheduleService.h"
+#include "BrokerMonitor.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 
@@ -61,6 +62,7 @@ namespace
         std::wstring lastReport = L"Never";
         std::wstring lastAlert = L"None";
         ScheduleTracker schedule;
+        BrokerMonitor brokerMonitor;
     };
 
     AppState g_app;
@@ -325,7 +327,7 @@ namespace
             result.status.autoTrading = { mcst::HealthState::Unknown, L"Disabled", L"" };
         }
 
-        result.status.broker = { mcst::HealthState::Unknown, L"Not connected yet", L"Planned for next integration step" };
+        result.status.broker = { mcst::HealthState::Unknown, L"Waiting", L"Broker events are evaluated from Recent Logs" };
         result.status.statusReports = {
             g_app.config.statusReportsEnabled ? mcst::HealthState::Healthy : mcst::HealthState::Unknown,
             g_app.config.statusReportsEnabled ? L"Scheduled" : L"Disabled",
@@ -432,7 +434,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.0", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.01", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -595,6 +597,7 @@ namespace
                 }
                 g_app.schedule.Reset();
                 g_app.autoTradingAlerts.Reset();
+            g_app.brokerMonitor.Reset();
                 KillTimer(hwnd, kRefreshTimer);
                 SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
                 StartRefresh(hwnd, true);
@@ -613,7 +616,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.0", false, L"Test email");
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.01", false, L"Test email");
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -676,6 +679,24 @@ namespace
                 g_app.snapshot = std::move(result->snapshot);
                 g_app.status.lastReport = g_app.lastReport;
                 g_app.status.lastAlert = g_app.lastAlert;
+
+                const auto monitorNow = std::chrono::system_clock::now();
+                const BrokerMonitorDecision brokerDecision = g_app.brokerMonitor.Evaluate(
+                    g_app.snapshot.recentLogs, g_app.config, monitorNow);
+                g_app.status.broker = brokerDecision.status;
+                g_app.status.overall = Worst(g_app.status.overall, g_app.status.broker.state);
+                if (brokerDecision.stateChanged && !brokerDecision.eventText.empty())
+                {
+                    AddActivity(g_app.status, brokerDecision.status.state, brokerDecision.eventText);
+                    if (brokerDecision.sendAlertEmail || brokerDecision.sendRecoveryEmail)
+                    {
+                        g_app.lastAlert = FormatLocalTime(monitorNow) + L" - " + brokerDecision.eventText;
+                        g_app.status.lastAlert = g_app.lastAlert;
+                        const std::wstring body = brokerDecision.eventText + L"\r\n\r\n"
+                            + BuildStatusReport(g_app.status, g_app.snapshot);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, brokerDecision.subject, body, true, brokerDecision.eventText);
+                    }
+                }
 
                 const AutoTradingAlertDecision alertDecision = g_app.autoTradingAlerts.Evaluate(active, g_app.config);
                 if (alertDecision.stateChanged && !alertDecision.eventText.empty())
@@ -831,7 +852,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 1.0 - First Production Test",
+        0, kWindowClass, L"MCST-Watchdog 1.01 - First Production Test",
         WS_OVERLAPPEDWINDOW,
         initialX, initialY, initialWidth, initialHeight,
         nullptr, nullptr, instance, nullptr);

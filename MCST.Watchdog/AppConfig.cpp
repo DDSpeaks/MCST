@@ -187,6 +187,28 @@ namespace
         std::wstring value;
         return TryReadRaw(path, section, key, value) ? value : fallback;
     }
+    std::vector<std::wstring> SplitPatterns(const std::wstring& value)
+    {
+        std::vector<std::wstring> result;
+        std::wstring current;
+        for (wchar_t ch : value)
+        {
+            if (ch == L'|')
+            {
+                current = Trim(current);
+                if (!current.empty()) result.push_back(current);
+                current.clear();
+            }
+            else
+            {
+                current.push_back(ch);
+            }
+        }
+        current = Trim(current);
+        if (!current.empty()) result.push_back(current);
+        return result;
+    }
+
 }
 
 std::wstring GetApplicationDirectory()
@@ -208,7 +230,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     std::vector<std::wstring> changes;
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.0");
+    WriteValue(path, L"General", L"version", L"1.01");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -239,6 +261,15 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureBoolKey(path, L"Heartbeat", L"enabled", true, changes);
     EnsureIntKey(path, L"Heartbeat", L"interval_minutes", 60, 1, 10080, changes);
     EnsureBoolKey(path, L"Heartbeat", L"send_on_startup", false, changes);
+
+    EnsureBoolKey(path, L"BrokerMonitor", L"enabled", true, changes);
+    EnsureIntKey(path, L"BrokerMonitor", L"disconnect_grace_seconds", 60, 10, 3600, changes);
+    EnsureBoolKey(path, L"BrokerMonitor", L"alert_email", true, changes);
+    EnsureBoolKey(path, L"BrokerMonitor", L"recovery_email", true, changes);
+    EnsureStringKey(path, L"BrokerMonitor", L"disconnect_patterns", L"connection lost|connection disconnected|broker disconnected|connection closed", changes);
+    EnsureStringKey(path, L"BrokerMonitor", L"reconnecting_patterns", L"reconnecting|reconnect attempt|trying to connect", changes);
+    EnsureStringKey(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|logged on", changes);
+    EnsureStringKey(path, L"DeveloperTools", L"universal_application_mapper_path", L"C:\\MCExtras\\UniversalApplicationMapper.exe", changes);
 
     EnsureIntKey(path, L"Window", L"left", -1, -32000, 32000, changes);
     EnsureIntKey(path, L"Window", L"top", -1, -32000, 32000, changes);
@@ -292,6 +323,14 @@ AppConfig LoadAppConfig()
     config.heartbeatEnabled = ReadBool(path, L"Heartbeat", L"enabled", true);
     config.heartbeatIntervalMinutes = ReadInt(path, L"Heartbeat", L"interval_minutes", 60, 1, 10080);
     config.heartbeatSendOnStartup = ReadBool(path, L"Heartbeat", L"send_on_startup", false);
+    config.brokerMonitoringEnabled = ReadBool(path, L"BrokerMonitor", L"enabled", true);
+    config.brokerDisconnectGraceSeconds = ReadInt(path, L"BrokerMonitor", L"disconnect_grace_seconds", 60, 10, 3600);
+    config.brokerAlertEmailEnabled = ReadBool(path, L"BrokerMonitor", L"alert_email", true);
+    config.brokerRecoveryEmailEnabled = ReadBool(path, L"BrokerMonitor", L"recovery_email", true);
+    config.brokerDisconnectPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"disconnect_patterns", L"connection lost|connection disconnected|broker disconnected|connection closed"));
+    config.brokerReconnectingPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"reconnecting_patterns", L"reconnecting|reconnect attempt|trying to connect"));
+    config.brokerConnectedPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|logged on"));
+    config.universalApplicationMapperPath = ReadString(path, L"DeveloperTools", L"universal_application_mapper_path", L"C:\\MCExtras\\UniversalApplicationMapper.exe");
     config.windowLeft = ReadInt(path, L"Window", L"left", -1, -32000, 32000);
     config.windowTop = ReadInt(path, L"Window", L"top", -1, -32000, 32000);
     config.windowWidth = ReadInt(path, L"Window", L"width", 980, 760, 3840);

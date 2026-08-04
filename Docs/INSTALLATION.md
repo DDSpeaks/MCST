@@ -29,3 +29,14 @@ The source tree and documentation are not required to be stored in `C:\MCExtras`
 ## Portable operation
 
 MCST is designed to avoid mandatory registry entries and `Program Files` installation. The runtime installation can therefore be backed up or moved as one directory, provided that configured paths remain valid.
+
+## Optional Universal Application Mapper
+
+When the separately built Mapper executable is available, copy it to:
+
+```text
+C:\MCExtras\UniversalApplicationMapper.exe
+```
+
+or change `[DeveloperTools] universal_application_mapper_path` in
+`MCST-Watchdog.ini`. The documentation and Mapper source may be stored anywhere.

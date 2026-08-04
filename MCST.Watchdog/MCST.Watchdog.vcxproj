@@ -57,6 +57,7 @@
     <ClCompile Include="Email.cpp" />
     <ClCompile Include="AlertService.cpp" />
     <ClCompile Include="ScheduleService.cpp" />
+    <ClCompile Include="BrokerMonitor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppConfig.h" />
@@ -66,6 +67,7 @@
     <ClInclude Include="Email.h" />
     <ClInclude Include="AlertService.h" />
     <ClInclude Include="ScheduleService.h" />
+    <ClInclude Include="BrokerMonitor.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MCST.Shared/MCST.Shared.vcxproj">
