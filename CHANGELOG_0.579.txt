@@ -1,0 +1,13 @@
+MCST-Watchdog 0.579 - AutoTrading Settings, Alerts and Email
+================================================================
+
+- AutoTrading current count continues to come from the verified MC memory reader.
+- minimum_active_strategies and check_interval_minutes are loaded from MCST-Watchdog.ini.
+- Added Reload Settings without restarting the application.
+- Added SMTP email sender based on the proven first-generation Watchdog implementation.
+- Added Send Test Email.
+- Save Report now also emails the same Dashboard-based report when Email.enabled=true.
+- Added one-shot AutoTrading below-minimum alert and one-shot recovery notification.
+- Repeated refreshes in the same state do not resend duplicate alert emails.
+- Dashboard Last Alert, Email status and Recent Activity are updated from real events.
+- No Bridge V155 protocol changes.

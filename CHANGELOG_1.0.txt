@@ -1,0 +1,22 @@
+MCST-Watchdog 1.0 - Production Candidate
+========================================
+
+Build fixes
+-----------
+- Removed the duplicate ReadRemotePeTimestamp implementation from AutoTradingReader.cpp.
+- Renamed local normalization-message variables to avoid hiding the WindowProc message parameter.
+
+Release integration
+-------------------
+- Updated the visible application version, window title, test-email version and INI version to 1.0.
+- Retained Bridge Protocol V155 without protocol changes.
+- Retained the 0.588 Compatibility Framework and verified AutoTrading profile.
+- Kept all source comments and release documentation in English.
+- Kept C:\MCExtras as the documented installation directory for runtime EXE and DLL files only.
+
+Validation
+----------
+- Checked project XML files for duplicate project items.
+- Checked that ReadRemotePeTimestamp has only one implementation.
+- Checked the release ZIP root contains the complete MCST-src directory.
+- A Windows Visual Studio Rebuild Solution / Debug x64 is required before production deployment.

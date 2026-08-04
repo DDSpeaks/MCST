@@ -13,6 +13,8 @@ struct AutoTradingReadResult
     int processesScanned = 0;
     std::chrono::system_clock::time_point lastAttempt{};
     std::chrono::system_clock::time_point lastSuccessfulRead{};
+    std::wstring compatibilityProfile;
+    std::wstring compatibilitySource;
     std::wstring diagnostic;
 };
 

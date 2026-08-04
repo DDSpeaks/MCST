@@ -1,0 +1,15 @@
+MCST-Watchdog 0.584
+===================
+
+Centralized INI normalization
+-----------------------------
+- All known configuration keys are checked at startup and on Reload Settings.
+- Missing keys are written immediately with documented safe defaults.
+- Invalid boolean and integer values are replaced with safe defaults and written back.
+- Out-of-range integer values are clamped to the supported range and written back.
+- User-provided SMTP credentials, addresses, file paths, comments, and unknown settings are not invented or intentionally removed.
+- Email and Heartbeat enabled keys now always become explicit in the INI file, eliminating ambiguous Disabled states.
+- Changes are appended to MCST-Watchdog-ConfigNormalization.log in the application directory.
+- Normalization actions are also added to Recent Activity.
+- Reload Settings reports whether corrections were needed.
+- Version updated to 0.584.

@@ -1,0 +1,11 @@
+MCST-Watchdog 0.582 - Dashboard Polish
+=======================================
+
+- Enlarged every Dashboard status indicator by approximately 20 percent.
+  - System-status row dots: 14 px -> 17 px.
+  - Overall-status dot: 20 px -> 24 px.
+- Preserved the fixed Dashboard layout and row order.
+- Corrected Recent Activity timestamp alignment with a fixed-width, right-aligned time column.
+- Event descriptions now always begin at the same x-coordinate.
+- Updated visible version and generated INI version to 0.582.
+- No Bridge protocol, AutoTrading reader, email, alert, scheduler, or heartbeat behavior changes.

@@ -1,0 +1,165 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#include "CompatibilityManager.h"
+#include "AppConfig.h"
+
+#include <algorithm>
+#include <cerrno>
+#include <cwchar>
+#include <filesystem>
+#include <iterator>
+#include <cwctype>
+#include <sstream>
+#include <vector>
+
+namespace
+{
+    constexpr wchar_t kDatabaseFileName[] = L"MCST-Compatibility.ini";
+    constexpr wchar_t kKnownSection[] = L"Profile.MC16-Charting-6A5684BF";
+
+    std::wstring Trim(std::wstring value)
+    {
+        const auto notSpace = [](wchar_t ch) { return iswspace(ch) == 0; };
+        value.erase(value.begin(), std::find_if(value.begin(), value.end(), notSpace));
+        value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(), value.end());
+        return value;
+    }
+
+    bool TryParseUnsigned(const std::wstring& text, unsigned long long& value)
+    {
+        const std::wstring normalized = Trim(text);
+        if (normalized.empty())
+            return false;
+
+        wchar_t* end = nullptr;
+        errno = 0;
+        const unsigned long long parsed = std::wcstoull(normalized.c_str(), &end, 0);
+        if (errno == ERANGE || end == normalized.c_str() || *end != L'\0')
+            return false;
+        value = parsed;
+        return true;
+    }
+
+    std::wstring ReadValue(const std::wstring& path, const std::wstring& section,
+        const wchar_t* key, const wchar_t* fallback = L"")
+    {
+        wchar_t buffer[2048]{};
+        GetPrivateProfileStringW(section.c_str(), key, fallback, buffer,
+            static_cast<DWORD>(std::size(buffer)), path.c_str());
+        return buffer;
+    }
+
+    std::vector<std::wstring> ReadSections(const std::wstring& path)
+    {
+        std::vector<wchar_t> buffer(32768, L'\0');
+        const DWORD count = GetPrivateProfileSectionNamesW(buffer.data(),
+            static_cast<DWORD>(buffer.size()), path.c_str());
+        std::vector<std::wstring> sections;
+        if (count == 0)
+            return sections;
+
+        const wchar_t* current = buffer.data();
+        while (*current != L'\0')
+        {
+            sections.emplace_back(current);
+            current += sections.back().size() + 1;
+        }
+        return sections;
+    }
+
+    bool WriteKnownProfile(const std::wstring& path)
+    {
+        bool ok = true;
+        ok = ok && WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"1", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(L"Compatibility", L"unknown_build_policy", L"reject", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"name", L"MC16 verified Charting.dll 0x6A5684BF", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"enabled", L"true", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"image_size", L"18493440", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"strategy_vtable_rva", L"0xA457B8", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"autotrading_offset", L"0x142", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"verification", L"0.577 research session: 8/8 exact toggle responses", path.c_str()) != FALSE;
+        WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+        return ok;
+    }
+}
+
+std::wstring GetCompatibilityDatabasePath()
+{
+    return (std::filesystem::path(GetApplicationDirectory()) / kDatabaseFileName).wstring();
+}
+
+bool EnsureCompatibilityDatabase(std::wstring& diagnostic)
+{
+    const std::wstring path = GetCompatibilityDatabasePath();
+    if (std::filesystem::exists(path))
+    {
+        diagnostic = L"Compatibility database available: " + path;
+        return true;
+    }
+
+    if (!WriteKnownProfile(path))
+    {
+        diagnostic = L"Failed to create compatibility database: " + path;
+        return false;
+    }
+
+    diagnostic = L"Created compatibility database with the verified MC16 profile: " + path;
+    return true;
+}
+
+CompatibilityProfile ResolveCompatibilityProfile(DWORD peTimestamp, unsigned long long imageSize)
+{
+    CompatibilityProfile profile;
+    std::wstring ensureDiagnostic;
+    if (!EnsureCompatibilityDatabase(ensureDiagnostic))
+    {
+        profile.diagnostic = ensureDiagnostic;
+        return profile;
+    }
+
+    const std::wstring path = GetCompatibilityDatabasePath();
+    for (const auto& section : ReadSections(path))
+    {
+        if (section.rfind(L"Profile.", 0) != 0)
+            continue;
+
+        const std::wstring enabled = ReadValue(path, section, L"enabled", L"true");
+        if (_wcsicmp(enabled.c_str(), L"false") == 0 || enabled == L"0")
+            continue;
+
+        unsigned long long candidateTimestamp = 0;
+        unsigned long long candidateImageSize = 0;
+        unsigned long long candidateRva = 0;
+        unsigned long long candidateOffset = 0;
+        if (!TryParseUnsigned(ReadValue(path, section, L"pe_timestamp"), candidateTimestamp) ||
+            !TryParseUnsigned(ReadValue(path, section, L"image_size"), candidateImageSize) ||
+            !TryParseUnsigned(ReadValue(path, section, L"strategy_vtable_rva"), candidateRva) ||
+            !TryParseUnsigned(ReadValue(path, section, L"autotrading_offset"), candidateOffset))
+        {
+            continue;
+        }
+
+        if (candidateTimestamp != peTimestamp || candidateImageSize != imageSize)
+            continue;
+
+        profile.matched = true;
+        profile.name = ReadValue(path, section, L"name", section.c_str());
+        profile.chartingPeTimestamp = static_cast<DWORD>(candidateTimestamp);
+        profile.chartingImageSize = candidateImageSize;
+        profile.strategyVtableRva = static_cast<ULONG_PTR>(candidateRva);
+        profile.autoTradingOffset = static_cast<SIZE_T>(candidateOffset);
+        profile.source = path + L" [" + section + L"]";
+        profile.diagnostic = L"Verified compatibility profile selected: " + profile.name;
+        return profile;
+    }
+
+    std::wostringstream message;
+    message << L"No verified compatibility profile for Charting.dll timestamp 0x"
+            << std::hex << std::uppercase << peTimestamp << std::dec
+            << L", image size " << imageSize
+            << L". AutoTrading remains UNKNOWN until a profile is verified.";
+    profile.diagnostic = message.str();
+    return profile;
+}

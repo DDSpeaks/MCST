@@ -1,0 +1,12 @@
+MCST-Watchdog 0.588 - Compatibility Framework
+==============================================
+
+- Added an external compatibility profile database: MCST-Compatibility.ini.
+- Added exact Charting.dll build detection using PE timestamp and image size.
+- Moved the verified AutoTrading vtable RVA and field offset out of the production reader.
+- Added automatic creation of the currently verified MC16 compatibility profile.
+- Added safe rejection of unknown or unverified MultiCharts builds.
+- Unknown builds now leave AutoTrading in UNKNOWN state instead of using stale offsets.
+- Added compatibility profile name and source to AutoTrading diagnostics.
+- Preserved Bridge Protocol V155 without changes.
+- Updated all release metadata to version 0.588.

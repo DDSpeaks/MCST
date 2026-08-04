@@ -1,0 +1,11 @@
+MCST-Watchdog Build Information
+Version: 1.0
+Release channel: Production Candidate
+Build date: 2026-08-04
+Bridge protocol: V155
+Compatibility framework: Enabled
+Verified AutoTrading profile: MC16-Charting-6A5684BF
+Runtime binary installation directory: C:\MCExtras
+
+Build note:
+The duplicate ReadRemotePeTimestamp implementation and the remaining variable-shadowing warning reported in 0.588 were corrected. A Windows Visual Studio rebuild is still required before production deployment.

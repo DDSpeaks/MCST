@@ -3,6 +3,7 @@
 #include <tlhelp32.h>
 
 #include "AutoTradingReader.h"
+#include "CompatibilityManager.h"
 
 #include <algorithm>
 #include <chrono>
@@ -32,9 +33,13 @@ namespace
     struct StrategyObjectCount
     {
         bool chartingFound = false;
+        bool profileMatched = false;
         int objects = 0;
         int active = 0;
         int readFailures = 0;
+        std::wstring compatibilityProfile;
+        std::wstring compatibilitySource;
+        std::wstring compatibilityDiagnostic;
     };
 
     std::mutex g_cacheMutex;
@@ -156,6 +161,38 @@ namespace
         return modules;
     }
 
+    bool ReadRemotePeTimestamp(HANDLE process, ULONG_PTR moduleBase, DWORD& timestamp)
+    {
+        IMAGE_DOS_HEADER dosHeader{};
+        SIZE_T bytesRead = 0;
+        if (!ReadProcessMemory(process, reinterpret_cast<LPCVOID>(moduleBase),
+            &dosHeader, sizeof(dosHeader), &bytesRead) || bytesRead != sizeof(dosHeader) ||
+            dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
+        {
+            return false;
+        }
+
+        DWORD peSignature = 0;
+        if (!ReadProcessMemory(process,
+            reinterpret_cast<LPCVOID>(moduleBase + static_cast<ULONG_PTR>(dosHeader.e_lfanew)),
+            &peSignature, sizeof(peSignature), &bytesRead) ||
+            bytesRead != sizeof(peSignature) || peSignature != IMAGE_NT_SIGNATURE)
+        {
+            return false;
+        }
+
+        IMAGE_FILE_HEADER fileHeader{};
+        const ULONG_PTR fileHeaderAddress = moduleBase + static_cast<ULONG_PTR>(dosHeader.e_lfanew) + sizeof(DWORD);
+        if (!ReadProcessMemory(process, reinterpret_cast<LPCVOID>(fileHeaderAddress),
+            &fileHeader, sizeof(fileHeader), &bytesRead) || bytesRead != sizeof(fileHeader))
+        {
+            return false;
+        }
+
+        timestamp = fileHeader.TimeDateStamp;
+        return true;
+    }
+
     bool IsReadableProtection(DWORD protection)
     {
         if ((protection & PAGE_GUARD) != 0)
@@ -169,11 +206,6 @@ namespace
     StrategyObjectCount CountStrategyObjects(DWORD processId)
     {
         StrategyObjectCount result;
-
-        // Verified for the current MultiCharts Charting.dll build (PE timestamp 0x6A5684BF)
-        // by the automated 0.577 research session: 8/8 exact ON/OFF responses.
-        constexpr ULONG_PTR kPrimaryStrategyVtableRva = 0xA457B8;
-        constexpr SIZE_T kAutoTradingOffset = 0x142;
         constexpr SIZE_T kReadChunk = 1024u * 1024u;
 
         const auto modules = EnumerateModules(processId);
@@ -190,8 +222,6 @@ namespace
             return result;
 
         result.chartingFound = true;
-        const ULONG_PTR wantedVtable = charting->base + kPrimaryStrategyVtableRva;
-
         HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
         if (process == nullptr)
         {
@@ -199,6 +229,28 @@ namespace
             return result;
         }
 
+        DWORD peTimestamp = 0;
+        if (!ReadRemotePeTimestamp(process, charting->base, peTimestamp))
+        {
+            ++result.readFailures;
+            result.compatibilityDiagnostic = L"Charting.dll PE timestamp could not be read.";
+            CloseHandle(process);
+            return result;
+        }
+
+        const CompatibilityProfile profile = ResolveCompatibilityProfile(
+            peTimestamp, static_cast<unsigned long long>(charting->size));
+        result.profileMatched = profile.matched;
+        result.compatibilityProfile = profile.name;
+        result.compatibilitySource = profile.source;
+        result.compatibilityDiagnostic = profile.diagnostic;
+        if (!profile.matched)
+        {
+            CloseHandle(process);
+            return result;
+        }
+
+        const ULONG_PTR wantedVtable = charting->base + profile.strategyVtableRva;
         SYSTEM_INFO systemInfo{};
         GetSystemInfo(&systemInfo);
         ULONG_PTR address = reinterpret_cast<ULONG_PTR>(systemInfo.lpMinimumApplicationAddress);
@@ -241,7 +293,7 @@ namespace
                         unsigned char state = 0xFF;
                         SIZE_T stateBytes = 0;
                         if (ReadProcessMemory(process,
-                            reinterpret_cast<LPCVOID>(objectBase + kAutoTradingOffset),
+                            reinterpret_cast<LPCVOID>(objectBase + profile.autoTradingOffset),
                             &state, sizeof(state), &stateBytes) &&
                             stateBytes == sizeof(state) && state <= 1)
                         {
@@ -275,16 +327,26 @@ namespace
         result.processesScanned = static_cast<int>(processIds.size());
 
         bool chartingFound = false;
+        bool anyProfileMatched = false;
+        std::wstring compatibilityFailure;
         for (DWORD processId : processIds)
         {
             const StrategyObjectCount count = CountStrategyObjects(processId);
             chartingFound = chartingFound || count.chartingFound;
+            anyProfileMatched = anyProfileMatched || count.profileMatched;
             result.strategyObjectsFound += count.objects;
             result.activeStrategies += count.active;
             result.readFailures += count.readFailures;
+            if (count.profileMatched && result.compatibilityProfile.empty())
+            {
+                result.compatibilityProfile = count.compatibilityProfile;
+                result.compatibilitySource = count.compatibilitySource;
+            }
+            if (!count.compatibilityDiagnostic.empty() && !count.profileMatched)
+                compatibilityFailure = count.compatibilityDiagnostic;
         }
 
-        result.succeeded = chartingFound && result.strategyObjectsFound > 0;
+        result.succeeded = chartingFound && anyProfileMatched && result.strategyObjectsFound > 0;
         if (result.succeeded)
             result.lastSuccessfulRead = result.lastAttempt;
         std::wostringstream diagnostic;
@@ -296,8 +358,12 @@ namespace
             diagnostic << L". No MultiCharts main windows were found.";
         else if (!chartingFound)
             diagnostic << L". Charting.dll was not found in the detected processes.";
+        else if (!anyProfileMatched)
+            diagnostic << L". " << compatibilityFailure;
         else if (result.strategyObjectsFound == 0)
-            diagnostic << L". No RTTI-verified CStrategyObject instances were found.";
+            diagnostic << L". The selected compatibility profile found no strategy objects.";
+        if (!result.compatibilityProfile.empty())
+            diagnostic << L". Profile: " << result.compatibilityProfile;
         result.diagnostic = diagnostic.str();
         return result;
     }
@@ -368,25 +434,6 @@ namespace
             return TRUE;
         }, reinterpret_cast<LPARAM>(&context));
         return titles;
-    }
-
-    bool ReadRemotePeTimestamp(HANDLE process, ULONG_PTR moduleBase, DWORD& timestamp)
-    {
-        IMAGE_DOS_HEADER dos{};
-        SIZE_T got = 0;
-        if (!ReadProcessMemory(process, reinterpret_cast<LPCVOID>(moduleBase), &dos, sizeof(dos), &got) ||
-            got != sizeof(dos) || dos.e_magic != IMAGE_DOS_SIGNATURE)
-            return false;
-        DWORD signature = 0;
-        if (!ReadProcessMemory(process, reinterpret_cast<LPCVOID>(moduleBase + dos.e_lfanew), &signature, sizeof(signature), &got) ||
-            got != sizeof(signature) || signature != IMAGE_NT_SIGNATURE)
-            return false;
-        IMAGE_FILE_HEADER header{};
-        const ULONG_PTR headerAddress = moduleBase + dos.e_lfanew + sizeof(DWORD);
-        if (!ReadProcessMemory(process, reinterpret_cast<LPCVOID>(headerAddress), &header, sizeof(header), &got) || got != sizeof(header))
-            return false;
-        timestamp = header.TimeDateStamp;
-        return true;
     }
 
     std::vector<DWORD> FindAsciiOccurrences(HANDLE process, const ModuleRange& module, const std::string& needle)
