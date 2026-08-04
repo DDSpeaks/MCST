@@ -1,0 +1,12 @@
+MCST-Watchdog 0.52 - First Production Test
+
+Changes from 0.51:
+- AutoTrading display format prepared as "Current Active" first and "Minimum required" second.
+- When the AutoTrading reader is integrated, the Dashboard will show for example:
+    67 Active  -  Minimum required 65
+- AutoTrading threshold evaluation is already prepared in the common status model.
+- Replaced the Unicode em dash used between Dashboard values with an ASCII hyphen to prevent mojibake such as "â€”".
+- Fixed x64 HMENU conversion warnings for Dashboard buttons.
+- Application, window title, README and default INI version updated to 0.52.
+
+No Bridge protocol changes were made. AutoTrading production reading is still not integrated in this version.

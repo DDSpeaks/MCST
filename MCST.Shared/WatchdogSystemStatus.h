@@ -1,0 +1,77 @@
+#pragma once
+
+#include <chrono>
+#include <string>
+#include <vector>
+
+namespace mcst
+{
+    enum class HealthState
+    {
+        Unknown,
+        Healthy,
+        Attention,
+        Critical
+    };
+
+    inline const wchar_t* HealthStateText(HealthState state)
+    {
+        switch (state)
+        {
+        case HealthState::Healthy: return L"OK";
+        case HealthState::Attention: return L"WARNING";
+        case HealthState::Critical: return L"CRITICAL";
+        default: return L"UNKNOWN";
+        }
+    }
+
+    struct MonitorStatus
+    {
+        HealthState state = HealthState::Unknown;
+        std::wstring value;
+        std::wstring detail;
+    };
+
+    struct ActivityItem
+    {
+        std::chrono::system_clock::time_point time{};
+        HealthState state = HealthState::Unknown;
+        std::wstring text;
+    };
+
+    struct WatchdogSystemStatus
+    {
+        HealthState overall = HealthState::Unknown;
+
+        MonitorStatus bridge;
+        MonitorStatus trackerSnapshot;
+        MonitorStatus autoTrading;
+        MonitorStatus broker;
+        MonitorStatus recentLogs;
+        MonitorStatus statusReports;
+        MonitorStatus email;
+        MonitorStatus heartbeat;
+
+        std::chrono::system_clock::time_point lastSuccessfulUpdate{};
+
+        std::wstring lastSnapshot;
+        std::wstring lastAutoTradingRead;
+        std::wstring lastReport;
+        std::wstring lastAlert;
+        std::wstring lastError;
+
+        unsigned long processId = 0;
+        std::size_t accountRows = 0;
+        std::size_t openPositionRows = 0;
+        std::size_t recentLogRows = 0;
+        int autoTradingActive = -1;
+        int autoTradingMinimum = 0;
+
+        double cpuPercent = 0.0;
+        std::size_t privateMemoryBytes = 0;
+        unsigned long handleCount = 0;
+        std::wstring uptime;
+
+        std::vector<ActivityItem> activity;
+    };
+}

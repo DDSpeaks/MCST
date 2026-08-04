@@ -1,0 +1,12 @@
+MCST-Watchdog 0.51 - First Production Test
+
+Changes from 0.5:
+- Generated output artifacts now use a hyphen after MCST instead of a dot.
+- MCST.Watchdog project outputs MCST-Watchdog.exe.
+- MCST.TrackerBridge project outputs MCST-TrackerBridge.lib.
+- MCST.Shared project outputs MCST-Shared.lib.
+- MCST.Tests project outputs MCST-Tests.exe.
+- Visual Studio project, solution, folder and source-reference names remain unchanged.
+- Application and default INI version updated to 0.51.
+
+No runtime behavior or Bridge protocol changes were made.

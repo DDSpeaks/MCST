@@ -1,0 +1,18 @@
+MCST-Watchdog 0.55
+====================
+
+Dashboard readability and time precision update.
+
+Changes
+-------
+- Made all Dashboard traffic-light dots brighter and easier to distinguish.
+- Updated Healthy, Attention, Critical, and Unknown state colors consistently.
+- Removed seconds from Dashboard timestamps and recent activity times.
+- Relative update age is now shown with minute precision.
+- Uptime continues to use days, hours, and minutes only.
+- Updated visible and configuration version numbers to 0.55.
+
+Compatibility
+-------------
+- No Bridge protocol or snapshot format changes.
+- Compatible with the existing Bridge V155.

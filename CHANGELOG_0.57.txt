@@ -1,0 +1,11 @@
+MCST-Watchdog 0.57
+===================
+
+- Completed the first operational AutoTrading dashboard integration.
+- Added latest successful AutoTrading read time to Dashboard.
+- Added latest successful AutoTrading read time to status report.
+- Manual Refresh now forces a new AutoTrading memory scan.
+- Automatic refreshes continue to respect the configured AutoTrading cache interval.
+- AutoTrading remains binary: HEALTHY at/above minimum, CRITICAL below minimum, UNKNOWN when unreadable.
+- Reduced the minute-only display timer from one-second invalidation to one-minute invalidation.
+- No Bridge protocol or snapshot format changes.
