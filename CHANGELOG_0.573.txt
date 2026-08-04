@@ -1,0 +1,8 @@
+MCST-Watchdog 0.573 - AutoTrading Toggle Verifier
+
+- Adds a two-stage controlled ON/OFF verification for the eight strongest candidates.
+- First press captures baseline (19 objects, expected 18 ON / 1 OFF).
+- User turns exactly one active strategy AutoTrading OFF.
+- Second press compares all candidates and marks exact ON -1 / OFF +1 reactions.
+- Passive only: no clicks, input, or writes to MultiCharts memory.
+- Baseline file is removed after comparison.

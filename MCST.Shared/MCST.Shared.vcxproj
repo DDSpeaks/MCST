@@ -52,9 +52,6 @@
     <ClInclude Include="WatchdogSystemStatus.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="MCBridgeProtocol.h" />
-  </ItemGroup>
-  <ItemGroup>
 
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

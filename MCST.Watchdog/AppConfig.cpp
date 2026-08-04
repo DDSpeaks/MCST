@@ -51,7 +51,7 @@ void EnsureDefaultConfigFile(const std::wstring& path)
     if (std::filesystem::exists(path))
         return;
 
-    WritePrivateProfileStringW(L"General", L"version", L"0.571", path.c_str());
+    WritePrivateProfileStringW(L"General", L"version", L"0.578", path.c_str());
     WritePrivateProfileStringW(L"Dashboard", L"refresh_seconds", L"10", path.c_str());
     WritePrivateProfileStringW(L"Bridge", L"timeout_milliseconds", L"5000", path.c_str());
     WritePrivateProfileStringW(L"Bridge", L"snapshot_retry_count", L"3", path.c_str());
@@ -59,6 +59,7 @@ void EnsureDefaultConfigFile(const std::wstring& path)
     WritePrivateProfileStringW(L"AutoTrading", L"enabled", L"true", path.c_str());
     WritePrivateProfileStringW(L"AutoTrading", L"minimum_active_strategies", L"65", path.c_str());
     WritePrivateProfileStringW(L"AutoTrading", L"check_interval_minutes", L"5", path.c_str());
+    WritePrivateProfileStringW(L"AutoTradingDiagnostics", L"expected_active_strategies", L"18", path.c_str());
     WritePrivateProfileStringW(L"StatusReport", L"enabled", L"false", path.c_str());
     WritePrivateProfileStringW(L"Email", L"enabled", L"false", path.c_str());
     WritePrivateProfileStringW(L"Heartbeat", L"enabled", L"false", path.c_str());
@@ -75,7 +76,7 @@ AppConfig LoadAppConfig()
 {
     const std::wstring path = GetConfigPath();
     EnsureDefaultConfigFile(path);
-    WritePrivateProfileStringW(L"General", L"version", L"0.571", path.c_str());
+    WritePrivateProfileStringW(L"General", L"version", L"0.578", path.c_str());
 
     AppConfig config;
     config.refreshSeconds = ReadInt(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600);
@@ -85,6 +86,7 @@ AppConfig LoadAppConfig()
     config.autoTradingMonitoringEnabled = ReadBool(path, L"AutoTrading", L"enabled", true);
     config.autoTradingMinimum = ReadInt(path, L"AutoTrading", L"minimum_active_strategies", 65, 0, 10000);
     config.autoTradingCheckMinutes = ReadInt(path, L"AutoTrading", L"check_interval_minutes", 5, 1, 1440);
+    config.autoTradingExpectedActiveForDiagnostics = ReadInt(path, L"AutoTradingDiagnostics", L"expected_active_strategies", 18, 0, 10000);
     config.statusReportsEnabled = ReadBool(path, L"StatusReport", L"enabled", false);
     config.emailEnabled = ReadBool(path, L"Email", L"enabled", false);
     config.heartbeatEnabled = ReadBool(path, L"Heartbeat", L"enabled", false);

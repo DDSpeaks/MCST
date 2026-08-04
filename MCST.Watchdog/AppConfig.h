@@ -14,6 +14,7 @@ struct AppConfig
     bool autoTradingMonitoringEnabled = true;
     int autoTradingMinimum = 65;
     int autoTradingCheckMinutes = 5;
+    int autoTradingExpectedActiveForDiagnostics = 18;
 
     bool statusReportsEnabled = false;
     bool emailEnabled = false;

@@ -32,6 +32,8 @@ namespace
     constexpr int kButtonSettings = 1003;
     constexpr int kButtonOpenFolder = 1004;
     constexpr int kButtonAutoTradingDiagnostics = 1005;
+    constexpr int kButtonAutoTradingCapture = 1006;
+    constexpr int kButtonAutoTradingFinish = 1007;
 
     struct RefreshResult
     {
@@ -60,6 +62,8 @@ namespace
     HWND g_settingsButton = nullptr;
     HWND g_openFolderButton = nullptr;
     HWND g_autoTradingDiagnosticsButton = nullptr;
+    HWND g_autoTradingCaptureButton = nullptr;
+    HWND g_autoTradingFinishButton = nullptr;
 
     std::wstring FormatLocalTime(std::chrono::system_clock::time_point value)
     {
@@ -121,7 +125,10 @@ namespace
         if (g_reportButton) MoveWindow(g_reportButton, 148, y, 120, 34, TRUE);
         if (g_settingsButton) MoveWindow(g_settingsButton, 278, y, 110, 34, TRUE);
         if (g_openFolderButton) MoveWindow(g_openFolderButton, 398, y, 120, 34, TRUE);
-        if (g_autoTradingDiagnosticsButton) MoveWindow(g_autoTradingDiagnosticsButton, 528, y, 170, 34, TRUE);
+        const int researchY = y - 42;
+        if (g_autoTradingDiagnosticsButton) MoveWindow(g_autoTradingDiagnosticsButton, 28, researchY, 190, 34, TRUE);
+        if (g_autoTradingCaptureButton) MoveWindow(g_autoTradingCaptureButton, 228, researchY, 190, 34, TRUE);
+        if (g_autoTradingFinishButton) MoveWindow(g_autoTradingFinishButton, 428, researchY, 190, 34, TRUE);
     }
 
     RECT ResolveInitialWindowRect(const AppConfig& config)
@@ -369,7 +376,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 0.571", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 0.578", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -453,8 +460,10 @@ namespace
             g_reportButton = CreateWindowW(L"BUTTON", L"Save Report", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 148, 690, 120, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReport)), nullptr, nullptr);
             g_settingsButton = CreateWindowW(L"BUTTON", L"Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 278, 690, 110, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonSettings)), nullptr, nullptr);
             g_openFolderButton = CreateWindowW(L"BUTTON", L"Open Folder", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 398, 690, 120, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenFolder)), nullptr, nullptr);
-            g_autoTradingDiagnosticsButton = CreateWindowW(L"BUTTON", L"AT Diagnostics", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 528, 690, 170, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingDiagnostics)), nullptr, nullptr);
-            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_autoTradingDiagnosticsButton })
+            g_autoTradingDiagnosticsButton = CreateWindowW(L"BUTTON", L"Start AT Research", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 28, 648, 190, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingDiagnostics)), nullptr, nullptr);
+            g_autoTradingCaptureButton = CreateWindowW(L"BUTTON", L"Capture AT Snapshot", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 228, 648, 190, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingCapture)), nullptr, nullptr);
+            g_autoTradingFinishButton = CreateWindowW(L"BUTTON", L"Finish AT Research", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 428, 648, 190, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingFinish)), nullptr, nullptr);
+            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             LayoutButtons(hwnd);
             SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
@@ -510,17 +519,44 @@ namespace
             case kButtonAutoTradingDiagnostics:
             {
                 CreateDirectoryW(L"C:\\Temp", nullptr);
-                const std::wstring path = L"C:\\Temp\\MCST-Watchdog-AutoTrading-Compatibility-0.571.txt";
+                const std::wstring path = L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt";
+                CreateDirectoryW(L"C:\\Temp\\MCST-Watchdog", nullptr);
                 std::wstring diagnostic;
-                SetWindowTextW(g_autoTradingDiagnosticsButton, L"Scanning...");
+                SetWindowTextW(g_autoTradingDiagnosticsButton, L"Starting...");
                 EnableWindow(g_autoTradingDiagnosticsButton, FALSE);
-                const bool ok = WriteAutoTradingCompatibilityDiagnostics(path, diagnostic);
+                const bool ok = StartAutoTradingResearchSession(path, diagnostic);
                 EnableWindow(g_autoTradingDiagnosticsButton, TRUE);
-                SetWindowTextW(g_autoTradingDiagnosticsButton, L"AT Diagnostics");
-                MessageBoxW(hwnd, diagnostic.c_str(), ok ? L"AutoTrading diagnostics" : L"AutoTrading diagnostics error",
+                SetWindowTextW(g_autoTradingDiagnosticsButton, L"Start AT Research");
+                MessageBoxW(hwnd, diagnostic.c_str(), ok ? L"AutoTrading research" : L"AutoTrading research error",
                     ok ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
-                if (ok)
-                    ShellExecuteW(hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                if (ok) ShellExecuteW(hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                return 0;
+            }
+            case kButtonAutoTradingCapture:
+            {
+                const std::wstring path = L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt";
+                std::wstring diagnostic;
+                SetWindowTextW(g_autoTradingCaptureButton, L"Capturing...");
+                EnableWindow(g_autoTradingCaptureButton, FALSE);
+                const bool ok = CaptureAutoTradingResearchSnapshot(path, diagnostic);
+                EnableWindow(g_autoTradingCaptureButton, TRUE);
+                SetWindowTextW(g_autoTradingCaptureButton, L"Capture AT Snapshot");
+                MessageBoxW(hwnd, diagnostic.c_str(), ok ? L"AutoTrading research" : L"AutoTrading research error",
+                    ok ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
+                return 0;
+            }
+            case kButtonAutoTradingFinish:
+            {
+                const std::wstring path = L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt";
+                std::wstring diagnostic;
+                SetWindowTextW(g_autoTradingFinishButton, L"Analyzing...");
+                EnableWindow(g_autoTradingFinishButton, FALSE);
+                const bool ok = FinishAutoTradingResearchSession(path, diagnostic);
+                EnableWindow(g_autoTradingFinishButton, TRUE);
+                SetWindowTextW(g_autoTradingFinishButton, L"Finish AT Research");
+                MessageBoxW(hwnd, diagnostic.c_str(), ok ? L"AutoTrading research summary" : L"AutoTrading research error",
+                    ok ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
+                if (ok) ShellExecuteW(hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 return 0;
             }
             }
@@ -620,7 +656,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 0.571 - First Production Test",
+        0, kWindowClass, L"MCST-Watchdog 0.578 - First Production Test",
         WS_OVERLAPPEDWINDOW,
         initialX, initialY, initialWidth, initialHeight,
         nullptr, nullptr, instance, nullptr);

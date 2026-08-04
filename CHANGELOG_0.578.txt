@@ -1,0 +1,11 @@
+MCST-Watchdog 0.578 - Verified AutoTrading Reader
+================================================
+
+- Activated the verified AutoTrading reader for the current MultiCharts build.
+- Updated the production strategy vtable RVA from 0xA42048 to 0xA457B8.
+- Retained the verified AutoTrading field offset 0x142.
+- The selected pair followed 8/8 controlled ON/OFF transitions exactly.
+- Dashboard, Overall Status and Status Report now receive the real AutoTrading count from the production reader.
+- AutoTrading changes directly from green to red when the configured minimum is crossed; there is no warning band.
+- Passive read-only behavior is unchanged.
+- Automated research-session tools remain available for diagnostics and future MC updates.
