@@ -1,0 +1,8 @@
+MCST-Watchdog 1.05 - Scheduler Reliability Fix
+
+- Changed the default [StatusReport] enabled value from false to true.
+- Added single-instance protection to prevent duplicate scheduled email delivery.
+- Reload Settings now preserves scheduler timestamps and no longer replays send_on_startup behavior.
+- Added independent in-flight guards for scheduled Status Report and Heartbeat email messages.
+- Updated visible and configuration version values to 1.05.
+- Bridge protocol V155, AutoTrading compatibility profiles, Broker Monitor, and HTML Status Report formatting are unchanged.

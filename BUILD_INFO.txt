@@ -1,7 +1,7 @@
-MCST-Watchdog Build Information
-Version: 1.03
-Release: Broker Recovery Detection Fix
+MCST-Watchdog 1.051
+Build type: Source production candidate
+Purpose: Status Report Delivery build fix
 Bridge Protocol: V155
-AutoTrading compatibility: Profile-based
-Runtime installation target: C:\MCExtras
-Build configuration for current production testing: Debug x64
+AutoTrading compatibility: Profile based
+
+This release fixes malformed C++ wide-string literals in the manual Status Report path.

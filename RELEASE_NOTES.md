@@ -1,15 +1,13 @@
-# MCST-Watchdog 1.03 Release Notes
+# MCST-Watchdog 1.051
 
-Version 1.03 fixes broker recovery detection observed during production testing.
+## Status Report Delivery Build Fix
 
-The Broker Monitor now recognizes provider-specific successful connection messages,
-including `Connection with TradeStation established.`, by using semantic token matching
-in addition to configurable INI patterns. A successful recovery event immediately clears
-an existing reconnecting or critical state. If the connection returned during the grace
-period, no alert is sent. If a critical alert was already sent, one recovery email is sent.
+This maintenance release fixes the C++ compilation failure in version 1.05.
 
-Negative messages such as reconnect failures, timeouts and disconnected states are
-explicitly excluded from recovery classification.
+- Corrects malformed multiline wide-string literals in the manual Status Report dialog.
+- Uses explicit `\r\n` line breaks.
+- Removes the local variable shadowing warning in the corrected block.
+- Keeps local report archiving independent from HTML email delivery.
+- Keeps the scheduler reliability protections introduced in 1.05.
 
-Bridge Protocol V155, the AutoTrading reader, Compatibility Framework and HTML Status
-Report remain unchanged.
+Bridge Protocol V155 and the current AutoTrading compatibility profile are unchanged.

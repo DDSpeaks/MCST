@@ -1,0 +1,9 @@
+MCST-Watchdog 1.05 - Status Report Delivery Independence
+
+- Decoupled HTML status report email delivery from the local report_path archive.
+- Scheduled and manual status report emails are now queued even when the local UTF-8 report file cannot be written.
+- Local archive failures are reported as warnings and remain visible in Recent Activity.
+- Scheduler decisions now claim their timestamps inside Evaluate(), preventing duplicate dispatches from overlapping refresh completions.
+- Heartbeat and scheduled status report in-flight guards remain separate.
+- Updated visible and configuration version numbers to 1.05.
+- Bridge Protocol V155, Compatibility Framework, AutoTrading reader and Broker Monitor are unchanged.

@@ -16,6 +16,7 @@ public:
     void MarkStatusReportSent(std::chrono::system_clock::time_point now);
     void MarkHeartbeatSent(std::chrono::system_clock::time_point now);
     void Reset();
+    void PreserveOnReload(std::chrono::system_clock::time_point now);
 
 private:
     bool initialized_ = false;

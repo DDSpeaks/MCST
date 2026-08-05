@@ -28,6 +28,7 @@
 namespace
 {
     constexpr wchar_t kWindowClass[] = L"MCSTWatchdogDashboardWindow";
+    constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\MCST-Watchdog-SingleInstance";
     constexpr UINT WM_APP_REFRESH_COMPLETE = WM_APP + 1;
     constexpr UINT WM_APP_EMAIL_COMPLETE = WM_APP + 2;
     constexpr UINT_PTR kRefreshTimer = 1;
@@ -63,6 +64,8 @@ namespace
         std::wstring lastAlert = L"None";
         ScheduleTracker schedule;
         BrokerMonitor brokerMonitor;
+        bool scheduledStatusReportEmailInFlight = false;
+        bool heartbeatEmailInFlight = false;
     };
 
     AppState g_app;
@@ -434,7 +437,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.03", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.051", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -571,14 +574,49 @@ namespace
                 }
                 std::wstring diagnostic;
                 const std::wstring report = BuildStatusReport(status, snapshot);
-                const bool ok = WriteUtf8TextFile(g_app.config.reportPath, report, diagnostic);
-                if (ok)
+                const bool reportWritten = WriteUtf8TextFile(g_app.config.reportPath, report, diagnostic);
                 {
-                    { std::lock_guard<std::mutex> lock(g_app.mutex); g_app.lastReport = FormatLocalTime(std::chrono::system_clock::now()); }
-                    if (g_app.config.emailEnabled)
-                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Status Report", BuildStatusReportHtml(report), false, L"Status report email", true);
+                    std::lock_guard<std::mutex> lock(g_app.mutex);
+                    g_app.lastReport = FormatLocalTime(std::chrono::system_clock::now());
+                    g_app.status.lastReport = g_app.lastReport;
+                    if (!reportWritten)
+                        AddActivity(g_app.status, mcst::HealthState::Attention,
+                            L"Local status report archive failed: " + diagnostic);
                 }
-                MessageBoxW(hwnd, diagnostic.c_str(), ok ? L"Status report" : L"Status report error", ok ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
+
+                bool emailQueued = false;
+                if (g_app.config.emailEnabled)
+                {
+                    emailQueued = true;
+                    SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config,
+                        L"MCST-Watchdog Status Report", BuildStatusReportHtml(report), false,
+                        L"Status report email", true);
+                }
+
+                std::wstring dialogMessage;
+                if (reportWritten)
+                {
+                    dialogMessage = diagnostic;
+                }
+                else
+                {
+                    dialogMessage =
+                        L"The HTML status report email is independent of the local archive.\r\n\r\n"
+                        L"Local archive warning: " + diagnostic;
+                }
+
+                if (emailQueued)
+                {
+                    dialogMessage += L"\r\n\r\nThe status report email has been queued.";
+                }
+                else
+                {
+                    dialogMessage += L"\r\n\r\nEmail is not enabled or configured.";
+                }
+
+                MessageBoxW(hwnd, dialogMessage.c_str(),
+                    reportWritten ? L"Status report" : L"Status report archive warning",
+                    reportWritten ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONWARNING);
                 return 0;
             }
             case kButtonSettings:
@@ -595,7 +633,7 @@ namespace
                     for (const auto& normalizationMessage : g_app.config.normalizationMessages)
                         AddActivity(g_app.status, mcst::HealthState::Attention, L"INI normalized: " + normalizationMessage);
                 }
-                g_app.schedule.Reset();
+                g_app.schedule.PreserveOnReload(std::chrono::system_clock::now());
                 g_app.autoTradingAlerts.Reset();
             g_app.brokerMonitor.Reset();
                 KillTimer(hwnd, kRefreshTimer);
@@ -616,7 +654,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.03", false, L"Test email");
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.051", false, L"Test email");
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -716,36 +754,53 @@ namespace
                 const auto scheduleNow = std::chrono::system_clock::now();
                 const ScheduleDecision scheduleDecision = g_app.schedule.Evaluate(g_app.config, scheduleNow);
 
-                if (scheduleDecision.sendStatusReport)
+                if (scheduleDecision.sendStatusReport && !g_app.scheduledStatusReportEmailInFlight)
                 {
                     const std::wstring report = BuildStatusReport(g_app.status, g_app.snapshot);
                     std::wstring fileDiagnostic;
                     const bool reportWritten = WriteUtf8TextFile(g_app.config.reportPath, report, fileDiagnostic);
-                    g_app.schedule.MarkStatusReportSent(scheduleNow);
+                    g_app.lastReport = FormatLocalTime(scheduleNow);
+                    g_app.status.lastReport = g_app.lastReport;
+
                     if (reportWritten)
                     {
-                        g_app.lastReport = FormatLocalTime(scheduleNow);
-                        g_app.status.lastReport = g_app.lastReport;
-                        AddActivity(g_app.status, mcst::HealthState::Healthy, L"Scheduled status report created");
-                        if (g_app.config.emailEnabled)
-                            SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Scheduled Status Report",
-                                BuildStatusReportHtml(report), false, L"Scheduled status report", true);
+                        AddActivity(g_app.status, mcst::HealthState::Healthy,
+                            L"Scheduled status report archived locally");
                     }
                     else
                     {
-                        AddActivity(g_app.status, mcst::HealthState::Critical, L"Scheduled status report failed: " + fileDiagnostic);
+                        AddActivity(g_app.status, mcst::HealthState::Attention,
+                            L"Local scheduled report archive failed: " + fileDiagnostic);
+                    }
+
+                    // Local archiving and email delivery are intentionally independent.
+                    // A missing folder, locked file or invalid report_path must never suppress
+                    // the scheduled HTML status report email.
+                    if (g_app.config.emailEnabled)
+                    {
+                        g_app.scheduledStatusReportEmailInFlight = true;
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config,
+                            L"MCST-Watchdog Scheduled Status Report", BuildStatusReportHtml(report),
+                            false, L"Scheduled status report", true);
+                    }
+                    else
+                    {
+                        AddActivity(g_app.status, mcst::HealthState::Attention,
+                            L"Scheduled status report email was not queued because email is disabled or not configured");
                     }
                 }
 
-                if (scheduleDecision.sendHeartbeat)
+                if (scheduleDecision.sendHeartbeat && !g_app.heartbeatEmailInFlight)
                 {
-                    g_app.schedule.MarkHeartbeatSent(scheduleNow);
                     const std::wstring heartbeatBody = L"MCST-Watchdog heartbeat. Monitoring is active.\r\n\r\n"
                         + BuildStatusReport(g_app.status, g_app.snapshot);
                     AddActivity(g_app.status, mcst::HealthState::Healthy, L"Heartbeat generated");
                     if (g_app.config.emailEnabled)
+                    {
+                        g_app.heartbeatEmailInFlight = true;
                         SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Heartbeat",
                             BuildStatusReportHtml(heartbeatBody), false, L"Heartbeat email", true);
+                    }
                 }
 
                 for (const auto& old : previousActivity)
@@ -765,6 +820,11 @@ namespace
             if (result)
             {
                 std::lock_guard<std::mutex> lock(g_app.mutex);
+                if (result->eventText == L"Scheduled status report")
+                    g_app.scheduledStatusReportEmailInFlight = false;
+                else if (result->eventText == L"Heartbeat email")
+                    g_app.heartbeatEmailInFlight = false;
+
                 g_app.status.email = result->ok
                     ? mcst::MonitorStatus{ mcst::HealthState::Healthy, L"Ready", L"Last send succeeded" }
                     : mcst::MonitorStatus{ mcst::HealthState::Critical, L"Send failed", result->message };
@@ -815,6 +875,16 @@ namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
+    HANDLE singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
+    if (!singleInstanceMutex)
+        return 1;
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        MessageBoxW(nullptr, L"MCST-Watchdog is already running.", L"MCST-Watchdog", MB_OK | MB_ICONINFORMATION);
+        CloseHandle(singleInstanceMutex);
+        return 0;
+    }
+
     g_app.config = LoadAppConfig();
     g_app.status.overall = mcst::HealthState::Unknown;
     g_app.status.bridge = { mcst::HealthState::Unknown, L"Starting", L"" };
@@ -852,7 +922,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 1.03 - First Production Test",
+        0, kWindowClass, L"MCST-Watchdog 1.051 - Status Report Delivery Build Fix",
         WS_OVERLAPPEDWINDOW,
         initialX, initialY, initialWidth, initialHeight,
         nullptr, nullptr, instance, nullptr);
@@ -873,5 +943,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     DeleteObject(g_headerFont);
     DeleteObject(g_bodyFont);
     DeleteObject(g_monoFont);
+    CloseHandle(singleInstanceMutex);
     return static_cast<int>(message.wParam);
 }

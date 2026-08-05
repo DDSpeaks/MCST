@@ -229,8 +229,20 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
 {
     std::vector<std::wstring> changes;
 
+    const std::wstring previousVersion = ReadString(path, L"General", L"version", L"");
+
+    // Versions up to 1.03 accidentally normalized a missing StatusReport enabled
+    // key to false. Migrate that legacy value once so existing installations
+    // receive scheduled reports without requiring a manual INI edit.
+    if (previousVersion != L"1.051" &&
+        ReadString(path, L"StatusReport", L"enabled", L"") == L"false")
+    {
+        WriteValue(path, L"StatusReport", L"enabled", L"true");
+        changes.push_back(L"[StatusReport] enabled migrated from the legacy false default to true");
+    }
+
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.03");
+    WriteValue(path, L"General", L"version", L"1.051");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -243,7 +255,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureIntKey(path, L"AutoTrading", L"check_interval_minutes", 5, 1, 1440, changes);
     EnsureIntKey(path, L"AutoTradingDiagnostics", L"expected_active_strategies", 18, 0, 10000, changes);
 
-    EnsureBoolKey(path, L"StatusReport", L"enabled", false, changes);
+    EnsureBoolKey(path, L"StatusReport", L"enabled", true, changes);
     EnsureIntKey(path, L"StatusReport", L"interval_minutes", 60, 1, 10080, changes);
     EnsureBoolKey(path, L"StatusReport", L"send_on_startup", false, changes);
 
@@ -305,7 +317,7 @@ AppConfig LoadAppConfig()
     config.autoTradingMinimum = ReadInt(path, L"AutoTrading", L"minimum_active_strategies", 65, 0, 10000);
     config.autoTradingCheckMinutes = ReadInt(path, L"AutoTrading", L"check_interval_minutes", 5, 1, 1440);
     config.autoTradingExpectedActiveForDiagnostics = ReadInt(path, L"AutoTradingDiagnostics", L"expected_active_strategies", 18, 0, 10000);
-    config.statusReportsEnabled = ReadBool(path, L"StatusReport", L"enabled", false);
+    config.statusReportsEnabled = ReadBool(path, L"StatusReport", L"enabled", true);
     config.statusReportIntervalMinutes = ReadInt(path, L"StatusReport", L"interval_minutes", 60, 1, 10080);
     config.statusReportSendOnStartup = ReadBool(path, L"StatusReport", L"send_on_startup", false);
     config.emailEnabledSettingPresent = true;
