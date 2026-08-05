@@ -41,6 +41,16 @@ struct AppConfig
     int brokerDisconnectGraceSeconds = 60;
     bool brokerAlertEmailEnabled = true;
     bool brokerRecoveryEmailEnabled = true;
+
+    bool logAlertsEnabled = true;
+    bool logAlertEmailEnabled = true;
+    bool logAlertNotifyExistingOnStartup = false;
+    int logAlertDeduplicationMinutes = 60;
+    std::vector<std::wstring> logAlertFatalKeywords;
+    std::vector<std::wstring> logAlertCriticalKeywords;
+    std::vector<std::wstring> logAlertWarningKeywords;
+    std::vector<std::wstring> logAlertIgnoreKeywords;
+
     std::vector<std::wstring> brokerDisconnectPatterns;
     std::vector<std::wstring> brokerReconnectingPatterns;
     std::vector<std::wstring> brokerConnectedPatterns;

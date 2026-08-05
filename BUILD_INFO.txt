@@ -1,7 +1,12 @@
-MCST-Watchdog 1.051
+MCST-Watchdog 1.06
 Build type: Source production candidate
-Purpose: Status Report Delivery build fix
+Purpose: Configurable Recent Logs email alert engine
 Bridge Protocol: V155
 AutoTrading compatibility: Profile based
 
-This release fixes malformed C++ wide-string literals in the manual Status Report path.
+Default order-rejection matches:
+- status: rejected
+- order: rejected
+- invalid stop price
+- order failed
+- boxed positions are not permitted

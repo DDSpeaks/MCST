@@ -58,6 +58,7 @@
     <ClCompile Include="AlertService.cpp" />
     <ClCompile Include="ScheduleService.cpp" />
     <ClCompile Include="BrokerMonitor.cpp" />
+    <ClCompile Include="LogAlertEngine.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppConfig.h" />
@@ -68,6 +69,7 @@
     <ClInclude Include="AlertService.h" />
     <ClInclude Include="ScheduleService.h" />
     <ClInclude Include="BrokerMonitor.h" />
+    <ClInclude Include="LogAlertEngine.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MCST.Shared/MCST.Shared.vcxproj">

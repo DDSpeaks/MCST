@@ -234,7 +234,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     // Versions up to 1.03 accidentally normalized a missing StatusReport enabled
     // key to false. Migrate that legacy value once so existing installations
     // receive scheduled reports without requiring a manual INI edit.
-    if (previousVersion != L"1.051" &&
+    if (previousVersion != L"1.06" &&
         ReadString(path, L"StatusReport", L"enabled", L"") == L"false")
     {
         WriteValue(path, L"StatusReport", L"enabled", L"true");
@@ -242,7 +242,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     }
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.051");
+    WriteValue(path, L"General", L"version", L"1.06");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -269,6 +269,18 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureStringKey(path, L"Email", L"to", L"", changes);
     EnsureBoolKey(path, L"Email", L"autotrading_alerts", true, changes);
     EnsureBoolKey(path, L"Email", L"autotrading_recovery", true, changes);
+
+    EnsureBoolKey(path, L"LogAlerts", L"enabled", true, changes);
+    EnsureBoolKey(path, L"LogAlerts", L"email_enabled", true, changes);
+    EnsureBoolKey(path, L"LogAlerts", L"notify_existing_on_startup", false, changes);
+    EnsureIntKey(path, L"LogAlerts", L"deduplication_minutes", 60, 0, 10080, changes);
+    EnsureStringKey(path, L"LogAlerts", L"fatal_keywords",
+        L"fatal|unhandled exception|access violation|application crash", changes);
+    EnsureStringKey(path, L"LogAlerts", L"critical_keywords",
+        L"status: rejected|order: rejected|invalid stop price|order failed|boxed positions are not permitted", changes);
+    EnsureStringKey(path, L"LogAlerts", L"warning_keywords", L"", changes);
+    EnsureStringKey(path, L"LogAlerts", L"ignore_keywords",
+        L"simulated trades are not shown on historical data", changes);
 
     EnsureBoolKey(path, L"Heartbeat", L"enabled", true, changes);
     EnsureIntKey(path, L"Heartbeat", L"interval_minutes", 60, 1, 10080, changes);
@@ -331,6 +343,17 @@ AppConfig LoadAppConfig()
     config.emailTo = ReadString(path, L"Email", L"to", L"");
     config.autoTradingAlertEmailEnabled = ReadBool(path, L"Email", L"autotrading_alerts", true);
     config.autoTradingRecoveryEmailEnabled = ReadBool(path, L"Email", L"autotrading_recovery", true);
+    config.logAlertsEnabled = ReadBool(path, L"LogAlerts", L"enabled", true);
+    config.logAlertEmailEnabled = ReadBool(path, L"LogAlerts", L"email_enabled", true);
+    config.logAlertNotifyExistingOnStartup = ReadBool(path, L"LogAlerts", L"notify_existing_on_startup", false);
+    config.logAlertDeduplicationMinutes = ReadInt(path, L"LogAlerts", L"deduplication_minutes", 60, 0, 10080);
+    config.logAlertFatalKeywords = SplitPatterns(ReadString(path, L"LogAlerts", L"fatal_keywords",
+        L"fatal|unhandled exception|access violation|application crash"));
+    config.logAlertCriticalKeywords = SplitPatterns(ReadString(path, L"LogAlerts", L"critical_keywords",
+        L"status: rejected|order: rejected|invalid stop price|order failed|boxed positions are not permitted"));
+    config.logAlertWarningKeywords = SplitPatterns(ReadString(path, L"LogAlerts", L"warning_keywords", L""));
+    config.logAlertIgnoreKeywords = SplitPatterns(ReadString(path, L"LogAlerts", L"ignore_keywords",
+        L"simulated trades are not shown on historical data"));
     config.heartbeatEnabledSettingPresent = true;
     config.heartbeatEnabled = ReadBool(path, L"Heartbeat", L"enabled", true);
     config.heartbeatIntervalMinutes = ReadInt(path, L"Heartbeat", L"interval_minutes", 60, 1, 10080);

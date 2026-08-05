@@ -46,3 +46,26 @@ connected_patterns=connection restored|reconnected|connection established|logged
 Pattern text is case-insensitive. Use the vertical bar (`|`) to separate patterns.
 The defaults are a safe starting point, but production patterns should be verified
 against the actual broker log wording.
+
+
+## Recent Logs email alerts
+
+Version 1.06 adds a dedicated Log Alert Engine. It watches only newly observed rows in the Order and Position Tracker **Logs** tab and can send an HTML email when a configured keyword is found.
+
+Configuration is stored in `MCST-Watchdog.ini`:
+
+```ini
+[LogAlerts]
+enabled=true
+email_enabled=true
+notify_existing_on_startup=false
+deduplication_minutes=60
+fatal_keywords=fatal|unhandled exception|access violation|application crash
+critical_keywords=status: rejected|order: rejected|invalid stop price|order failed|boxed positions are not permitted
+warning_keywords=
+ignore_keywords=simulated trades are not shown on historical data
+```
+
+Keywords are separated with `|` and matching is case-insensitive. Any one matching keyword is sufficient. The default critical list catches rejected orders such as `Invalid Stop Price`. Existing rows are used only as a startup baseline unless `notify_existing_on_startup=true`.
+
+The Log Alert Engine is separate from the Broker State Engine. Changing Fatal, Critical or Warning keywords does not change broker connection recovery detection.

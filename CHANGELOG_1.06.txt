@@ -1,0 +1,11 @@
+MCST-Watchdog 1.06 - Configurable Log Alert Engine
+
+- Adds a dedicated Log Alert Engine for Recent Logs.
+- Adds INI-configurable Fatal, Critical, Warning and Ignore keyword lists.
+- Sends HTML email alerts for newly observed matching log rows.
+- Includes Date/Time, Category, Instrument, Profile, Strategy and Message in alerts.
+- Adds duplicate suppression with a configurable time window.
+- Does not send historical Recent Logs on startup by default.
+- Keeps Log Classification independent from Broker State detection.
+- Adds safe INI normalization for all new LogAlerts settings.
+- Bridge Protocol V155 and the AutoTrading compatibility profile are unchanged.

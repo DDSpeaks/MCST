@@ -11,6 +11,7 @@
 #include "AlertService.h"
 #include "ScheduleService.h"
 #include "BrokerMonitor.h"
+#include "LogAlertEngine.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 
@@ -64,6 +65,7 @@ namespace
         std::wstring lastAlert = L"None";
         ScheduleTracker schedule;
         BrokerMonitor brokerMonitor;
+        LogAlertEngine logAlertEngine;
         bool scheduledStatusReportEmailInFlight = false;
         bool heartbeatEmailInFlight = false;
     };
@@ -437,7 +439,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.051", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.06", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -635,7 +637,8 @@ namespace
                 }
                 g_app.schedule.PreserveOnReload(std::chrono::system_clock::now());
                 g_app.autoTradingAlerts.Reset();
-            g_app.brokerMonitor.Reset();
+                g_app.brokerMonitor.Reset();
+                g_app.logAlertEngine.Reset();
                 KillTimer(hwnd, kRefreshTimer);
                 SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
                 StartRefresh(hwnd, true);
@@ -654,7 +657,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.051", false, L"Test email");
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.06", false, L"Test email");
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -733,6 +736,26 @@ namespace
                         const std::wstring body = brokerDecision.eventText + L"\r\n\r\n"
                             + BuildStatusReport(g_app.status, g_app.snapshot);
                         SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, brokerDecision.subject, BuildStatusReportHtml(body), true, brokerDecision.eventText, true);
+                    }
+                }
+
+                const LogAlertEngine::Decision logAlertDecision = g_app.logAlertEngine.Evaluate(
+                    g_app.snapshot.recentLogs, g_app.config, monitorNow);
+                if (logAlertDecision.eventCount > 0)
+                {
+                    g_app.status.recentLogs.state = Worst(g_app.status.recentLogs.state, logAlertDecision.state);
+                    g_app.status.recentLogs.detail = std::to_wstring(logAlertDecision.eventCount) + L" new alert match(es)";
+                    g_app.lastAlert = FormatLocalTime(monitorNow) + L" - " + logAlertDecision.eventText;
+                    g_app.status.lastAlert = g_app.lastAlert;
+                    AddActivity(g_app.status, logAlertDecision.state, logAlertDecision.eventText);
+
+                    if (logAlertDecision.sendEmail)
+                    {
+                        const std::wstring body = logAlertDecision.body + L"\r\n"
+                            + BuildStatusReport(g_app.status, g_app.snapshot);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config,
+                            logAlertDecision.subject, BuildStatusReportHtml(body), true,
+                            L"Log alert email", true);
                     }
                 }
 
@@ -922,7 +945,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 1.051 - Status Report Delivery Build Fix",
+        0, kWindowClass, L"MCST-Watchdog 1.06 - Configurable Log Alert Engine",
         WS_OVERLAPPEDWINDOW,
         initialX, initialY, initialWidth, initialHeight,
         nullptr, nullptr, instance, nullptr);
