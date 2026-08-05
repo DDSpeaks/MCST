@@ -1,9 +1,7 @@
-Product: MCST-Watchdog
-Version: 1.01
-Release type: Production Candidate with Broker Monitor Foundation
-Bridge protocol: V155
-Compatibility database: MCST-Compatibility.ini
-Verified AutoTrading profile: Charting.dll PE timestamp 0x6A5684BF, image size 18493440
-Verified AutoTrading reader: vtable RVA 0xA457B8, offset 0x142
-Runtime EXE/DLL installation directory: C:\MCExtras
-Documentation and source location: user selectable
+MCST-Watchdog Build Information
+Version: 1.03
+Release: Broker Recovery Detection Fix
+Bridge Protocol: V155
+AutoTrading compatibility: Profile-based
+Runtime installation target: C:\MCExtras
+Build configuration for current production testing: Debug x64

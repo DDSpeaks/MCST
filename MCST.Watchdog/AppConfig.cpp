@@ -230,7 +230,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     std::vector<std::wstring> changes;
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.01");
+    WriteValue(path, L"General", L"version", L"1.03");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -268,7 +268,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureBoolKey(path, L"BrokerMonitor", L"recovery_email", true, changes);
     EnsureStringKey(path, L"BrokerMonitor", L"disconnect_patterns", L"connection lost|connection disconnected|broker disconnected|connection closed", changes);
     EnsureStringKey(path, L"BrokerMonitor", L"reconnecting_patterns", L"reconnecting|reconnect attempt|trying to connect", changes);
-    EnsureStringKey(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|logged on", changes);
+    EnsureStringKey(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|connection with tradestation established|connection to tradestation established|connection with saxo established|connection to saxo established|logged on", changes);
     EnsureStringKey(path, L"DeveloperTools", L"universal_application_mapper_path", L"C:\\MCExtras\\UniversalApplicationMapper.exe", changes);
 
     EnsureIntKey(path, L"Window", L"left", -1, -32000, 32000, changes);
@@ -329,7 +329,7 @@ AppConfig LoadAppConfig()
     config.brokerRecoveryEmailEnabled = ReadBool(path, L"BrokerMonitor", L"recovery_email", true);
     config.brokerDisconnectPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"disconnect_patterns", L"connection lost|connection disconnected|broker disconnected|connection closed"));
     config.brokerReconnectingPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"reconnecting_patterns", L"reconnecting|reconnect attempt|trying to connect"));
-    config.brokerConnectedPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|logged on"));
+    config.brokerConnectedPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|connection with tradestation established|connection to tradestation established|connection with saxo established|connection to saxo established|logged on"));
     config.universalApplicationMapperPath = ReadString(path, L"DeveloperTools", L"universal_application_mapper_path", L"C:\\MCExtras\\UniversalApplicationMapper.exe");
     config.windowLeft = ReadInt(path, L"Window", L"left", -1, -32000, 32000);
     config.windowTop = ReadInt(path, L"Window", L"top", -1, -32000, 32000);

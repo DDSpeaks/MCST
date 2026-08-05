@@ -29,7 +29,7 @@ bool EmailSender::IsConfigured(std::wstring* reason) const {
     }
     return true;
 }
-bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, std::wstring* errorOut) const {
+bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, bool bodyAsHtml, std::wstring* errorOut) const {
     std::wstring reason; if(!IsConfigured(&reason)){ if(errorOut)*errorOut=reason; return false; }
     try {
         auto temp=std::filesystem::temp_directory_path();
@@ -44,7 +44,7 @@ bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, st
         f<<L"$subject=Get-Content -LiteralPath '"<<EscapePS(sp.wstring())<<L"' -Raw -Encoding UTF8\n";
         f<<L"$body=Get-Content -LiteralPath '"<<EscapePS(bp.wstring())<<L"' -Raw -Encoding UTF8\n";
         f<<L"$sec=ConvertTo-SecureString $pass -AsPlainText -Force\n$cred=New-Object System.Management.Automation.PSCredential($user,$sec)\n";
-        f<<L"Send-MailMessage -SmtpServer $server -Port $port "<<(config_.smtpUseSsl?L"-UseSsl ":L"")<<L"-Credential $cred -From $from -To $to -Subject $subject -Body $body -Encoding UTF8\n";
+        f<<L"Send-MailMessage -SmtpServer $server -Port $port "<<(config_.smtpUseSsl?L"-UseSsl ":L"")<<L"-Credential $cred -From $from -To $to -Subject $subject -Body $body "<<(bodyAsHtml?L"-BodyAsHtml ":L"")<<L"-Encoding UTF8\n";
         f.close();
         std::wstring cmd=L"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+ps.wstring()+L"\"";
         int rc=_wsystem(cmd.c_str()); std::error_code ec; std::filesystem::remove(ps,ec); std::filesystem::remove(bp,ec); std::filesystem::remove(sp,ec);
@@ -57,15 +57,15 @@ bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, st
 #include <thread>
 
 void SendEmailAsync(HWND targetWindow, UINT completionMessage, const AppConfig& config,
-    const std::wstring& subject, const std::wstring& body, bool alert, const std::wstring& eventText)
+    const std::wstring& subject, const std::wstring& body, bool alert, const std::wstring& eventText, bool bodyAsHtml)
 {
-    std::thread([targetWindow, completionMessage, config, subject, body, alert, eventText]() {
+    std::thread([targetWindow, completionMessage, config, subject, body, alert, eventText, bodyAsHtml]() {
         auto result = std::make_unique<EmailSendResult>();
         result->alert = alert;
         result->eventText = eventText;
         EmailSender sender(config);
         std::wstring error;
-        result->ok = sender.Send(subject, body, &error);
+        result->ok = sender.Send(subject, body, bodyAsHtml, &error);
         result->message = result->ok ? L"Email sent successfully." : error;
         PostMessageW(targetWindow, completionMessage, 0, reinterpret_cast<LPARAM>(result.release()));
     }).detach();

@@ -8,4 +8,6 @@ std::wstring BuildStatusReport(
     const mcst::WatchdogSystemStatus& status,
     const TrackerStatusSnapshot& snapshot);
 
+std::wstring BuildStatusReportHtml(const std::wstring& plainText);
+
 bool WriteUtf8TextFile(const std::wstring& path, const std::wstring& text, std::wstring& diagnostic);

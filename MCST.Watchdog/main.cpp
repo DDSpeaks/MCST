@@ -434,7 +434,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.01", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.03", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -576,7 +576,7 @@ namespace
                 {
                     { std::lock_guard<std::mutex> lock(g_app.mutex); g_app.lastReport = FormatLocalTime(std::chrono::system_clock::now()); }
                     if (g_app.config.emailEnabled)
-                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Status Report", report, false, L"Status report email");
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Status Report", BuildStatusReportHtml(report), false, L"Status report email", true);
                 }
                 MessageBoxW(hwnd, diagnostic.c_str(), ok ? L"Status report" : L"Status report error", ok ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
                 return 0;
@@ -616,7 +616,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.01", false, L"Test email");
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.03", false, L"Test email");
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -694,7 +694,7 @@ namespace
                         g_app.status.lastAlert = g_app.lastAlert;
                         const std::wstring body = brokerDecision.eventText + L"\r\n\r\n"
                             + BuildStatusReport(g_app.status, g_app.snapshot);
-                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, brokerDecision.subject, body, true, brokerDecision.eventText);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, brokerDecision.subject, BuildStatusReportHtml(body), true, brokerDecision.eventText, true);
                     }
                 }
 
@@ -709,7 +709,7 @@ namespace
                     {
                         const std::wstring body = alertDecision.eventText + L"\r\n\r\n"
                             + BuildStatusReport(g_app.status, g_app.snapshot);
-                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, alertDecision.subject, body, true, alertDecision.eventText);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, alertDecision.subject, BuildStatusReportHtml(body), true, alertDecision.eventText, true);
                     }
                 }
 
@@ -729,7 +729,7 @@ namespace
                         AddActivity(g_app.status, mcst::HealthState::Healthy, L"Scheduled status report created");
                         if (g_app.config.emailEnabled)
                             SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Scheduled Status Report",
-                                report, false, L"Scheduled status report");
+                                BuildStatusReportHtml(report), false, L"Scheduled status report", true);
                     }
                     else
                     {
@@ -745,7 +745,7 @@ namespace
                     AddActivity(g_app.status, mcst::HealthState::Healthy, L"Heartbeat generated");
                     if (g_app.config.emailEnabled)
                         SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Heartbeat",
-                            heartbeatBody, false, L"Heartbeat email");
+                            BuildStatusReportHtml(heartbeatBody), false, L"Heartbeat email", true);
                 }
 
                 for (const auto& old : previousActivity)
@@ -852,7 +852,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 1.01 - First Production Test",
+        0, kWindowClass, L"MCST-Watchdog 1.03 - First Production Test",
         WS_OVERLAPPEDWINDOW,
         initialX, initialY, initialWidth, initialHeight,
         nullptr, nullptr, instance, nullptr);

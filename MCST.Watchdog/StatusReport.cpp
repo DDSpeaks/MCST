@@ -82,6 +82,53 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     return out.str();
 }
 
+
+std::wstring BuildStatusReportHtml(const std::wstring& plainText)
+{
+    auto escapeHtml = [](const std::wstring& value)
+    {
+        std::wstring escaped;
+        escaped.reserve(value.size() + 256);
+        for (const wchar_t ch : value)
+        {
+            switch (ch)
+            {
+            case L'&': escaped += L"&amp;"; break;
+            case L'<': escaped += L"&lt;"; break;
+            case L'>': escaped += L"&gt;"; break;
+            case L'\"': escaped += L"&quot;"; break;
+            default: escaped.push_back(ch); break;
+            }
+        }
+        return escaped;
+    };
+
+    auto replaceAll = [](std::wstring& value, const std::wstring& from, const std::wstring& to)
+    {
+        std::size_t position = 0;
+        while ((position = value.find(from, position)) != std::wstring::npos)
+        {
+            value.replace(position, from.size(), to);
+            position += to.size();
+        }
+    };
+
+    std::wstring colored = escapeHtml(plainText);
+    replaceAll(colored, L"HEALTHY", L"<span style=\"color:#008f00;font-weight:700;\">HEALTHY</span>");
+    replaceAll(colored, L"ATTENTION", L"<span style=\"color:#b36b00;font-weight:700;\">ATTENTION</span>");
+    replaceAll(colored, L"CRITICAL", L"<span style=\"color:#b00020;font-weight:700;\">CRITICAL</span>");
+    replaceAll(colored, L"UNKNOWN", L"<span style=\"color:#666666;font-weight:700;\">UNKNOWN</span>");
+
+    std::wstring html;
+    html += L"<!doctype html>\r\n";
+    html += L"<html><head><meta charset=\"utf-8\"></head>\r\n";
+    html += L"<body style=\"margin:0;padding:16px;background:#ffffff;color:#111111;\">\r\n";
+    html += L"<pre style=\"font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.28;white-space:pre;margin:0;\">";
+    html += colored;
+    html += L"</pre>\r\n</body></html>\r\n";
+    return html;
+}
+
 bool WriteUtf8TextFile(const std::wstring& path, const std::wstring& text, std::wstring& diagnostic)
 {
     diagnostic.clear();
