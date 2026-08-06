@@ -22,15 +22,16 @@ bool WriteUtf8(const std::filesystem::path& path, const std::wstring& text) {
 }
 }
 EmailSender::EmailSender(const AppConfig& config): config_(config) {}
-bool EmailSender::IsConfigured(std::wstring* reason) const {
+bool EmailSender::IsConfigured(std::wstring* reason, const std::wstring& recipientOverride) const {
     if(config_.emailEnabledSettingPresent && !config_.emailEnabled){ if(reason)*reason=L"Email is explicitly disabled in INI ([Email] enabled=false)."; return false; }
-    if(config_.smtpServer.empty()||config_.smtpUser.empty()||config_.smtpPassword.empty()||config_.emailFrom.empty()||config_.emailTo.empty()){
+    const std::wstring recipient = recipientOverride.empty() ? config_.emailTo : recipientOverride;
+    if(config_.smtpServer.empty()||config_.smtpUser.empty()||config_.smtpPassword.empty()||config_.emailFrom.empty()||recipient.empty()){
         if(reason)*reason=L"SMTP server, user, password, from and to must be configured."; return false;
     }
     return true;
 }
-bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, bool bodyAsHtml, std::wstring* errorOut) const {
-    std::wstring reason; if(!IsConfigured(&reason)){ if(errorOut)*errorOut=reason; return false; }
+bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, bool bodyAsHtml, std::wstring* errorOut, const std::wstring& recipientOverride) const {
+    std::wstring reason; if(!IsConfigured(&reason, recipientOverride)){ if(errorOut)*errorOut=reason; return false; }
     try {
         auto temp=std::filesystem::temp_directory_path();
         auto stamp=std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());
@@ -40,7 +41,8 @@ bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, bo
         f<<L"$ErrorActionPreference='Stop'\n";
         f<<L"$server='"<<EscapePS(config_.smtpServer)<<L"'\n$port="<<config_.smtpPort<<L"\n";
         f<<L"$user='"<<EscapePS(config_.smtpUser)<<L"'\n$pass='"<<EscapePS(config_.smtpPassword)<<L"'\n";
-        f<<L"$from='"<<EscapePS(config_.emailFrom)<<L"'\n$to='"<<EscapePS(config_.emailTo)<<L"'\n";
+        const std::wstring recipient = recipientOverride.empty() ? config_.emailTo : recipientOverride;
+        f<<L"$from='"<<EscapePS(config_.emailFrom)<<L"'\n$to='"<<EscapePS(recipient)<<L"'\n";
         f<<L"$subject=Get-Content -LiteralPath '"<<EscapePS(sp.wstring())<<L"' -Raw -Encoding UTF8\n";
         f<<L"$body=Get-Content -LiteralPath '"<<EscapePS(bp.wstring())<<L"' -Raw -Encoding UTF8\n";
         f<<L"$sec=ConvertTo-SecureString $pass -AsPlainText -Force\n$cred=New-Object System.Management.Automation.PSCredential($user,$sec)\n";
@@ -57,15 +59,15 @@ bool EmailSender::Send(const std::wstring& subject, const std::wstring& body, bo
 #include <thread>
 
 void SendEmailAsync(HWND targetWindow, UINT completionMessage, const AppConfig& config,
-    const std::wstring& subject, const std::wstring& body, bool alert, const std::wstring& eventText, bool bodyAsHtml)
+    const std::wstring& subject, const std::wstring& body, bool alert, const std::wstring& eventText, bool bodyAsHtml, const std::wstring& recipientOverride)
 {
-    std::thread([targetWindow, completionMessage, config, subject, body, alert, eventText, bodyAsHtml]() {
+    std::thread([targetWindow, completionMessage, config, subject, body, alert, eventText, bodyAsHtml, recipientOverride]() {
         auto result = std::make_unique<EmailSendResult>();
         result->alert = alert;
         result->eventText = eventText;
         EmailSender sender(config);
         std::wstring error;
-        result->ok = sender.Send(subject, body, bodyAsHtml, &error);
+        result->ok = sender.Send(subject, body, bodyAsHtml, &error, recipientOverride);
         result->message = result->ok ? L"Email sent successfully." : error;
         PostMessageW(targetWindow, completionMessage, 0, reinterpret_cast<LPARAM>(result.release()));
     }).detach();

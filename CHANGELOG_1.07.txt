@@ -1,0 +1,13 @@
+MCST-Watchdog 1.07 - Email Channel Separation and Status Report Settings
+=======================================================================
+
+- Separates alert email delivery from report email delivery.
+- Alerts use [Email] alert_to, with legacy [Email] to as fallback.
+- Status Reports and Heartbeats use [StatusReport] to / [Email] report_to.
+- Preserves legacy send_immediately_on_start behavior.
+- Honors Status Report weekdays and sending-window settings.
+- Adds a Status Report Settings window for recipient, interval, startup delivery, weekdays and sending window.
+- Hides AutoTrading research controls unless [Developer] enabled=true.
+- Adds explicit queue activity entries identifying the message type and recipient.
+- Keeps Heartbeat and Status Report schedules, locks, subjects and recipients independent.
+- Bridge Protocol V155 and the verified AutoTrading compatibility profile are unchanged.

@@ -69,3 +69,26 @@ ignore_keywords=simulated trades are not shown on historical data
 Keywords are separated with `|` and matching is case-insensitive. Any one matching keyword is sufficient. The default critical list catches rejected orders such as `Invalid Stop Price`. Existing rows are used only as a startup baseline unless `notify_existing_on_startup=true`.
 
 The Log Alert Engine is separate from the Broker State Engine. Changing Fatal, Critical or Warning keywords does not change broker connection recovery detection.
+
+
+## Email channels (1.07)
+
+Use separate recipients for alerts and routine reports:
+
+```ini
+[Email]
+alert_to=alerts@example.com
+report_to=reports@example.com
+
+[StatusReport]
+to=reports@example.com
+```
+
+AutoTrading, Broker and Log Alert messages use `alert_to`. Status Reports and Heartbeats use the Status Report recipient.
+
+The **Status Settings** button edits the Status Report recipient, interval, startup behavior, weekdays and sending window. AutoTrading research buttons are shown only in Developer Mode.
+
+
+## Dashboard row menus (1.09)
+
+The AutoTrading, Status Reports, Email, and Heartbeat rows include a compact `...` button. Use it to open the focused settings panel or run a subsystem-specific action. AutoTrading research commands are shown only when `[Developer] enabled=true`.

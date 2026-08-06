@@ -1,0 +1,11 @@
+MCST-Watchdog 1.09 - UI Polish
+================================
+
+- Replaced flat GDI status circles with anti-aliased GDI+ indicators.
+- Added a subtle vertical gradient, soft shadow and restrained highlight rim.
+- Changed the healthy indicator to a deeper, more saturated green.
+- Added a subtle slow pulse to the large healthy overall-status indicator.
+- Added a semibold status font while retaining the existing text colors.
+- Lightened dashboard separator lines.
+- Restored uptime to the right side of the system-update row.
+- Preserved all 1.08 settings panels, email routing, monitoring and compatibility behavior.

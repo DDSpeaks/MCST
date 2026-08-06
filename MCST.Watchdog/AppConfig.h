@@ -21,6 +21,9 @@ struct AppConfig
     bool statusReportsEnabled = false;
     int statusReportIntervalMinutes = 60;
     bool statusReportSendOnStartup = false;
+    std::wstring statusReportWeekdays = L"mon-fri";
+    std::wstring statusReportSendStart = L"00:00";
+    std::wstring statusReportSendEnd = L"23:59";
     bool emailEnabled = true;
     bool emailEnabledSettingPresent = false;
     std::wstring smtpServer;
@@ -30,6 +33,8 @@ struct AppConfig
     std::wstring smtpPassword;
     std::wstring emailFrom;
     std::wstring emailTo;
+    std::wstring alertEmailTo;
+    std::wstring reportEmailTo;
     bool autoTradingAlertEmailEnabled = true;
     bool autoTradingRecoveryEmailEnabled = true;
     bool heartbeatEnabled = true;
@@ -74,3 +79,7 @@ AppConfig LoadAppConfig();
 void EnsureDefaultConfigFile(const std::wstring& path);
 std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path);
 void SaveWindowPlacementToConfig(const WINDOWPLACEMENT& placement);
+bool SaveStatusReportSettings(bool enabled, const std::wstring& recipient, int intervalMinutes, bool sendOnStartup, const std::wstring& weekdays, const std::wstring& sendStart, const std::wstring& sendEnd, std::wstring& errorOut);
+bool SaveAutoTradingSettings(bool enabled, int minimumActive, int intervalMinutes, bool alertEmail, bool recoveryEmail, std::wstring& errorOut);
+bool SaveEmailSettings(bool enabled, const std::wstring& server, int port, bool useSsl, const std::wstring& user, const std::wstring& password, const std::wstring& from, const std::wstring& alertTo, const std::wstring& reportTo, std::wstring& errorOut);
+bool SaveHeartbeatSettings(bool enabled, int intervalMinutes, bool sendOnStartup, std::wstring& errorOut);

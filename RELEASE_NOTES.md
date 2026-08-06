@@ -1,25 +1,14 @@
-# MCST-Watchdog 1.06
+# MCST-Watchdog 1.091
 
-## Configurable Log Alert Engine
+## UI Polish Build Fix
 
-This release adds email alerts for selected messages in MultiCharts Recent Logs.
+This maintenance release corrects the GDI+ header integration and removes accidental duplicate GDI+ initialization fragments. All UI changes from 1.09 remain included.
 
-The engine is configured through the `[LogAlerts]` section in `MCST-Watchdog.ini`. Keyword lists use `|` as the separator and matching is case-insensitive.
 
-Default critical keywords include rejected orders and invalid stop prices. Existing log rows are treated as a startup baseline and are not emailed by default. New matching rows are grouped into one HTML email per snapshot. Duplicate messages are suppressed for 60 minutes by default.
+## Dashboard Settings Panels
 
-Example configuration:
+The AutoTrading, Status Reports, Email, and Heartbeat rows now include compact three-dot menus. Each menu opens a focused settings panel and offers actions relevant to that subsystem.
 
-```ini
-[LogAlerts]
-enabled=true
-email_enabled=true
-notify_existing_on_startup=false
-deduplication_minutes=60
-fatal_keywords=fatal|unhandled exception|access violation|application crash
-critical_keywords=status: rejected|order: rejected|invalid stop price|order failed|boxed positions are not permitted
-warning_keywords=
-ignore_keywords=simulated trades are not shown on historical data
-```
+AutoTrading research actions remain hidden unless Developer Mode is enabled. Alert email and report email recipients remain separate. Settings are stored in `MCST-Watchdog.ini` and reloaded without triggering startup deliveries.
 
-Bridge Protocol V155, Broker State detection and the AutoTrading Compatibility Framework are unchanged.
+The runtime EXE and DLL files are intended for `C:\MCExtras`. Documentation and source code can be stored anywhere.

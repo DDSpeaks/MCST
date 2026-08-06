@@ -1,12 +1,7 @@
-MCST-Watchdog 1.06
-Build type: Source production candidate
-Purpose: Configurable Recent Logs email alert engine
+MCST-Watchdog Build Information
+Version: 1.091
+Edition: UI Polish Build Fix
 Bridge Protocol: V155
-AutoTrading compatibility: Profile based
+Configuration: Debug x64 / Release x64 supported
 
-Default order-rejection matches:
-- status: rejected
-- order: rejected
-- invalid stop price
-- order failed
-- boxed positions are not permitted
+This maintenance release fixes the GDI+ integration and removes accidental startup code fragments from main.cpp.

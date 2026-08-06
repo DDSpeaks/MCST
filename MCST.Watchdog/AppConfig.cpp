@@ -231,18 +231,12 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
 
     const std::wstring previousVersion = ReadString(path, L"General", L"version", L"");
 
-    // Versions up to 1.03 accidentally normalized a missing StatusReport enabled
-    // key to false. Migrate that legacy value once so existing installations
-    // receive scheduled reports without requiring a manual INI edit.
-    if (previousVersion != L"1.06" &&
-        ReadString(path, L"StatusReport", L"enabled", L"") == L"false")
-    {
-        WriteValue(path, L"StatusReport", L"enabled", L"true");
-        changes.push_back(L"[StatusReport] enabled migrated from the legacy false default to true");
-    }
+    // Migrate the original production key once when upgrading to 1.07.
+    if (previousVersion != L"1.07" && ReadBool(path, L"StatusReport", L"send_immediately_on_start", false))
+        WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.06");
+    WriteValue(path, L"General", L"version", L"1.091");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -255,9 +249,17 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureIntKey(path, L"AutoTrading", L"check_interval_minutes", 5, 1, 1440, changes);
     EnsureIntKey(path, L"AutoTradingDiagnostics", L"expected_active_strategies", 18, 0, 10000, changes);
 
+    // Preserve the original Watchdog startup semantics. Older production INI files
+    // used send_immediately_on_start instead of send_on_startup.
+    if (ReadBool(path, L"StatusReport", L"send_immediately_on_start", false))
+        WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
+
     EnsureBoolKey(path, L"StatusReport", L"enabled", true, changes);
     EnsureIntKey(path, L"StatusReport", L"interval_minutes", 60, 1, 10080, changes);
     EnsureBoolKey(path, L"StatusReport", L"send_on_startup", false, changes);
+    EnsureStringKey(path, L"StatusReport", L"weekdays", L"mon-fri", changes);
+    EnsureStringKey(path, L"StatusReport", L"send_start", L"00:00", changes);
+    EnsureStringKey(path, L"StatusReport", L"send_end", L"23:59", changes);
 
     EnsureBoolKey(path, L"Email", L"enabled", true, changes);
     EnsureStringKey(path, L"Email", L"smtp_server", L"", changes);
@@ -267,6 +269,13 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureStringKey(path, L"Email", L"smtp_password", L"", changes);
     EnsureStringKey(path, L"Email", L"from", L"", changes);
     EnsureStringKey(path, L"Email", L"to", L"", changes);
+    // alert_to and report_to provide strict channel separation while keeping
+    // the legacy [Email] to and [StatusReport] to keys compatible.
+    std::wstring legacyEmailTo = ReadString(path, L"Email", L"to", L"");
+    std::wstring legacyReportTo = ReadString(path, L"StatusReport", L"to", L"");
+    EnsureStringKey(path, L"Email", L"alert_to", legacyEmailTo.c_str(), changes);
+    EnsureStringKey(path, L"Email", L"report_to", legacyReportTo.empty() ? legacyEmailTo.c_str() : legacyReportTo.c_str(), changes);
+    EnsureStringKey(path, L"StatusReport", L"to", legacyReportTo.empty() ? legacyEmailTo.c_str() : legacyReportTo.c_str(), changes);
     EnsureBoolKey(path, L"Email", L"autotrading_alerts", true, changes);
     EnsureBoolKey(path, L"Email", L"autotrading_recovery", true, changes);
 
@@ -331,7 +340,10 @@ AppConfig LoadAppConfig()
     config.autoTradingExpectedActiveForDiagnostics = ReadInt(path, L"AutoTradingDiagnostics", L"expected_active_strategies", 18, 0, 10000);
     config.statusReportsEnabled = ReadBool(path, L"StatusReport", L"enabled", true);
     config.statusReportIntervalMinutes = ReadInt(path, L"StatusReport", L"interval_minutes", 60, 1, 10080);
-    config.statusReportSendOnStartup = ReadBool(path, L"StatusReport", L"send_on_startup", false);
+    config.statusReportSendOnStartup = ReadBool(path, L"StatusReport", L"send_on_startup", false) || ReadBool(path, L"StatusReport", L"send_immediately_on_start", false);
+    config.statusReportWeekdays = ReadString(path, L"StatusReport", L"weekdays", L"mon-fri");
+    config.statusReportSendStart = ReadString(path, L"StatusReport", L"send_start", L"00:00");
+    config.statusReportSendEnd = ReadString(path, L"StatusReport", L"send_end", L"23:59");
     config.emailEnabledSettingPresent = true;
     config.emailEnabled = ReadBool(path, L"Email", L"enabled", true);
     config.smtpServer = ReadString(path, L"Email", L"smtp_server", L"");
@@ -341,6 +353,9 @@ AppConfig LoadAppConfig()
     config.smtpPassword = ReadString(path, L"Email", L"smtp_password", L"");
     config.emailFrom = ReadString(path, L"Email", L"from", L"");
     config.emailTo = ReadString(path, L"Email", L"to", L"");
+    config.alertEmailTo = ReadString(path, L"Email", L"alert_to", config.emailTo);
+    const std::wstring emailReportFallback = ReadString(path, L"Email", L"report_to", config.emailTo);
+    config.reportEmailTo = ReadString(path, L"StatusReport", L"to", emailReportFallback);
     config.autoTradingAlertEmailEnabled = ReadBool(path, L"Email", L"autotrading_alerts", true);
     config.autoTradingRecoveryEmailEnabled = ReadBool(path, L"Email", L"autotrading_recovery", true);
     config.logAlertsEnabled = ReadBool(path, L"LogAlerts", L"enabled", true);
@@ -394,4 +409,113 @@ void SaveWindowPlacementToConfig(const WINDOWPLACEMENT& placement)
     WritePrivateProfileStringW(L"Window", L"width", std::to_wstring(width).c_str(), path.c_str());
     WritePrivateProfileStringW(L"Window", L"height", std::to_wstring(height).c_str(), path.c_str());
     WritePrivateProfileStringW(L"Window", L"maximized", placement.showCmd == SW_SHOWMAXIMIZED ? L"true" : L"false", path.c_str());
+}
+
+
+bool SaveStatusReportSettings(bool enabled, const std::wstring& recipient, int intervalMinutes, bool sendOnStartup, const std::wstring& weekdays, const std::wstring& sendStart, const std::wstring& sendEnd, std::wstring& errorOut)
+{
+    const std::wstring path = GetConfigPath();
+    const std::wstring trimmedRecipient = Trim(recipient);
+    if (trimmedRecipient.empty())
+    {
+        errorOut = L"Status Report recipient cannot be empty.";
+        return false;
+    }
+    if (intervalMinutes < 1 || intervalMinutes > 10080)
+    {
+        errorOut = L"Status Report interval must be between 1 and 10080 minutes.";
+        return false;
+    }
+
+    const std::wstring trimmedWeekdays = Trim(weekdays);
+    const std::wstring trimmedStart = Trim(sendStart);
+    const std::wstring trimmedEnd = Trim(sendEnd);
+    if (trimmedWeekdays.empty() || trimmedStart.empty() || trimmedEnd.empty())
+    {
+        errorOut = L"Weekdays and sending window values cannot be empty.";
+        return false;
+    }
+
+    const bool ok =
+        WritePrivateProfileStringW(L"StatusReport", L"enabled", enabled ? L"true" : L"false", path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"to", trimmedRecipient.c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"interval_minutes", std::to_wstring(intervalMinutes).c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"send_on_startup", sendOnStartup ? L"true" : L"false", path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"send_immediately_on_start", sendOnStartup ? L"true" : L"false", path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"weekdays", trimmedWeekdays.c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"send_start", trimmedStart.c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"StatusReport", L"send_end", trimmedEnd.c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"Email", L"report_to", trimmedRecipient.c_str(), path.c_str());
+
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+    if (!ok)
+    {
+        errorOut = L"Windows could not write the Status Report settings to MCST-Watchdog.ini.";
+        return false;
+    }
+    errorOut.clear();
+    return true;
+}
+
+
+bool SaveAutoTradingSettings(bool enabled, int minimumActive, int intervalMinutes, bool alertEmail, bool recoveryEmail, std::wstring& errorOut)
+{
+    if (minimumActive < 0 || minimumActive > 10000 || intervalMinutes < 1 || intervalMinutes > 1440)
+    {
+        errorOut = L"AutoTrading values are outside the allowed range.";
+        return false;
+    }
+    const std::wstring path = GetConfigPath();
+    const bool ok =
+        WritePrivateProfileStringW(L"AutoTrading", L"enabled", enabled ? L"true" : L"false", path.c_str()) &&
+        WritePrivateProfileStringW(L"AutoTrading", L"minimum_active_strategies", std::to_wstring(minimumActive).c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"AutoTrading", L"check_interval_minutes", std::to_wstring(intervalMinutes).c_str(), path.c_str()) &&
+        WritePrivateProfileStringW(L"Email", L"autotrading_alerts", alertEmail ? L"true" : L"false", path.c_str()) &&
+        WritePrivateProfileStringW(L"Email", L"autotrading_recovery", recoveryEmail ? L"true" : L"false", path.c_str());
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+    if (!ok) errorOut = L"Unable to write AutoTrading settings to MCST-Watchdog.ini.";
+    return ok;
+}
+
+bool SaveEmailSettings(bool enabled, const std::wstring& server, int port, bool useSsl, const std::wstring& user, const std::wstring& password, const std::wstring& from, const std::wstring& alertTo, const std::wstring& reportTo, std::wstring& errorOut)
+{
+    if (port < 1 || port > 65535)
+    {
+        errorOut = L"SMTP port must be between 1 and 65535.";
+        return false;
+    }
+    const std::wstring path = GetConfigPath();
+    bool ok = true;
+    auto put=[&](const wchar_t* section,const wchar_t* key,const std::wstring& value){ ok = WritePrivateProfileStringW(section,key,value.c_str(),path.c_str()) && ok; };
+    put(L"Email",L"enabled",enabled?L"true":L"false");
+    put(L"Email",L"smtp_server",server);
+    put(L"Email",L"smtp_port",std::to_wstring(port));
+    put(L"Email",L"use_ssl",useSsl?L"true":L"false");
+    put(L"Email",L"smtp_user",user);
+    if (!password.empty()) put(L"Email",L"smtp_password",password);
+    put(L"Email",L"from",from);
+    put(L"Email",L"alert_to",alertTo);
+    put(L"Email",L"to",alertTo);
+    put(L"Email",L"report_to",reportTo);
+    put(L"StatusReport",L"to",reportTo);
+    WritePrivateProfileStringW(nullptr,nullptr,nullptr,path.c_str());
+    if (!ok) errorOut=L"Unable to write Email settings to MCST-Watchdog.ini.";
+    return ok;
+}
+
+bool SaveHeartbeatSettings(bool enabled, int intervalMinutes, bool sendOnStartup, std::wstring& errorOut)
+{
+    if (intervalMinutes < 1 || intervalMinutes > 10080)
+    {
+        errorOut = L"Heartbeat interval must be between 1 and 10080 minutes.";
+        return false;
+    }
+    const std::wstring path=GetConfigPath();
+    const bool ok=
+        WritePrivateProfileStringW(L"Heartbeat",L"enabled",enabled?L"true":L"false",path.c_str()) &&
+        WritePrivateProfileStringW(L"Heartbeat",L"interval_minutes",std::to_wstring(intervalMinutes).c_str(),path.c_str()) &&
+        WritePrivateProfileStringW(L"Heartbeat",L"send_on_startup",sendOnStartup?L"true":L"false",path.c_str());
+    WritePrivateProfileStringW(nullptr,nullptr,nullptr,path.c_str());
+    if(!ok) errorOut=L"Unable to write Heartbeat settings to MCST-Watchdog.ini.";
+    return ok;
 }
