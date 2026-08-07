@@ -68,6 +68,20 @@ namespace mcst
         int autoTradingMinimum = 0;
 
         double cpuPercent = 0.0;
+        bool cpuAvailable = false;
+        unsigned long logicalProcessorCount = 0;
+
+        bool systemMemoryAvailable = false;
+        unsigned long memoryLoadPercent = 0;
+        unsigned long long totalPhysicalMemoryBytes = 0;
+        unsigned long long availablePhysicalMemoryBytes = 0;
+
+        bool systemDiskAvailable = false;
+        std::wstring systemDiskRoot;
+        unsigned long long diskTotalBytes = 0;
+        unsigned long long diskFreeBytes = 0;
+        double diskUsedPercent = 0.0;
+
         std::size_t privateMemoryBytes = 0;
         unsigned long handleCount = 0;
         std::wstring uptime;

@@ -1,7 +1,7 @@
 MCST-Watchdog Build Information
-Version: 1.091
-Edition: UI Polish Build Fix
+===============================
+Version: 1.104
+Edition: Content-Sized Status Columns
 Bridge Protocol: V155
-Configuration: Debug x64 / Release x64 supported
-
-This maintenance release fixes the GDI+ integration and removes accidental startup code fragments from main.cpp.
+Target: Windows x64 / Windows 10 compatible
+Recommended build: Debug x64 for validation, Release x64 for production

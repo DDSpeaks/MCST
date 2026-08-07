@@ -5,6 +5,19 @@
 #include <string>
 #include <vector>
 
+
+struct BrokerAuthProfile
+{
+    bool enabled = true;
+    std::wstring sectionName;
+    std::wstring name;
+    std::vector<std::wstring> urlContains;
+    std::vector<std::wstring> titleContains;
+    std::vector<std::wstring> textContains;
+    std::vector<std::wstring> recoveryLogContains;
+    int alertAfterSeconds = 10;
+};
+
 struct AppConfig
 {
     int refreshSeconds = 10;
@@ -44,6 +57,7 @@ struct AppConfig
 
     bool brokerMonitoringEnabled = true;
     int brokerDisconnectGraceSeconds = 60;
+    int brokerStateCacheMaxAgeMinutes = 1440;
     bool brokerAlertEmailEnabled = true;
     bool brokerRecoveryEmailEnabled = true;
 
@@ -59,6 +73,7 @@ struct AppConfig
     std::vector<std::wstring> brokerDisconnectPatterns;
     std::vector<std::wstring> brokerReconnectingPatterns;
     std::vector<std::wstring> brokerConnectedPatterns;
+    std::vector<BrokerAuthProfile> brokerAuthProfiles;
     std::wstring universalApplicationMapperPath;
 
     int windowLeft = -1;

@@ -5,19 +5,113 @@
 
 #include <iomanip>
 #include <sstream>
+#include <vector>
+#include <algorithm>
 
 namespace
 {
+    const wchar_t* StateMarker(mcst::HealthState state)
+    {
+        switch (state)
+        {
+        case mcst::HealthState::Healthy: return L"[OK]";
+        case mcst::HealthState::Attention: return L"[!]";
+        case mcst::HealthState::Critical: return L"[X]";
+        default: return L"[?]";
+        }
+    }
+
+    std::wstring StateCell(mcst::HealthState state)
+    {
+        return std::wstring(StateMarker(state)) + L" " + mcst::HealthStateText(state);
+    }
+
     std::wstring MonitorLine(const wchar_t* name, const mcst::MonitorStatus& item)
     {
         std::wostringstream out;
         out << std::left << std::setw(22) << name
-            << std::setw(11) << mcst::HealthStateText(item.state)
+            << std::setw(18) << StateCell(item.state)
             << item.value;
         if (!item.detail.empty())
             out << L"  " << item.detail;
         out << L'\n';
         return out.str();
+    }
+
+    std::wstring FormatGb(unsigned long long bytes)
+    {
+        std::wostringstream out;
+        out << std::fixed << std::setprecision(1)
+            << (static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0)) << L" GB";
+        return out.str();
+    }
+
+    std::wstring FormatPercent(double value)
+    {
+        std::wostringstream out;
+        out << std::fixed << std::setprecision(0) << value << L"%";
+        return out.str();
+    }
+
+    void AppendSystemResources(std::wostringstream& out, const mcst::WatchdogSystemStatus& status)
+    {
+        constexpr int resourceWidth = 16;
+        constexpr int totalWidth = 19;
+        constexpr int freeWidth = 19;
+        constexpr int usedWidth = 10;
+
+        out << L"SYSTEM RESOURCES\n"
+            << L"----------------------------------------------------------------\n"
+            << std::left << std::setw(resourceWidth) << L"Resource"
+            << std::right << std::setw(totalWidth) << L"Total/Capacity"
+            << std::setw(freeWidth) << L"Free"
+            << std::setw(usedWidth) << L"Used %" << L'\n'
+            << L"----------------------------------------------------------------\n";
+
+        if (status.systemMemoryAvailable)
+        {
+            out << std::left << std::setw(resourceWidth) << L"RAM"
+                << std::right << std::setw(totalWidth) << FormatGb(status.totalPhysicalMemoryBytes)
+                << std::setw(freeWidth) << FormatGb(status.availablePhysicalMemoryBytes)
+                << std::setw(usedWidth) << (std::to_wstring(status.memoryLoadPercent) + L"%") << L'\n';
+        }
+        else
+        {
+            out << std::left << std::setw(resourceWidth) << L"RAM"
+                << std::right << std::setw(totalWidth) << L"n/a"
+                << std::setw(freeWidth) << L"n/a"
+                << std::setw(usedWidth) << L"n/a" << L'\n';
+        }
+
+        const std::wstring cpuCapacity = status.logicalProcessorCount > 0
+            ? std::to_wstring(status.logicalProcessorCount) + L" logical CPUs"
+            : L"n/a";
+        out << std::left << std::setw(resourceWidth) << L"CPU"
+            << std::right << std::setw(totalWidth) << cpuCapacity
+            << std::setw(freeWidth) << L"n/a"
+            << std::setw(usedWidth) << (status.cpuAvailable ? FormatPercent(status.cpuPercent) : L"n/a") << L'\n';
+
+        const std::wstring diskLabel = status.systemDiskRoot.empty() ? L"Disk" : L"Disk " + status.systemDiskRoot;
+        if (status.systemDiskAvailable)
+        {
+            out << std::left << std::setw(resourceWidth) << diskLabel
+                << std::right << std::setw(totalWidth) << FormatGb(status.diskTotalBytes)
+                << std::setw(freeWidth) << FormatGb(status.diskFreeBytes)
+                << std::setw(usedWidth) << FormatPercent(status.diskUsedPercent) << L'\n';
+        }
+        else
+        {
+            out << std::left << std::setw(resourceWidth) << diskLabel
+                << std::right << std::setw(totalWidth) << L"n/a"
+                << std::setw(freeWidth) << L"n/a"
+                << std::setw(usedWidth) << L"n/a" << L'\n';
+        }
+
+        out << L"\nWATCHDOG PROCESS\n"
+            << L"----------------\n"
+            << std::left << std::setw(22) << L"Private memory" << (status.privateMemoryBytes / (1024 * 1024)) << L" MB\n"
+            << std::left << std::setw(22) << L"Handles" << status.handleCount << L'\n'
+            << std::left << std::setw(22) << L"Uptime" << status.uptime << L'\n';
     }
 
     void AppendRows(std::wostringstream& out, const TrackerBridgeSection& section)
@@ -46,7 +140,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
         << L"===========================\n\n"
         << L"OVERALL STATUS\n"
         << L"--------------\n"
-        << mcst::HealthStateText(status.overall) << L"\n\n"
+        << StateCell(status.overall) << L"\n\n"
         << L"SYSTEM STATUS\n"
         << L"-------------\n"
         << MonitorLine(L"Bridge", status.bridge)
@@ -63,12 +157,9 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
         << std::left << std::setw(22) << L"Last Snapshot" << status.lastSnapshot << L'\n'
         << std::left << std::setw(22) << L"Last AutoTrading Read" << (status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead) << L'\n'
         << std::left << std::setw(22) << L"Last Status Report" << status.lastReport << L'\n'
-        << std::left << std::setw(22) << L"Last Alert" << status.lastAlert << L'\n'
-        << L"\nSYSTEM RESOURCES\n"
-        << L"----------------\n"
-        << std::left << std::setw(22) << L"Private memory" << (status.privateMemoryBytes / (1024 * 1024)) << L" MB\n"
-        << std::left << std::setw(22) << L"Handles" << status.handleCount << L'\n'
-        << std::left << std::setw(22) << L"Uptime" << status.uptime << L'\n';
+        << std::left << std::setw(22) << L"Last Alert" << status.lastAlert << L"\n\n";
+
+    AppendSystemResources(out, status);
 
     if (!status.lastError.empty())
         out << L"\nLATEST ERROR\n------------\n" << status.lastError << L'\n';
@@ -81,7 +172,6 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     AppendRows(out, snapshot.recentLogs);
     return out.str();
 }
-
 
 std::wstring BuildStatusReportHtml(const std::wstring& plainText)
 {
@@ -103,29 +193,199 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         return escaped;
     };
 
-    auto replaceAll = [](std::wstring& value, const std::wstring& from, const std::wstring& to)
+    auto trimRight = [](std::wstring value)
     {
-        std::size_t position = 0;
-        while ((position = value.find(from, position)) != std::wstring::npos)
-        {
-            value.replace(position, from.size(), to);
-            position += to.size();
-        }
+        while (!value.empty() && (value.back() == L' ' || value.back() == L'\t' || value.back() == L'\r'))
+            value.pop_back();
+        return value;
     };
 
-    std::wstring colored = escapeHtml(plainText);
-    replaceAll(colored, L"HEALTHY", L"<span style=\"color:#008f00;font-weight:700;\">HEALTHY</span>");
-    replaceAll(colored, L"ATTENTION", L"<span style=\"color:#b36b00;font-weight:700;\">ATTENTION</span>");
-    replaceAll(colored, L"CRITICAL", L"<span style=\"color:#b00020;font-weight:700;\">CRITICAL</span>");
-    replaceAll(colored, L"UNKNOWN", L"<span style=\"color:#666666;font-weight:700;\">UNKNOWN</span>");
+    auto trim = [&](std::wstring value)
+    {
+        value = trimRight(std::move(value));
+        std::size_t first = 0;
+        while (first < value.size() && (value[first] == L' ' || value[first] == L'\t'))
+            ++first;
+        return value.substr(first);
+    };
+
+    auto stateHtml = [&](const std::wstring& stateCell)
+    {
+        struct StateStyle
+        {
+            const wchar_t* marker;
+            const wchar_t* label;
+            const wchar_t* dotColor;
+            const wchar_t* textColor;
+        };
+
+        static const StateStyle styles[] = {
+            { L"[OK]", L"OK", L"#16A34A", L"#15803D" },
+            { L"[!]", L"WARNING", L"#E6A700", L"#B77900" },
+            { L"[X]", L"CRITICAL", L"#D13438", L"#B4232A" },
+            { L"[?]", L"UNKNOWN", L"#8B949E", L"#687078" }
+        };
+
+        for (const auto& style : styles)
+        {
+            if (stateCell.find(style.marker) != std::wstring::npos)
+            {
+                std::wstring result =
+                    L"<span style=\"display:inline-block;width:10px;height:10px;background-color:";
+                result += style.dotColor;
+                result += L";border-radius:50%;margin-right:7px;vertical-align:middle;\"></span>";
+                result += L"<span style=\"color:";
+                result += style.textColor;
+                result += L";font-weight:600;vertical-align:middle;\">";
+                result += style.label;
+                result += L"</span>";
+                return result;
+            }
+        }
+        return escapeHtml(trim(stateCell));
+    };
+
+    std::vector<std::wstring> lines;
+    {
+        std::wistringstream input(plainText);
+        std::wstring line;
+        while (std::getline(input, line))
+            lines.push_back(trimRight(line));
+    }
 
     std::wstring html;
     html += L"<!doctype html>\r\n";
-    html += L"<html><head><meta charset=\"utf-8\"></head>\r\n";
-    html += L"<body style=\"margin:0;padding:16px;background:#ffffff;color:#111111;\">\r\n";
-    html += L"<pre style=\"font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.28;white-space:pre;margin:0;\">";
-    html += colored;
-    html += L"</pre>\r\n</body></html>\r\n";
+    html += L"<html><head><meta charset=\"utf-8\">";
+    html += L"<style>body,table,tbody,tr,td,th,div,span,pre,p{font-family:Consolas,\'Courier New\',monospace !important;}</style></head>\r\n";
+    html += L"<body style=\"margin:0;padding:16px;background:#ffffff;color:#202020;font-family:Consolas,'Courier New',monospace;\">\r\n";
+
+    bool inOverall = false;
+    bool inSystemStatus = false;
+    bool systemTableOpen = false;
+    bool preOpen = false;
+
+    auto openPre = [&]()
+    {
+        if (!preOpen)
+        {
+            html += L"<pre style=\"font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.28;white-space:pre;margin:0;\">";
+            preOpen = true;
+        }
+    };
+
+    auto closePre = [&]()
+    {
+        if (preOpen)
+        {
+            html += L"</pre>\r\n";
+            preOpen = false;
+        }
+    };
+
+    auto closeSystemTable = [&]()
+    {
+        if (systemTableOpen)
+        {
+            html += L"</table>\r\n";
+            systemTableOpen = false;
+        }
+    };
+
+    for (std::size_t i = 0; i < lines.size(); ++i)
+    {
+        const std::wstring& line = lines[i];
+
+        if (line == L"OVERALL STATUS")
+        {
+            closePre();
+            closeSystemTable();
+            inOverall = true;
+            inSystemStatus = false;
+            html += L"<div style=\"font-size:15px;font-weight:600;letter-spacing:.2px;margin-top:18px;margin-bottom:5px;\">OVERALL STATUS</div>";
+            continue;
+        }
+        if (inOverall && line == L"--------------")
+            continue;
+        if (inOverall && !line.empty())
+        {
+            // Size the first two columns by their monospaced content instead of by
+            // percentages. This keeps Component and Status readable on narrow mail
+            // clients while allowing Description to consume and wrap in all remaining
+            // space. The hidden Tracker Snapshot label gives Overall Status exactly the
+            // same Component-column width as the System Status table.
+            html += L"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.32;margin:3px 0 18px 0;width:100%;max-width:100%;table-layout:auto;\">";
+            html += L"<tr>";
+            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;\"><span style=\"visibility:hidden;white-space:nowrap;\">Tracker Snapshot</span></td>";
+            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;\">" + stateHtml(line) + L"</td>";
+            html += L"<td style=\"padding:2px 0;vertical-align:top;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;white-space:normal;\"></td>";
+            html += L"</tr></table>";
+            inOverall = false;
+            continue;
+        }
+
+        if (line == L"SYSTEM STATUS")
+        {
+            closePre();
+            closeSystemTable();
+            inSystemStatus = true;
+            inOverall = false;
+            html += L"<div style=\"font-size:15px;font-weight:600;letter-spacing:.2px;margin-top:4px;margin-bottom:7px;\">SYSTEM STATUS</div>";
+            html += L"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.32;margin:0 0 18px 0;width:100%;max-width:100%;table-layout:auto;\">";
+            systemTableOpen = true;
+            continue;
+        }
+        if (inSystemStatus && line == L"-------------")
+            continue;
+
+        if (inSystemStatus)
+        {
+            if (line.empty())
+            {
+                closeSystemTable();
+                inSystemStatus = false;
+                continue;
+            }
+
+            // BuildStatusReport() formats every monitor row with fixed 22- and
+            // 18-character fields. Preserve that semantic layout here, but use
+            // real HTML columns so OK, WARNING, CRITICAL and UNKNOWN never move
+            // the description column horizontally. Keep the component column wide enough for labels such as Tracker Snapshot,
+            // while the description column may wrap naturally on narrow mail clients.
+            std::wstring component = line.substr(0, std::min<std::size_t>(22, line.size()));
+            std::wstring stateCell;
+            std::wstring description;
+            if (line.size() > 22)
+                stateCell = line.substr(22, std::min<std::size_t>(18, line.size() - 22));
+            if (line.size() > 40)
+                description = line.substr(40);
+
+            component = trim(component);
+            stateCell = trim(stateCell);
+            description = trim(description);
+
+            html += L"<tr>";
+            // The first two cells are content-sized (effectively character-sized in
+            // this monospaced report). They never wrap. The Description cell has no
+            // fixed width and therefore receives all remaining space and wraps naturally.
+            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:400;\">" + escapeHtml(component) + L"</td>";
+            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;\">" + stateHtml(stateCell) + L"</td>";
+            html += L"<td style=\"padding:2px 0;vertical-align:top;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:400;white-space:normal;word-break:normal;overflow-wrap:break-word;\">" + escapeHtml(description) + L"</td>";
+            html += L"</tr>\r\n";
+            continue;
+        }
+
+        // Keep data-heavy sections such as SYSTEM RESOURCES, ACCOUNTS,
+        // OPEN POSITIONS and RECENT LOGS monospaced. This retains the proven
+        // fixed-column readability while keeping one consistent monospaced
+        // typeface throughout the entire report.
+        openPre();
+        html += escapeHtml(line);
+        html += L"\n";
+    }
+
+    closeSystemTable();
+    closePre();
+    html += L"</body></html>\r\n";
     return html;
 }
 

@@ -1,14 +1,11 @@
-# MCST-Watchdog 1.091
+# MCST-Watchdog 1.104
 
-## UI Polish Build Fix
+## Content-Sized Status Columns
 
-This maintenance release corrects the GDI+ header integration and removes accidental duplicate GDI+ initialization fragments. All UI changes from 1.09 remain included.
+The Status Report no longer divides SYSTEM STATUS into percentage-based columns. The Component and Status columns now size themselves to their non-wrapping monospaced content, while the Description column receives all remaining width and wraps naturally. This follows the same robust behavior used by the report's lower data sections and works better across desktop, tablet, and narrow phone mail views.
 
+OVERALL STATUS uses the same content-sized geometry. A hidden `Tracker Snapshot` sizing label keeps its status indicator on the same vertical line as the SYSTEM STATUS indicators without exposing extra text.
 
-## Dashboard Settings Panels
+The unified Consolas / Courier New / monospace typography, colored HTML indicators, and all monitoring logic are unchanged.
 
-The AutoTrading, Status Reports, Email, and Heartbeat rows now include compact three-dot menus. Each menu opens a focused settings panel and offers actions relevant to that subsystem.
-
-AutoTrading research actions remain hidden unless Developer Mode is enabled. Alert email and report email recipients remain separate. Settings are stored in `MCST-Watchdog.ini` and reloaded without triggering startup deliveries.
-
-The runtime EXE and DLL files are intended for `C:\MCExtras`. Documentation and source code can be stored anywhere.
+See `CHANGELOG_1.104.txt` for details.

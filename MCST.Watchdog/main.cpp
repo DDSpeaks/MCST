@@ -15,7 +15,9 @@
 #include "AlertService.h"
 #include "ScheduleService.h"
 #include "BrokerMonitor.h"
+#include "BrokerAuthDetector.h"
 #include "LogAlertEngine.h"
+#include "DashboardLayout.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 
@@ -83,6 +85,7 @@ namespace
     {
         mcst::WatchdogSystemStatus status;
         TrackerStatusSnapshot snapshot;
+        BrokerAuthenticationDetection brokerAuthentication;
         std::wstring diagnostic;
     };
 
@@ -109,6 +112,7 @@ namespace
     HFONT g_titleFont = nullptr;
     HFONT g_headerFont = nullptr;
     HFONT g_bodyFont = nullptr;
+    HFONT g_labelFont = nullptr;
     HFONT g_statusFont = nullptr;
     HFONT g_monoFont = nullptr;
     HWND g_refreshButton = nullptr;
@@ -125,6 +129,11 @@ namespace
     HWND g_emailMenuButton = nullptr;
     HWND g_heartbeatMenuButton = nullptr;
     ULONG_PTR g_gdiplusToken = 0;
+
+    std::wstring BrokerStateCachePath()
+    {
+        return GetApplicationDirectory() + L"\\MCST-Watchdog-BrokerState.cache";
+    }
 
     std::wstring FormatLocalTime(std::chrono::system_clock::time_point value)
     {
@@ -198,7 +207,8 @@ namespace
         {
             if (g_reloadSettingsButton) MoveWindow(g_reloadSettingsButton, 408, y, 150, 34, TRUE);
         }
-        const int menuX = (std::max)(690, static_cast<int>(client.right) - 58);
+        const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
+        const int menuX = rowLayout.overflowButtonX;
         if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 216, 30, 24, TRUE);
         if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 318, 30, 24, TRUE);
         if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 352, 30, 24, TRUE);
@@ -457,6 +467,60 @@ namespace
             status.activity.resize(10);
     }
 
+    unsigned long long FileTimeToUInt64(const FILETIME& value)
+    {
+        ULARGE_INTEGER converted{};
+        converted.LowPart = value.dwLowDateTime;
+        converted.HighPart = value.dwHighDateTime;
+        return converted.QuadPart;
+    }
+
+    bool QuerySystemCpuPercent(double& percent)
+    {
+        static bool initialized = false;
+        static unsigned long long previousIdle = 0;
+        static unsigned long long previousKernel = 0;
+        static unsigned long long previousUser = 0;
+
+        FILETIME idle{}, kernel{}, user{};
+        if (!GetSystemTimes(&idle, &kernel, &user))
+            return false;
+
+        unsigned long long currentIdle = FileTimeToUInt64(idle);
+        unsigned long long currentKernel = FileTimeToUInt64(kernel);
+        unsigned long long currentUser = FileTimeToUInt64(user);
+
+        if (!initialized)
+        {
+            previousIdle = currentIdle;
+            previousKernel = currentKernel;
+            previousUser = currentUser;
+            initialized = true;
+            Sleep(120);
+            if (!GetSystemTimes(&idle, &kernel, &user))
+                return false;
+            currentIdle = FileTimeToUInt64(idle);
+            currentKernel = FileTimeToUInt64(kernel);
+            currentUser = FileTimeToUInt64(user);
+        }
+
+        const unsigned long long idleDelta = currentIdle - previousIdle;
+        const unsigned long long kernelDelta = currentKernel - previousKernel;
+        const unsigned long long userDelta = currentUser - previousUser;
+        const unsigned long long total = kernelDelta + userDelta;
+
+        previousIdle = currentIdle;
+        previousKernel = currentKernel;
+        previousUser = currentUser;
+
+        if (total == 0)
+            return false;
+
+        percent = 100.0 * static_cast<double>(total - idleDelta) / static_cast<double>(total);
+        percent = (std::max)(0.0, (std::min)(100.0, percent));
+        return true;
+    }
+
     void ReadProcessResources(mcst::WatchdogSystemStatus& status)
     {
         PROCESS_MEMORY_COUNTERS_EX memory{};
@@ -465,6 +529,37 @@ namespace
             status.privateMemoryBytes = static_cast<std::size_t>(memory.PrivateUsage);
         GetProcessHandleCount(GetCurrentProcess(), &status.handleCount);
         status.uptime = FormatUptime(std::chrono::steady_clock::now() - g_app.started);
+
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        status.logicalProcessorCount = systemInfo.dwNumberOfProcessors;
+        status.cpuAvailable = QuerySystemCpuPercent(status.cpuPercent);
+
+        MEMORYSTATUSEX systemMemory{};
+        systemMemory.dwLength = sizeof(systemMemory);
+        if (GlobalMemoryStatusEx(&systemMemory))
+        {
+            status.systemMemoryAvailable = true;
+            status.memoryLoadPercent = systemMemory.dwMemoryLoad;
+            status.totalPhysicalMemoryBytes = systemMemory.ullTotalPhys;
+            status.availablePhysicalMemoryBytes = systemMemory.ullAvailPhys;
+        }
+
+        wchar_t windowsDirectory[MAX_PATH]{};
+        std::wstring root = L"C:\\";
+        if (GetWindowsDirectoryW(windowsDirectory, MAX_PATH) > 0 && windowsDirectory[1] == L':')
+            root[0] = windowsDirectory[0];
+        status.systemDiskRoot = root;
+
+        ULARGE_INTEGER freeBytesAvailable{}, totalBytes{}, totalFreeBytes{};
+        if (GetDiskFreeSpaceExW(root.c_str(), &freeBytesAvailable, &totalBytes, &totalFreeBytes) && totalBytes.QuadPart > 0)
+        {
+            status.systemDiskAvailable = true;
+            status.diskTotalBytes = totalBytes.QuadPart;
+            status.diskFreeBytes = totalFreeBytes.QuadPart;
+            const unsigned long long usedBytes = totalBytes.QuadPart - totalFreeBytes.QuadPart;
+            status.diskUsedPercent = 100.0 * static_cast<double>(usedBytes) / static_cast<double>(totalBytes.QuadPart);
+        }
     }
 
     RefreshResult CollectStatus(bool forceAutoTradingRefresh)
@@ -618,6 +713,11 @@ namespace
             result.status.overall = Worst(result.status.overall, result.status.email.state);
         if (g_app.config.heartbeatEnabled)
             result.status.overall = Worst(result.status.overall, result.status.heartbeat.state);
+
+        // Browser authentication is sampled on the refresh worker thread. The
+        // resulting signal is applied by BrokerMonitor on the UI thread, where
+        // it overrides weaker historical Recent Logs when a broker login page is visible.
+        result.brokerAuthentication = DetectBrokerAuthentication(g_app.config);
 
         ReadProcessResources(result.status);
         result.diagnostic = diagnostic;
@@ -860,7 +960,7 @@ namespace
         else if (rowId == kButtonAutoMenu && command == kMenuAction1)
             SendMessageW(hwnd, WM_COMMAND, kButtonAutoTradingDiagnostics, 0);
         else if (rowId == kButtonAutoMenu && command == kMenuAction2)
-            ShellExecuteW(hwnd, L"open", L"C:\Temp\MCST-Watchdog\AutoTradingResearch.txt", nullptr, nullptr, SW_SHOWNORMAL);
+            ShellExecuteW(hwnd, L"open", L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt", nullptr, nullptr, SW_SHOWNORMAL);
     }
 
     Gdiplus::Color IndicatorTopColor(mcst::HealthState state, BYTE alpha = 255)
@@ -908,12 +1008,15 @@ namespace
 
     void DrawStatusRow(HDC dc, int y, const wchar_t* label, const mcst::MonitorStatus& item, int width)
     {
-        const int left = 34;
-        DrawModernIndicator(dc, left + 8, y + 7, 17, item.state);
+        const DashboardRowLayout layout = CalculateDashboardRowLayout(width);
+        DrawModernIndicator(dc, layout.indicatorX, y + 7, 17, item.state);
 
-        DrawTextSimple(dc, { left + 37, y, 250, y + 32 }, label, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { 250, y, 410, y + 32 }, mcst::HealthStateText(item.state), g_statusFont, StateColor(item.state), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { 405, y, width - 28, y + 32 }, item.value + (item.detail.empty() ? L"" : L"  -  " + item.detail), g_bodyFont, RGB(70, 76, 86), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { layout.labelLeft, y, layout.labelRight, y + 32 }, label, g_labelFont, RGB(28, 31, 36), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { layout.stateLeft, y, layout.stateRight, y + 32 }, mcst::HealthStateText(item.state), g_statusFont, StateColor(item.state), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { layout.descriptionLeft, y, layout.descriptionRight, y + 32 },
+            item.value + (item.detail.empty() ? L"" : L"  -  " + item.detail),
+            g_bodyFont, RGB(45, 49, 56),
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
 
     void PaintDashboard(HWND hwnd, HDC dc)
@@ -928,7 +1031,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.091", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.104", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -961,10 +1064,10 @@ namespace
         const std::wstring updateText = status.lastSuccessfulUpdate.time_since_epoch().count() == 0
             ? L"Last successful system update: waiting for first successful update"
             : L"Last successful system update: " + FormatClock(status.lastSuccessfulUpdate) + L"  (" + FormatAge(status.lastSuccessfulUpdate) + L")";
-        DrawTextSimple(dc, { 28, 80, client.right - 250, 106 }, updateText, g_bodyFont, RGB(90, 96, 106), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        DrawTextSimple(dc, { client.right - 245, 80, client.right - 28, 106 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(90, 96, 106), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 80, client.right - 250, 106 }, updateText, g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { client.right - 245, 80, client.right - 28, 106 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-        DrawTextSimple(dc, { 28, 108, client.right - 28, 138 }, L"SYSTEM STATUS", g_headerFont, RGB(55, 60, 70), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 108, client.right - 28, 138 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         int y = 144;
         DrawStatusRow(dc, y, L"Bridge", status.bridge, client.right); y += 34;
         DrawStatusRow(dc, y, L"Tracker Snapshot", status.trackerSnapshot, client.right); y += 34;
@@ -975,22 +1078,22 @@ namespace
         DrawStatusRow(dc, y, L"Email", status.email, client.right); y += 34;
         DrawStatusRow(dc, y, L"Heartbeat", status.heartbeat, client.right); y += 46;
 
-        DrawTextSimple(dc, { 28, y, client.right - 28, y + 30 }, L"LATEST ACTIVITY", g_headerFont, RGB(55, 60, 70), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, y, client.right - 28, y + 30 }, L"LATEST ACTIVITY", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += 34;
         const int middle = client.right / 2;
         constexpr int latestLabelLeft = 34;
         constexpr int latestLabelRight = 184;
         constexpr int latestValueLeft = 194;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last Snapshot", g_bodyFont, RGB(90, 96, 106), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last Snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 28 }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += 32;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last AutoTrading Read", g_bodyFont, RGB(90, 96, 106), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 28 }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         y += 44;
 
-        DrawTextSimple(dc, { 28, y, client.right - 28, y + 30 }, L"RECENT ACTIVITY", g_headerFont, RGB(55, 60, 70), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, y, client.right - 28, y + 30 }, L"RECENT ACTIVITY", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += 34;
         for (std::size_t i = 0; i < status.activity.size() && i < 5 && y + 26 < client.bottom - 72; ++i)
         {
@@ -1001,13 +1104,30 @@ namespace
         }
     }
 
+    HFONT CreateUiFont(int pointSize, int weight, const wchar_t* faceName, DWORD pitchAndFamily = DEFAULT_PITCH)
+    {
+        HDC screenDc = GetDC(nullptr);
+        const int dpiY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+        if (screenDc)
+            ReleaseDC(nullptr, screenDc);
+
+        // A negative height requests the actual character height instead of the full cell height.
+        // This gives more predictable ClearType rendering on Windows 10 and under RDP.
+        const int height = -MulDiv(pointSize, dpiY, 72);
+        return CreateFontW(height, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, pitchAndFamily, faceName);
+    }
+
     void CreateFonts()
     {
-        g_titleFont = CreateFontW(26, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        g_headerFont = CreateFontW(16, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        g_bodyFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-        g_statusFont = CreateFontW(16, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-        g_monoFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+        // Segoe UI is present on Windows 10. Avoid Segoe UI Variable Text here because it is
+        // a Windows 11 font and may be substituted by a less suitable fallback on Windows 10.
+        g_titleFont = CreateUiFont(16, FW_SEMIBOLD, L"Segoe UI");
+        g_headerFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
+        g_bodyFont = CreateUiFont(10, FW_NORMAL, L"Segoe UI");
+        g_labelFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
+        g_statusFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
+        g_monoFont = CreateUiFont(10, FW_NORMAL, L"Consolas", FIXED_PITCH | FF_MODERN);
     }
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1150,7 +1270,8 @@ namespace
                 }
                 g_app.schedule.PreserveOnReload(std::chrono::system_clock::now());
                 g_app.autoTradingAlerts.Reset();
-                g_app.brokerMonitor.Reset();
+                // Preserve the last confirmed Broker state across an INI reload.
+                // A settings reload is not broker evidence and must not force UNKNOWN.
                 g_app.logAlertEngine.Reset();
                 KillTimer(hwnd, kRefreshTimer);
                 SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
@@ -1171,14 +1292,14 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.091", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.104", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
             case kButtonAutoTradingDiagnostics:
             {
                 CreateDirectoryW(L"C:\\Temp", nullptr);
-                const std::wstring path = L"C:\Temp\MCST-Watchdog\AutoTradingResearch.txt";
+                const std::wstring path = L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt";
                 CreateDirectoryW(L"C:\\Temp\\MCST-Watchdog", nullptr);
                 std::wstring diagnostic;
                 SetWindowTextW(g_autoTradingDiagnosticsButton, L"Starting...");
@@ -1193,7 +1314,7 @@ namespace
             }
             case kButtonAutoTradingCapture:
             {
-                const std::wstring path = L"C:\Temp\MCST-Watchdog\AutoTradingResearch.txt";
+                const std::wstring path = L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt";
                 std::wstring diagnostic;
                 SetWindowTextW(g_autoTradingCaptureButton, L"Capturing...");
                 EnableWindow(g_autoTradingCaptureButton, FALSE);
@@ -1206,7 +1327,7 @@ namespace
             }
             case kButtonAutoTradingFinish:
             {
-                const std::wstring path = L"C:\Temp\MCST-Watchdog\AutoTradingResearch.txt";
+                const std::wstring path = L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt";
                 std::wstring diagnostic;
                 SetWindowTextW(g_autoTradingFinishButton, L"Analyzing...");
                 EnableWindow(g_autoTradingFinishButton, FALSE);
@@ -1237,9 +1358,16 @@ namespace
 
                 const auto monitorNow = std::chrono::system_clock::now();
                 const BrokerMonitorDecision brokerDecision = g_app.brokerMonitor.Evaluate(
-                    g_app.snapshot.recentLogs, g_app.config, monitorNow);
+                    g_app.snapshot.recentLogs, result->brokerAuthentication, g_app.config, monitorNow);
                 g_app.status.broker = brokerDecision.status;
                 g_app.status.overall = Worst(g_app.status.overall, g_app.status.broker.state);
+                if (brokerDecision.stateChanged)
+                {
+                    if (brokerDecision.status.state == mcst::HealthState::Healthy)
+                        g_app.brokerMonitor.SaveConnectedStateCache(BrokerStateCachePath(), monitorNow);
+                    else if (brokerDecision.status.state == mcst::HealthState::Critical)
+                        g_app.brokerMonitor.ClearConnectedStateCache(BrokerStateCachePath());
+                }
                 if (brokerDecision.stateChanged && !brokerDecision.eventText.empty())
                 {
                     AddActivity(g_app.status, brokerDecision.status.state, brokerDecision.eventText);
@@ -1435,6 +1563,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     }
 
     g_app.config = LoadAppConfig();
+    g_app.brokerMonitor.LoadConnectedStateCache(
+        BrokerStateCachePath(), std::chrono::system_clock::now(), g_app.config.brokerStateCacheMaxAgeMinutes);
     g_app.status.overall = mcst::HealthState::Unknown;
     g_app.status.bridge = { mcst::HealthState::Unknown, L"Starting", L"" };
     g_app.status.trackerSnapshot = { mcst::HealthState::Unknown, L"Waiting", L"" };
@@ -1471,7 +1601,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 1.091 - UI Polish",
+        0, kWindowClass, L"MCST-Watchdog 1.104 - Content-Sized Status Columns",
         WS_OVERLAPPEDWINDOW,
         initialX, initialY, initialWidth, initialHeight,
         nullptr, nullptr, instance, nullptr);
@@ -1491,6 +1621,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     DeleteObject(g_titleFont);
     DeleteObject(g_headerFont);
     DeleteObject(g_bodyFont);
+    DeleteObject(g_labelFont);
     DeleteObject(g_statusFont);
     DeleteObject(g_monoFont);
     Gdiplus::GdiplusShutdown(g_gdiplusToken);

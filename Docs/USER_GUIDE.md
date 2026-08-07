@@ -92,3 +92,58 @@ The **Status Settings** button edits the Status Report recipient, interval, star
 ## Dashboard row menus (1.09)
 
 The AutoTrading, Status Reports, Email, and Heartbeat rows include a compact `...` button. Use it to open the focused settings panel or run a subsystem-specific action. AutoTrading research commands are shown only when `[Developer] enabled=true`.
+
+## Browser-based Broker Authentication Detection
+
+Broker authentication pages are treated as stronger current evidence than historical Recent Logs.
+The Watchdog passively reads supported browser address bars by the proven Win32 browser window/child-text inspection used by the original production Watchdog. It does not
+interact with the page or credentials.
+
+The default Saxo profile is written automatically when missing:
+
+```ini
+[BrokerAuth.Saxo]
+enabled=true
+name=Saxo
+url_contains=developer.saxobank.com/login
+title_contains=MultiCharts (OpenAPI Web App)|Saxo
+text_contains=login|account authentication
+recovery_log_contains=saxo|saxo group
+alert_after_seconds=10
+```
+
+If the configured login URL remains visible for the configured delay, Broker status becomes
+CRITICAL and the normal broker alert channel is used. A login page therefore overrides an older
+"connection established" log entry. URL query strings and fragments are deliberately removed from
+Watchdog diagnostics and email.
+
+To add another broker, create another section such as `[BrokerAuth.MyBroker]`. Prefer a stable
+`url_contains` value. Multiple alternatives can be separated with `|`. If no stable URL is
+available, `title_contains` and `text_contains` can be used as a fallback.
+
+## Status Report System Resources
+
+The Status Report SYSTEM RESOURCES section reports system-wide RAM, CPU and the Windows system
+Drive. RAM and disk rows include total capacity, free capacity and used percentage. CPU includes
+logical processor capacity and current usage. Watchdog-specific private memory, handle count and
+uptime are shown separately under WATCHDOG PROCESS.
+
+In HTML email, SYSTEM STATUS values include the same green/amber/red/gray visual status-dot
+language used by the Dashboard.
+
+Example for a second broker profile:
+
+```ini
+[BrokerAuth.TradeStation]
+enabled=true
+name=TradeStation
+url_contains=auth.tradestation.com|signin.tradestation.com|login.tradestation.com
+title_contains=TradeStation
+text_contains=login|sign in|authentication
+recovery_log_contains=tradestation
+alert_after_seconds=10
+```
+
+The exact URL terms should be based on the broker's real authentication page observed in the
+production environment. A configured URL match is preferred over generic words such as `login`
+because it avoids false alerts from unrelated browser tabs.

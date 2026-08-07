@@ -58,7 +58,9 @@
     <ClCompile Include="AlertService.cpp" />
     <ClCompile Include="ScheduleService.cpp" />
     <ClCompile Include="BrokerMonitor.cpp" />
+    <ClCompile Include="BrokerAuthDetector.cpp" />
     <ClCompile Include="LogAlertEngine.cpp" />
+    <ClCompile Include="DashboardLayout.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppConfig.h" />
@@ -69,7 +71,9 @@
     <ClInclude Include="AlertService.h" />
     <ClInclude Include="ScheduleService.h" />
     <ClInclude Include="BrokerMonitor.h" />
+    <ClInclude Include="BrokerAuthDetector.h" />
     <ClInclude Include="LogAlertEngine.h" />
+    <ClInclude Include="DashboardLayout.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MCST.Shared/MCST.Shared.vcxproj">

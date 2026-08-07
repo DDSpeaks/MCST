@@ -1,0 +1,25 @@
+MCST-Watchdog 1.094
+===================
+
+Broker Authentication Override and Status Report Resources
+-----------------------------------------------------------
+
+Broker authentication detection
+- Added a generic browser-based broker authentication detector.
+- Browser address bars are read passively with the proven Win32 browser window/child-text inspection used by the original production Watchdog.
+- A matching broker login URL is treated as stronger current evidence than historical Recent Logs.
+- A confirmed authentication page overrides a green Broker state and raises a CRITICAL alert after a short persistence delay.
+- OAuth/query parameters are never stored in diagnostics or email; displayed URLs are stripped at '?' and '#'.
+- Added data-driven [BrokerAuth.*] profiles. The built-in Saxo profile matches developer.saxobank.com/login.
+- Broker-auth recovery can require broker-specific Recent Logs terms so another broker cannot falsely clear the alert.
+- Additional brokers can be added by INI configuration without rebuilding the Watchdog.
+
+Status Report
+- Added Dashboard-style color status dots beside the written SYSTEM STATUS values in HTML email.
+- Restored system-wide RAM usage, CPU usage, and Windows-system-drive capacity/free/used information.
+- Retained Watchdog private memory, handle count, and uptime as a separate WATCHDOG PROCESS block.
+
+Unchanged
+- Bridge Protocol V155.
+- AutoTrading Compatibility Framework and verified reader.
+- Existing email channel separation and Dashboard settings panels.

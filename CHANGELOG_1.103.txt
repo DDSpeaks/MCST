@@ -1,0 +1,15 @@
+MCST-Watchdog 1.103 - Overall Status Alignment Fix
+=================================================
+
+Changed
+-------
+- Aligned the Overall Status indicator with the System Status indicator column.
+- Added explicit HTML width attributes to the 25% / 13% / 62% status table cells for improved compatibility with Apple Mail on iPad.
+- Kept the existing unified monospace typography, responsive status table, colored HTML indicators, and wide description column.
+
+Unchanged
+---------
+- Bridge Protocol V155.
+- AutoTrading reader and compatibility framework.
+- Broker monitoring and authentication detection.
+- Email scheduling and alert logic.

@@ -1,0 +1,12 @@
+MCST-Watchdog 1.096
+====================
+
+Status Report HTML Indicator Fix
+
+- Replaced Unicode status bullets in HTML email with CSS-drawn circles.
+- Replaced Unicode plain-text state markers with ASCII-only markers before HTML conversion.
+- Eliminates mojibake such as "â–..." in Gmail, Apple Mail and other clients.
+- Keeps the same green, amber, red and gray status colors as the Dashboard.
+- Applies to Overall Status and all System Status rows.
+- Plain-text report archive remains readable without relying on Unicode symbols.
+- No changes to Bridge V155, AutoTrading, Broker Monitor, scheduling or email routing.

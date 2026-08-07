@@ -1,0 +1,11 @@
+MCST-Watchdog 1.097 - Status Report Layout Polish
+==================================================
+
+- Rebuilt the HTML SYSTEM STATUS section as a real three-column table.
+- Component, status, and description columns now have stable alignment.
+- OK, WARNING, CRITICAL, and UNKNOWN no longer shift description text horizontally.
+- Kept Dashboard-style CSS status indicators without Unicode status glyphs.
+- Switched report headings and SYSTEM STATUS typography to Segoe UI / Arial fallback.
+- Kept system resources, accounts, positions, and recent logs in Consolas / Courier New for fixed-column readability.
+- Overall Status uses the same shared HTML status indicator treatment.
+- No changes to Bridge V155, AutoTrading, Broker Monitor, scheduler, or compatibility profiles.

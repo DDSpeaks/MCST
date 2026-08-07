@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 namespace
 {
@@ -209,6 +210,53 @@ namespace
         return result;
     }
 
+    std::vector<std::wstring> ReadSectionNames(const std::wstring& path)
+    {
+        std::vector<wchar_t> buffer(32768, L'\0');
+        const DWORD copied = GetPrivateProfileSectionNamesW(buffer.data(), static_cast<DWORD>(buffer.size()), path.c_str());
+        std::vector<std::wstring> result;
+        if (copied == 0 || copied >= buffer.size() - 2)
+            return result;
+
+        const wchar_t* current = buffer.data();
+        while (*current != L'\0')
+        {
+            result.emplace_back(current);
+            current += std::wcslen(current) + 1;
+        }
+        return result;
+    }
+
+    std::vector<BrokerAuthProfile> ReadBrokerAuthProfiles(const std::wstring& path)
+    {
+        std::vector<BrokerAuthProfile> profiles;
+        constexpr wchar_t prefix[] = L"BrokerAuth.";
+        const std::wstring lowerPrefix = ToLower(prefix);
+        for (const auto& section : ReadSectionNames(path))
+        {
+            const std::wstring lowerSection = ToLower(section);
+            if (lowerSection.rfind(lowerPrefix, 0) != 0)
+                continue;
+
+            BrokerAuthProfile profile;
+            profile.sectionName = section;
+            const std::wstring suffix = section.substr(std::size(prefix) - 1);
+            profile.enabled = ReadBool(path, section.c_str(), L"enabled", true);
+            profile.name = Trim(ReadString(path, section.c_str(), L"name", suffix));
+            if (profile.name.empty())
+                profile.name = suffix;
+            profile.urlContains = SplitPatterns(ReadString(path, section.c_str(), L"url_contains", L""));
+            profile.titleContains = SplitPatterns(ReadString(path, section.c_str(), L"title_contains", L""));
+            profile.textContains = SplitPatterns(ReadString(path, section.c_str(), L"text_contains", L""));
+            profile.recoveryLogContains = SplitPatterns(ReadString(path, section.c_str(), L"recovery_log_contains", L""));
+            profile.alertAfterSeconds = ReadInt(path, section.c_str(), L"alert_after_seconds", 10, 3, 600);
+
+            if (!profile.urlContains.empty() || !profile.titleContains.empty() || !profile.textContains.empty())
+                profiles.push_back(std::move(profile));
+        }
+        return profiles;
+    }
+
 }
 
 std::wstring GetApplicationDirectory()
@@ -236,7 +284,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.091");
+    WriteValue(path, L"General", L"version", L"1.104");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -297,11 +345,23 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
 
     EnsureBoolKey(path, L"BrokerMonitor", L"enabled", true, changes);
     EnsureIntKey(path, L"BrokerMonitor", L"disconnect_grace_seconds", 60, 10, 3600, changes);
+    EnsureIntKey(path, L"BrokerMonitor", L"state_cache_max_age_minutes", 1440, 1, 10080, changes);
     EnsureBoolKey(path, L"BrokerMonitor", L"alert_email", true, changes);
     EnsureBoolKey(path, L"BrokerMonitor", L"recovery_email", true, changes);
     EnsureStringKey(path, L"BrokerMonitor", L"disconnect_patterns", L"connection lost|connection disconnected|broker disconnected|connection closed", changes);
     EnsureStringKey(path, L"BrokerMonitor", L"reconnecting_patterns", L"reconnecting|reconnect attempt|trying to connect", changes);
-    EnsureStringKey(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|connection with tradestation established|connection to tradestation established|connection with saxo established|connection to saxo established|logged on", changes);
+    EnsureStringKey(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|connected to|successfully connected|session established|session connected|trading system connected|login successful|logon successful|authentication successful|connection with tradestation established|connection to tradestation established|connection with saxo established|connection to saxo established|logged on|logged in", changes);
+
+    // Browser authentication profiles are deliberately data-driven. A detected
+    // broker login URL is stronger current evidence than historical Recent Logs.
+    EnsureBoolKey(path, L"BrokerAuth.Saxo", L"enabled", true, changes);
+    EnsureStringKey(path, L"BrokerAuth.Saxo", L"name", L"Saxo", changes);
+    EnsureStringKey(path, L"BrokerAuth.Saxo", L"url_contains", L"developer.saxobank.com/login", changes);
+    EnsureStringKey(path, L"BrokerAuth.Saxo", L"title_contains", L"MultiCharts (OpenAPI Web App)|Saxo", changes);
+    EnsureStringKey(path, L"BrokerAuth.Saxo", L"text_contains", L"login|account authentication", changes);
+    EnsureStringKey(path, L"BrokerAuth.Saxo", L"recovery_log_contains", L"saxo|saxo group", changes);
+    EnsureIntKey(path, L"BrokerAuth.Saxo", L"alert_after_seconds", 10, 3, 600, changes);
+
     EnsureStringKey(path, L"DeveloperTools", L"universal_application_mapper_path", L"C:\\MCExtras\\UniversalApplicationMapper.exe", changes);
 
     EnsureIntKey(path, L"Window", L"left", -1, -32000, 32000, changes);
@@ -375,11 +435,13 @@ AppConfig LoadAppConfig()
     config.heartbeatSendOnStartup = ReadBool(path, L"Heartbeat", L"send_on_startup", false);
     config.brokerMonitoringEnabled = ReadBool(path, L"BrokerMonitor", L"enabled", true);
     config.brokerDisconnectGraceSeconds = ReadInt(path, L"BrokerMonitor", L"disconnect_grace_seconds", 60, 10, 3600);
+    config.brokerStateCacheMaxAgeMinutes = ReadInt(path, L"BrokerMonitor", L"state_cache_max_age_minutes", 1440, 1, 10080);
     config.brokerAlertEmailEnabled = ReadBool(path, L"BrokerMonitor", L"alert_email", true);
     config.brokerRecoveryEmailEnabled = ReadBool(path, L"BrokerMonitor", L"recovery_email", true);
     config.brokerDisconnectPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"disconnect_patterns", L"connection lost|connection disconnected|broker disconnected|connection closed"));
     config.brokerReconnectingPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"reconnecting_patterns", L"reconnecting|reconnect attempt|trying to connect"));
-    config.brokerConnectedPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|connection with tradestation established|connection to tradestation established|connection with saxo established|connection to saxo established|logged on"));
+    config.brokerConnectedPatterns = SplitPatterns(ReadString(path, L"BrokerMonitor", L"connected_patterns", L"connection restored|reconnected|connection established|connected to|successfully connected|session established|session connected|trading system connected|login successful|logon successful|authentication successful|connection with tradestation established|connection to tradestation established|connection with saxo established|connection to saxo established|logged on|logged in"));
+    config.brokerAuthProfiles = ReadBrokerAuthProfiles(path);
     config.universalApplicationMapperPath = ReadString(path, L"DeveloperTools", L"universal_application_mapper_path", L"C:\\MCExtras\\UniversalApplicationMapper.exe");
     config.windowLeft = ReadInt(path, L"Window", L"left", -1, -32000, 32000);
     config.windowTop = ReadInt(path, L"Window", L"top", -1, -32000, 32000);

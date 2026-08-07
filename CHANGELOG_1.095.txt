@@ -1,0 +1,18 @@
+MCST-Watchdog 1.095
+====================
+
+Broker state reliability
+- Added a bounded last-known CONNECTED cache (default maximum age 24 hours) so a Watchdog restart does not immediately lose a recently confirmed broker state when the current Recent Logs window contains no broker event. Current login-page and disconnect evidence always override the cache.
+- Broker state is no longer reset to UNKNOWN when settings are reloaded.
+- The last confirmed in-memory Broker state persists until stronger contradictory evidence arrives.
+- Expanded semantic connection recognition covers connected-to, successful connection, session established, successful login/logon/authentication, and trading-system connected messages.
+- Browser authentication detection remains the strongest current signal and overrides historical log evidence.
+
+Dashboard alignment
+- Added DashboardLayout module for shared System Status row geometry.
+- Every status description now ends at the same right-side boundary, including rows without an overflow menu.
+- Long text uses end ellipsis before the reserved overflow-menu column and can no longer extend to the same horizontal level as the ... buttons.
+
+Architecture
+- Moved shared System Status row geometry out of main.cpp into DashboardLayout.cpp/.h as the first step in the planned UI modularization.
+- Bridge Protocol V155 is unchanged.

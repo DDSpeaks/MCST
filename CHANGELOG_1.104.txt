@@ -1,0 +1,18 @@
+MCST-Watchdog 1.104 - Content-Sized Status Columns
+=================================================
+
+Changed
+-------
+- Removed percentage-based column widths from the HTML Status Report SYSTEM STATUS section.
+- Component and Status columns now use non-wrapping content-sized cells.
+- Description now consumes all remaining mail-view width and wraps naturally.
+- OVERALL STATUS uses the same content-sized alignment model.
+- Added a hidden Tracker Snapshot sizing label to keep the Overall Status indicator aligned with System Status on mail clients that size separate tables independently.
+- Retained the unified monospaced typography and colored HTML indicators.
+
+Unchanged
+---------
+- Bridge Protocol V155.
+- AutoTrading reader and compatibility framework.
+- Broker monitoring and authentication detection.
+- Email scheduling and alert logic.
