@@ -198,4 +198,4 @@ C:\MCExtras\MCST-Watchdog-Startup.log
 C:\Temp\MCST-Watchdog-Startup.log
 ```
 
-If Watchdog starts but a subsystem is `UNKNOWN` or `CRITICAL`, use the row description, Recent Activity, Status Report, and the relevant configuration section to determine the cause before changing compatibility data.
+If Watchdog starts but a subsystem is `UNKNOWN` or `CRITICAL`, use the row description, Latest Activity, Status Report, and the relevant configuration section to determine the cause before changing compatibility data.

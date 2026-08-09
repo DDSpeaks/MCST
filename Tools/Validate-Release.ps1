@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.110'
+$currentVersion = '1.111'
 
 $required = @(
     'MCST.sln',
@@ -64,6 +64,12 @@ Get-ChildItem -Path $root -Recurse -Filter *.vcxproj | ForEach-Object {
             $items[$key] = $true
         }
     }
+}
+
+
+$watchdogMain = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
+if ($watchdogMain -match 'RECENT ACTIVITY') {
+    throw 'The redundant RECENT ACTIVITY Dashboard section must not be present in the production UI.'
 }
 
 $watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw

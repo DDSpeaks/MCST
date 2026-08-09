@@ -4,7 +4,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.110**
+- MCST-Watchdog: **1.111**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V155**
 - Bridge protocol: **V2**

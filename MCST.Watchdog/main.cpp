@@ -1133,7 +1133,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.110", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.111", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1195,16 +1195,6 @@ namespace
         DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 28 }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         y += 44;
-
-        DrawTextSimple(dc, { 28, y, client.right - 28, y + 30 }, L"RECENT ACTIVITY", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        y += 34;
-        for (std::size_t i = 0; i < status.activity.size() && i < 5 && y + 26 < client.bottom - 72; ++i)
-        {
-            const auto& item = status.activity[i];
-            DrawTextSimple(dc, { 34, y, 88, y + 26 }, FormatClock(item.time), g_monoFont, RGB(105, 110, 120), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            DrawTextSimple(dc, { 100, y, client.right - 28, y + 26 }, item.text, g_bodyFont, StateColor(item.state), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-            y += 26;
-        }
     }
 
     HFONT CreateUiFont(int pointSize, int weight, const wchar_t* faceName, DWORD pitchAndFamily = DEFAULT_PITCH)
@@ -1407,7 +1397,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.110", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.111", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1669,7 +1659,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.110 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.111 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -1739,7 +1729,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.110 - Production Release",
+            0, kWindowClass, L"MCST-Watchdog 1.111 - Production Release",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

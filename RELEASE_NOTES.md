@@ -1,6 +1,10 @@
-# MCST 1.110 Production Release
+# MCST 1.111 Production Release
 
-MCST-Watchdog 1.110 is a production release focused on public-release documentation, configuration clarity, and Developer Mode UI scalability while preserving the established production monitoring and Bridge interfaces.
+MCST-Watchdog 1.111 is a production correction release that simplifies the Dashboard by removing a redundant activity section while preserving the monitoring logic, public-release documentation, compact Developer Mode UI, and established Bridge interfaces.
+
+## Dashboard activity cleanup
+
+The redundant **Recent Activity** section has been removed from the Dashboard. **Latest Activity** remains the single user-facing activity summary, avoiding duplicated information and preserving vertical space for the production controls. Internal activity/event tracking used by monitoring logic is unchanged.
 
 ## Developer Mode UI
 

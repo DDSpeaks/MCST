@@ -3,7 +3,7 @@ MCST Production Build Information
 
 MCST-Watchdog
 -------------
-Version:             1.110
+Version:             1.111
 Configuration:       Release x64
 Runtime linkage:     Static /MT
 Optimization:        /O2

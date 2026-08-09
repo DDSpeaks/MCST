@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.111
+
+- Removed the redundant `RECENT ACTIVITY` section from the Dashboard.
+- Kept `LATEST ACTIVITY` as the single user-facing activity summary.
+- Preserved internal activity/event tracking and production monitoring logic.
+- Updated the User Guide and release metadata to match the simplified Dashboard.
+- Preserved Bridge Protocol V2, Tracker Bridge internal build V155, and established production Release settings.
+
 ## 1.110
 
 - Added a compact, lower-height Developer Mode toolbar with centralized layout geometry for future compatibility research controls.
