@@ -1,9 +1,0 @@
-MCST-Watchdog 1.100 - Status Report Font Enforcement
-====================================================
-
-- Enforced a single Consolas / Courier New / monospace font stack across every HTML element inside the Status Report body.
-- Removed the possibility of table, span, div, pre or other HTML elements falling back to a different font.
-- Preserved the fixed System Status columns, wide description column and CSS status indicators.
-- No monitoring, broker, AutoTrading, Bridge or scheduling logic was changed.
-
-Note: the large message subject shown by an email application is part of the email client's own user interface and its font cannot be controlled by the HTML message body.

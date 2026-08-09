@@ -1,0 +1,8134 @@
+﻿#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#define MCTRACKERBRIDGE_EXPORTS
+
+#include "MCTrackerBridge.h"
+#include "ExtractorSeh.h"
+#include "../MCST.Shared/MCBridgeProtocol.h"
+
+#include <windows.h>
+#include <tlhelp32.h>
+#include <unknwn.h>
+#include <objbase.h>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <iterator>
+#include <map>
+#include <set>
+#include <cwctype>
+#include <cstring>
+#include <deque>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "ole32.lib")
+
+namespace
+{
+    constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
+    constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
+    constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
+    constexpr int kBridgeVersion = 155;
+    constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
+
+    enum class RuntimeState : LONG
+    {
+        Stopped = 0,
+        Starting = 1,
+        Running = 2,
+        Stopping = 3,
+        Failed = 4
+    };
+
+    struct WindowRecord
+    {
+        HWND hwnd = nullptr;
+        HWND parent = nullptr;
+        DWORD threadId = 0;
+        DWORD processId = 0;
+        std::wstring className;
+        std::wstring text;
+        RECT rect{};
+        bool visible = false;
+        bool enabled = false;
+        LONG_PTR wndProc = 0;
+        LONG_PTR userData = 0;
+        LONG_PTR instance = 0;
+    };
+
+    struct ModuleRecord
+    {
+        std::wstring name;
+        std::wstring path;
+        std::uintptr_t base = 0;
+        DWORD size = 0;
+    };
+
+    struct Snapshot
+    {
+        std::uint64_t generation = 0;
+        SYSTEMTIME capturedUtc{};
+        DWORD processId = 0;
+        DWORD initializeThreadId = 0;
+        DWORD workerThreadId = 0;
+        DWORD trackerThreadId = 0;
+        std::wstring processPath;
+        std::uint64_t processCreationTime = 0;
+        HWND topWindow = nullptr;
+        HWND trackerWindow = nullptr;
+        bool trackerFound = false;
+        bool trackerInSameProcess = false;
+        HMODULE atonpTrackerModule = nullptr;
+        std::uintptr_t atonpTrackerBase = 0;
+        DWORD atonpTrackerSize = 0;
+        std::size_t pageCount = 0;
+        std::size_t flexGridCount = 0;
+        std::vector<WindowRecord> windows;
+        std::vector<ModuleRecord> modules;
+        std::vector<DWORD> processThreads;
+    };
+
+    HMODULE g_module = nullptr;
+    HMODULE g_selfReference = nullptr;
+    std::atomic<RuntimeState> g_state{ RuntimeState::Stopped };
+    std::atomic<DWORD> g_lastError{ ERROR_SUCCESS };
+    std::atomic<ULONGLONG> g_lastHeartbeatTick{ 0 };
+    std::atomic<std::uint64_t> g_generation{ 0 };
+    DWORD g_initializeThreadId = 0;
+    DWORD g_workerThreadId = 0;
+    HANDLE g_workerThread = nullptr;
+    HANDLE g_stopEvent = nullptr;
+    HANDLE g_singletonMutex = nullptr;
+    SRWLOCK g_snapshotLock = SRWLOCK_INIT;
+    Snapshot g_lastSnapshot;
+    SRWLOCK g_executionTraceLock = SRWLOCK_INIT;
+    SRWLOCK g_gridReadLock = SRWLOCK_INIT;
+
+    std::wstring ExecutionTracePath()
+    {
+        std::wostringstream out;
+        out << kOutputDirectory << L"\\MC_V147_Extractor_Execution_"
+            << GetCurrentProcessId() << L".txt";
+        return out.str();
+    }
+
+    void AppendExecutionTrace(const char* stage, const std::string& detail = {})
+    {
+        AcquireSRWLockExclusive(&g_executionTraceLock);
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        std::ofstream file(ExecutionTracePath(), std::ios::binary | std::ios::app);
+        if (file)
+        {
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            file << std::setfill('0')
+                 << std::setw(4) << now.wYear << '-'
+                 << std::setw(2) << now.wMonth << '-'
+                 << std::setw(2) << now.wDay << ' '
+                 << std::setw(2) << now.wHour << ':'
+                 << std::setw(2) << now.wMinute << ':'
+                 << std::setw(2) << now.wSecond << '.'
+                 << std::setw(3) << now.wMilliseconds
+                 << " pid=" << GetCurrentProcessId()
+                 << " tid=" << GetCurrentThreadId()
+                 << " stage=" << (stage ? stage : "")
+                 << (detail.empty() ? "" : " detail=") << detail << "\r\n";
+            file.flush();
+        }
+        ReleaseSRWLockExclusive(&g_executionTraceLock);
+    }
+
+    std::wstring Lower(std::wstring value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
+            return static_cast<wchar_t>(towlower(ch));
+        });
+        return value;
+    }
+
+    std::wstring ClassName(HWND hwnd)
+    {
+        wchar_t buffer[512]{};
+        if (!hwnd || GetClassNameW(hwnd, buffer, static_cast<int>(std::size(buffer))) <= 0)
+            return L"";
+        return buffer;
+    }
+
+    std::wstring WindowTextWithTimeout(HWND hwnd)
+    {
+        if (!hwnd)
+            return L"";
+
+        DWORD_PTR lengthResult = 0;
+        if (!SendMessageTimeoutW(
+                hwnd,
+                WM_GETTEXTLENGTH,
+                0,
+                0,
+                SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                100,
+                &lengthResult))
+        {
+            return L"";
+        }
+
+        std::size_t length = static_cast<std::size_t>(lengthResult);
+        if (length > 8192)
+            length = 8192;
+
+        std::vector<wchar_t> buffer(length + 1, L'\0');
+        DWORD_PTR copied = 0;
+        if (!SendMessageTimeoutW(
+                hwnd,
+                WM_GETTEXT,
+                static_cast<WPARAM>(buffer.size()),
+                reinterpret_cast<LPARAM>(buffer.data()),
+                SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                100,
+                &copied))
+        {
+            return L"";
+        }
+        return std::wstring(buffer.data());
+    }
+
+    std::wstring ProcessPath()
+    {
+        std::vector<wchar_t> buffer(32768, L'\0');
+        DWORD length = static_cast<DWORD>(buffer.size());
+        if (!QueryFullProcessImageNameW(GetCurrentProcess(), 0, buffer.data(), &length))
+            return L"";
+        return std::wstring(buffer.data(), length);
+    }
+
+    std::wstring BaseName(const std::wstring& path)
+    {
+        const std::size_t slash = path.find_last_of(L"\\/");
+        return slash == std::wstring::npos ? path : path.substr(slash + 1);
+    }
+
+    std::uint64_t ProcessCreationFileTime()
+    {
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+            return 0;
+        ULARGE_INTEGER value{};
+        value.LowPart = created.dwLowDateTime;
+        value.HighPart = created.dwHighDateTime;
+        return value.QuadPart;
+    }
+
+    std::string WideToUtf8(const std::wstring& value)
+    {
+        if (value.empty())
+            return {};
+        const int required = WideCharToMultiByte(
+            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+        if (required <= 0)
+            return {};
+        std::string result(static_cast<std::size_t>(required), '\0');
+        WideCharToMultiByte(
+            CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), required, nullptr, nullptr);
+        return result;
+    }
+
+    std::string JsonEscape(const std::string& value)
+    {
+        std::ostringstream out;
+        for (unsigned char ch : value)
+        {
+            switch (ch)
+            {
+            case '\\': out << "\\\\"; break;
+            case '"': out << "\\\""; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (ch < 0x20)
+                {
+                    out << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<unsigned int>(ch) << std::dec;
+                }
+                else
+                {
+                    out << static_cast<char>(ch);
+                }
+                break;
+            }
+        }
+        return out.str();
+    }
+
+    std::string JsonString(const std::wstring& value)
+    {
+        return std::string("\"") + JsonEscape(WideToUtf8(value)) + "\"";
+    }
+
+    std::string JsonString(const std::string& value)
+    {
+        return std::string("\"") + JsonEscape(value) + "\"";
+    }
+
+    std::string HexValue(std::uintptr_t value)
+    {
+        std::ostringstream out;
+        out << "0x" << std::hex << std::uppercase << value;
+        return out.str();
+    }
+
+
+    std::uintptr_t ParseAtlClassAddress(const std::wstring& className)
+    {
+        constexpr wchar_t prefix[] = L"ATL:";
+        if (className.size() <= 4 || className.compare(0, 4, prefix) != 0)
+            return 0;
+        std::uintptr_t value = 0;
+        for (std::size_t i = 4; i < className.size(); ++i)
+        {
+            const wchar_t ch = className[i];
+            unsigned int digit = 0;
+            if (ch >= L'0' && ch <= L'9') digit = static_cast<unsigned int>(ch - L'0');
+            else if (ch >= L'a' && ch <= L'f') digit = 10u + static_cast<unsigned int>(ch - L'a');
+            else if (ch >= L'A' && ch <= L'F') digit = 10u + static_cast<unsigned int>(ch - L'A');
+            else return 0;
+            if (value > (UINTPTR_MAX >> 4))
+                return 0;
+            value = (value << 4) | digit;
+        }
+        return value;
+    }
+
+    bool IsCurrentProcessWindow(HWND hwnd)
+    {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        return pid == GetCurrentProcessId();
+    }
+
+    WindowRecord MakeWindowRecord(HWND hwnd)
+    {
+        WindowRecord record;
+        record.hwnd = hwnd;
+        record.parent = GetParent(hwnd);
+        record.threadId = GetWindowThreadProcessId(hwnd, &record.processId);
+        record.className = ClassName(hwnd);
+        const std::wstring lowerClass = Lower(record.className);
+        const bool textIsUseful =
+            lowerClass.find(L"atl_mcmdichildframe") != std::wstring::npos ||
+            lowerClass.find(L"flexgrid") != std::wstring::npos ||
+            lowerClass.find(L"tab") != std::wstring::npos ||
+            lowerClass.find(L"header") != std::wstring::npos ||
+            lowerClass == L"#32770";
+        if (textIsUseful)
+            record.text = WindowTextWithTimeout(hwnd);
+        GetWindowRect(hwnd, &record.rect);
+        record.visible = IsWindowVisible(hwnd) != FALSE;
+        record.enabled = IsWindowEnabled(hwnd) != FALSE;
+        if (record.processId == GetCurrentProcessId())
+        {
+            SetLastError(ERROR_SUCCESS);
+            record.wndProc = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+            record.userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+            record.instance = GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
+        }
+        return record;
+    }
+
+    struct WindowEnumContext
+    {
+        DWORD pid = 0;
+        std::vector<HWND>* windows = nullptr;
+    };
+
+    BOOL CALLBACK CollectWindow(HWND hwnd, LPARAM parameter)
+    {
+        auto* context = reinterpret_cast<WindowEnumContext*>(parameter);
+        if (!context || !context->windows)
+            return TRUE;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (pid == context->pid)
+            context->windows->push_back(hwnd);
+        return TRUE;
+    }
+
+    std::vector<HWND> TopWindowsForCurrentProcess()
+    {
+        std::vector<HWND> result;
+        WindowEnumContext context{ GetCurrentProcessId(), &result };
+        EnumWindows(CollectWindow, reinterpret_cast<LPARAM>(&context));
+        return result;
+    }
+
+    std::vector<HWND> Descendants(HWND root)
+    {
+        std::vector<HWND> result;
+        if (!root)
+            return result;
+        WindowEnumContext context{ GetCurrentProcessId(), &result };
+        EnumChildWindows(root, CollectWindow, reinterpret_cast<LPARAM>(&context));
+        return result;
+    }
+
+    bool IsFlexGridClass(const std::wstring& className)
+    {
+        return Lower(className).find(L"cls_flexgridwnd") != std::wstring::npos;
+    }
+
+    int TrackerCandidateScore(HWND hwnd)
+    {
+        if (!IsCurrentProcessWindow(hwnd))
+            return -1;
+        const std::wstring cls = Lower(ClassName(hwnd));
+        if (cls.find(L"atl_mcmdichildframe") == std::wstring::npos)
+            return -1;
+        const std::wstring text = Lower(WindowTextWithTimeout(hwnd));
+        int score = 80;
+        if (text.find(L"order and position tracker") != std::wstring::npos)
+            score += 1000;
+
+        std::size_t grids = 0;
+        for (HWND child : Descendants(hwnd))
+        {
+            if (IsFlexGridClass(ClassName(child)))
+                ++grids;
+        }
+        if (grids > 0)
+            score += 100 + static_cast<int>(std::min<std::size_t>(grids, 20));
+        return score;
+    }
+
+    HWND FindTrackerWindow(HWND& topWindow)
+    {
+        HWND best = nullptr;
+        int bestScore = 0;
+        topWindow = nullptr;
+
+        for (HWND top : TopWindowsForCurrentProcess())
+        {
+            std::vector<HWND> candidates;
+            candidates.push_back(top);
+            const auto children = Descendants(top);
+            candidates.insert(candidates.end(), children.begin(), children.end());
+
+            for (HWND hwnd : candidates)
+            {
+                const int score = TrackerCandidateScore(hwnd);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = hwnd;
+                    topWindow = GetAncestor(hwnd, GA_ROOT);
+                }
+            }
+        }
+        return bestScore >= 1000 ? best : nullptr;
+    }
+
+    std::vector<ModuleRecord> EnumerateModules()
+    {
+        std::vector<ModuleRecord> result;
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+        if (snapshot == INVALID_HANDLE_VALUE)
+            return result;
+
+        MODULEENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        if (Module32FirstW(snapshot, &entry))
+        {
+            do
+            {
+                ModuleRecord record;
+                record.name = entry.szModule;
+                record.path = entry.szExePath;
+                record.base = reinterpret_cast<std::uintptr_t>(entry.modBaseAddr);
+                record.size = entry.modBaseSize;
+                result.push_back(std::move(record));
+                entry.dwSize = sizeof(entry);
+            } while (Module32NextW(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+        return result;
+    }
+
+    std::vector<DWORD> EnumerateThreads()
+    {
+        std::vector<DWORD> result;
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+            return result;
+
+        THREADENTRY32 entry{};
+        entry.dwSize = sizeof(entry);
+        if (Thread32First(snapshot, &entry))
+        {
+            do
+            {
+                if (entry.th32OwnerProcessID == GetCurrentProcessId())
+                    result.push_back(entry.th32ThreadID);
+                entry.dwSize = sizeof(entry);
+            } while (Thread32Next(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+        std::sort(result.begin(), result.end());
+        return result;
+    }
+
+    Snapshot CaptureSnapshot()
+    {
+        Snapshot snapshot;
+        snapshot.generation = ++g_generation;
+        GetSystemTime(&snapshot.capturedUtc);
+        snapshot.processId = GetCurrentProcessId();
+        snapshot.initializeThreadId = g_initializeThreadId;
+        snapshot.workerThreadId = g_workerThreadId;
+        snapshot.processPath = ProcessPath();
+        snapshot.processCreationTime = ProcessCreationFileTime();
+        snapshot.modules = EnumerateModules();
+        snapshot.processThreads = EnumerateThreads();
+
+        snapshot.trackerWindow = FindTrackerWindow(snapshot.topWindow);
+        snapshot.trackerFound = snapshot.trackerWindow != nullptr;
+        if (snapshot.trackerFound)
+        {
+            DWORD trackerPid = 0;
+            snapshot.trackerThreadId = GetWindowThreadProcessId(snapshot.trackerWindow, &trackerPid);
+            snapshot.trackerInSameProcess = trackerPid == snapshot.processId;
+
+            if (snapshot.topWindow && snapshot.topWindow != snapshot.trackerWindow)
+                snapshot.windows.push_back(MakeWindowRecord(snapshot.topWindow));
+            snapshot.windows.push_back(MakeWindowRecord(snapshot.trackerWindow));
+            const auto descendants = Descendants(snapshot.trackerWindow);
+            for (HWND hwnd : descendants)
+            {
+                WindowRecord record = MakeWindowRecord(hwnd);
+                const std::wstring lowerClass = Lower(record.className);
+                if (lowerClass == L"#32770")
+                    ++snapshot.pageCount;
+                if (IsFlexGridClass(record.className))
+                    ++snapshot.flexGridCount;
+                snapshot.windows.push_back(std::move(record));
+            }
+        }
+
+        snapshot.atonpTrackerModule = GetModuleHandleW(L"ATOnPTracker.dll");
+        snapshot.atonpTrackerBase = reinterpret_cast<std::uintptr_t>(snapshot.atonpTrackerModule);
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            if (Lower(module.name) == L"atonptracker.dll")
+            {
+                snapshot.atonpTrackerBase = module.base;
+                snapshot.atonpTrackerSize = module.size;
+                break;
+            }
+        }
+
+        AcquireSRWLockExclusive(&g_snapshotLock);
+        g_lastSnapshot = snapshot;
+        ReleaseSRWLockExclusive(&g_snapshotLock);
+        return snapshot;
+    }
+
+    bool LastSnapshotHasTracker()
+    {
+        AcquireSRWLockShared(&g_snapshotLock);
+        const bool found = g_lastSnapshot.trackerFound && g_lastSnapshot.trackerInSameProcess;
+        ReleaseSRWLockShared(&g_snapshotLock);
+        return found;
+    }
+
+    std::string TimestampJson(const SYSTEMTIME& time)
+    {
+        std::ostringstream out;
+        out << '"' << std::setfill('0')
+            << std::setw(4) << time.wYear << '-'
+            << std::setw(2) << time.wMonth << '-'
+            << std::setw(2) << time.wDay << 'T'
+            << std::setw(2) << time.wHour << ':'
+            << std::setw(2) << time.wMinute << ':'
+            << std::setw(2) << time.wSecond << '.'
+            << std::setw(3) << time.wMilliseconds << "Z\"";
+        return out.str();
+    }
+
+    void AppendStatusJson(std::ostringstream& out, const Snapshot& snapshot)
+    {
+        out << "\"bridge_version\":" << kBridgeVersion << ',';
+        out << "\"protocol_version\":" << mcbridge::kProtocolVersion << ',';
+        out << "\"state\":" << static_cast<LONG>(g_state.load()) << ',';
+        out << "\"last_error\":" << g_lastError.load() << ',';
+        out << "\"last_heartbeat_tick\":" << g_lastHeartbeatTick.load() << ',';
+        out << "\"process_id\":" << snapshot.processId << ',';
+        out << "\"process_path\":" << JsonString(snapshot.processPath) << ',';
+        out << "\"process_creation_time\":" << snapshot.processCreationTime << ',';
+        out << "\"initialize_thread_id\":" << snapshot.initializeThreadId << ',';
+        out << "\"worker_thread_id\":" << snapshot.workerThreadId << ',';
+        out << "\"tracker_found\":" << (snapshot.trackerFound ? "true" : "false") << ',';
+        out << "\"tracker_same_process\":" << (snapshot.trackerInSameProcess ? "true" : "false") << ',';
+        out << "\"top_hwnd\":\"" << HexValue(reinterpret_cast<std::uintptr_t>(snapshot.topWindow)) << "\",";
+        out << "\"tracker_hwnd\":\"" << HexValue(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow)) << "\",";
+        out << "\"tracker_thread_id\":" << snapshot.trackerThreadId << ',';
+        out << "\"atonptracker_loaded\":" << (snapshot.atonpTrackerBase != 0 ? "true" : "false") << ',';
+        out << "\"atonptracker_base\":\"" << HexValue(snapshot.atonpTrackerBase) << "\",";
+        out << "\"atonptracker_size\":" << snapshot.atonpTrackerSize << ',';
+        out << "\"page_count\":" << snapshot.pageCount << ',';
+        out << "\"flexgrid_count\":" << snapshot.flexGridCount << ',';
+        out << "\"generation\":" << snapshot.generation << ',';
+        out << "\"captured_utc\":" << TimestampJson(snapshot.capturedUtc) << ',';
+        out << "\"internal_function_calls_enabled\":false,";
+        out << "\"experimental_internal_function_calls_available\":true,";
+        out << "\"controlled_gettext_single_cell_probe_enabled\":true,";
+        out << "\"status_report_snapshot_enabled\":true,";
+        out << "\"state_changing_messages_enabled\":false";
+    }
+
+    std::string StatusJson(const Snapshot& snapshot)
+    {
+        std::ostringstream out;
+        out << '{';
+        AppendStatusJson(out, snapshot);
+        out << '}';
+        return out.str();
+    }
+
+    std::string TrackerMapJson(const Snapshot& snapshot)
+    {
+        std::ostringstream out;
+        out << '{';
+        AppendStatusJson(out, snapshot);
+        out << ",\"windows\":[";
+        bool first = true;
+        for (const WindowRecord& window : snapshot.windows)
+        {
+            if (!first) out << ',';
+            first = false;
+            out << '{'
+                << "\"hwnd\":\"" << HexValue(reinterpret_cast<std::uintptr_t>(window.hwnd)) << "\"," 
+                << "\"parent\":\"" << HexValue(reinterpret_cast<std::uintptr_t>(window.parent)) << "\"," 
+                << "\"thread_id\":" << window.threadId << ','
+                << "\"process_id\":" << window.processId << ','
+                << "\"class\":" << JsonString(window.className) << ','
+                << "\"text\":" << JsonString(window.text) << ','
+                << "\"visible\":" << (window.visible ? "true" : "false") << ','
+                << "\"enabled\":" << (window.enabled ? "true" : "false") << ','
+                << "\"rect\":[" << window.rect.left << ',' << window.rect.top << ','
+                << window.rect.right << ',' << window.rect.bottom << "],"
+                << "\"wndproc\":\"" << HexValue(static_cast<std::uintptr_t>(window.wndProc)) << "\"," 
+                << "\"userdata\":\"" << HexValue(static_cast<std::uintptr_t>(window.userData)) << "\"," 
+                << "\"hinstance\":\"" << HexValue(static_cast<std::uintptr_t>(window.instance)) << "\""
+                << '}';
+        }
+        out << "]}";
+        return out.str();
+    }
+
+    bool EnsureOutputDirectory()
+    {
+        if (CreateDirectoryW(kOutputDirectory, nullptr))
+            return true;
+        const DWORD error = GetLastError();
+        return error == ERROR_ALREADY_EXISTS;
+    }
+
+    std::wstring ReportPath(const wchar_t* stem, DWORD pid)
+    {
+        std::wostringstream out;
+        out << kOutputDirectory << L"\\" << stem << L"_" << pid << L".txt";
+        return out.str();
+    }
+
+    bool WriteUtf8File(const std::wstring& path, const std::string& text)
+    {
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+        DWORD written = 0;
+        bool ok = WriteFile(file, bom, static_cast<DWORD>(sizeof(bom)), &written, nullptr) != FALSE;
+        if (ok && !text.empty())
+            ok = WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) != FALSE;
+        FlushFileBuffers(file);
+        CloseHandle(file);
+        return ok;
+    }
+
+    bool AppendUtf8Line(const std::wstring& path, const std::string& line)
+    {
+        HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        LARGE_INTEGER size{};
+        const bool empty = GetFileSizeEx(file, &size) && size.QuadPart == 0;
+        DWORD written = 0;
+        bool ok = true;
+        if (empty)
+        {
+            const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+            ok = WriteFile(file, bom, static_cast<DWORD>(sizeof(bom)), &written, nullptr) != FALSE;
+        }
+        std::string text = line;
+        if (text.size() < 2 || text.substr(text.size() - 2) != "\r\n")
+            text += "\r\n";
+        if (ok)
+            ok = WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) != FALSE;
+        FlushFileBuffers(file);
+        CloseHandle(file);
+        return ok;
+    }
+
+    bool FileExists(const std::wstring& path)
+    {
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+
+    std::string HumanSnapshotReport(const Snapshot& snapshot)
+    {
+        std::ostringstream out;
+        out << "MC V147 In-Process Bridge Local Snapshot\r\n";
+        out << "=========================================\r\n";
+        out << "bridge_version=" << kBridgeVersion << "\r\n";
+        out << "last_error=" << g_lastError.load() << "\r\n";
+        out << "last_heartbeat_tick=" << g_lastHeartbeatTick.load() << "\r\n";
+        out << "process_id=" << snapshot.processId << "\r\n";
+        out << "process_path=" << WideToUtf8(snapshot.processPath) << "\r\n";
+        out << "process_creation_time=" << snapshot.processCreationTime << "\r\n";
+        out << "initialize_thread_id=" << snapshot.initializeThreadId << "\r\n";
+        out << "worker_thread_id=" << snapshot.workerThreadId << "\r\n";
+        out << "tracker_found=" << (snapshot.trackerFound ? "yes" : "no") << "\r\n";
+        out << "tracker_same_process=" << (snapshot.trackerInSameProcess ? "yes" : "no") << "\r\n";
+        out << "top_hwnd=" << HexValue(reinterpret_cast<std::uintptr_t>(snapshot.topWindow)) << "\r\n";
+        out << "tracker_hwnd=" << HexValue(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow)) << "\r\n";
+        out << "tracker_thread_id=" << snapshot.trackerThreadId << "\r\n";
+        out << "atonptracker_loaded=" << (snapshot.atonpTrackerBase != 0 ? "yes" : "no") << "\r\n";
+        out << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n";
+        out << "atonptracker_size=" << snapshot.atonpTrackerSize << "\r\n";
+        out << "page_count=" << snapshot.pageCount << "\r\n";
+        out << "flexgrid_count=" << snapshot.flexGridCount << "\r\n";
+        out << "internal_function_calls_attempted=no\r\n";
+        out << "state_changing_messages_sent=no\r\n";
+        out << "synthetic_input_used=no\r\n";
+        out << "clipboard_used=no\r\n\r\n";
+
+        out << "WINDOWS\r\n-------\r\n";
+        for (const WindowRecord& window : snapshot.windows)
+        {
+            out << "hwnd=" << HexValue(reinterpret_cast<std::uintptr_t>(window.hwnd))
+                << " parent=" << HexValue(reinterpret_cast<std::uintptr_t>(window.parent))
+                << " tid=" << window.threadId
+                << " class=[" << WideToUtf8(window.className) << "]"
+                << " text=[" << WideToUtf8(window.text) << "]"
+                << " visible=" << (window.visible ? "yes" : "no")
+                << " enabled=" << (window.enabled ? "yes" : "no")
+                << " wndproc=" << HexValue(static_cast<std::uintptr_t>(window.wndProc))
+                << " userdata=" << HexValue(static_cast<std::uintptr_t>(window.userData))
+                << "\r\n";
+        }
+
+        out << "\r\nMODULES\r\n-------\r\n";
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            out << "base=" << HexValue(module.base)
+                << " size=" << module.size
+                << " name=[" << WideToUtf8(module.name) << "]"
+                << " path=[" << WideToUtf8(module.path) << "]\r\n";
+        }
+
+        out << "\r\nTHREADS\r\n-------\r\n";
+        for (DWORD threadId : snapshot.processThreads)
+            out << "thread_id=" << threadId << "\r\n";
+        return out.str();
+    }
+
+    bool WriteSnapshotReports(const Snapshot& snapshot, std::vector<std::wstring>& writtenPaths)
+    {
+        EnsureOutputDirectory();
+        const std::wstring localPath = ReportPath(L"MC_V147_Bridge_Local_Snapshot", snapshot.processId);
+        const std::wstring statusPath = ReportPath(L"MC_V147_Bridge_Status", snapshot.processId);
+        const std::wstring trackerPath = ReportPath(L"MC_V147_Bridge_Tracker_Window_Map", snapshot.processId);
+
+        bool ok = true;
+        if (WriteUtf8File(localPath, HumanSnapshotReport(snapshot))) writtenPaths.push_back(localPath); else ok = false;
+        if (WriteUtf8File(statusPath, StatusJson(snapshot))) writtenPaths.push_back(statusPath); else ok = false;
+        if (WriteUtf8File(trackerPath, TrackerMapJson(snapshot))) writtenPaths.push_back(trackerPath); else ok = false;
+        return ok;
+    }
+    constexpr std::uintptr_t kExtractAccountsRva = 0x10FAE6;
+    constexpr std::uintptr_t kExtractOpenPositionsRva = 0x10FF56;
+    constexpr DWORD kKnownAtonpSize = 3534848;
+
+    // ITS_TradingCenter::ITC_TradeInfo IID observed in ATOnPTracker symbols.
+    const GUID kIidTradeInfo =
+        { 0x37f57e35, 0x641f, 0x4a43, { 0xbe, 0x8a, 0x66, 0xa7, 0x29, 0x97, 0x6d, 0xf1 } };
+
+    struct ExtractorAttempt
+    {
+        std::string name;
+        std::uintptr_t function = 0;
+        std::uintptr_t tabView = 0;
+        std::uintptr_t tradeInfo = 0;
+        std::uintptr_t returnedInterface = 0;
+        std::uintptr_t returnedVtable = 0;
+        bool functionValid = false;
+        bool tabViewValid = false;
+        bool tradeInfoValid = false;
+        bool gateEnabled = false;
+        bool liveAttempted = false;
+        bool liveSucceeded = false;
+        DWORD sehCode = 0;
+        HRESULT queryInterfaceHr = E_FAIL;
+        std::string diagnostic;
+    };
+
+    struct TabViewCandidate
+    {
+        std::uintptr_t object = 0;
+        std::uintptr_t vtable = 0;
+        std::uintptr_t currentVtable = 0;
+        std::uintptr_t secondaryVtable = 0;
+        std::uintptr_t allocationBase = 0;
+        std::uintptr_t regionBase = 0;
+        std::size_t regionSize = 0;
+        DWORD memoryType = 0;
+        DWORD memoryProtect = 0;
+        int trackerWindowReferences = 0;
+        int pageWindowReferences = 0;
+        int flexGridReferences = 0;
+        int pageObjectPointers = 0;
+        int debugFillQwords = 0;
+        int bridgeModulePointers = 0;
+        bool stableVtable = false;
+        bool secondaryTabViewVtableAt48 = false;
+        bool trackerLayoutSignature = false;
+        bool rejected = false;
+        std::string rejectedReason;
+        int score = 0;
+    };
+
+    SRWLOCK g_extractorLock = SRWLOCK_INIT;
+    ExtractorAttempt g_accountsAttempt;
+    ExtractorAttempt g_openPositionsAttempt;
+    SRWLOCK g_tabViewCacheLock = SRWLOCK_INIT;
+    std::uintptr_t g_cachedTabView = 0;
+    std::uintptr_t g_cachedAtonpBase = 0;
+    HWND g_cachedTrackerWindow = nullptr;
+    SRWLOCK g_candidateCacheLock = SRWLOCK_INIT;
+    std::vector<TabViewCandidate> g_cachedCandidates;
+    std::string g_cachedCandidateScanDiagnostic;
+    std::uintptr_t g_candidateCacheAtonpBase = 0;
+    HWND g_candidateCacheTrackerWindow = nullptr;
+
+    constexpr UINT kUiExtractorDispatchMessage = WM_APP + 0x4B3;
+    constexpr DWORD kUiExtractorDispatchTimeoutMs = 15000;
+
+    struct UiDispatchDiagnostics
+    {
+        DWORD requestReceivedThreadId = 0;
+        DWORD dispatchTargetThreadId = 0;
+        bool dispatchPosted = false;
+        bool uiCallbackEntered = false;
+        DWORD uiCallbackThreadId = 0;
+        bool uiCallbackCompleted = false;
+        DWORD waitResult = WAIT_FAILED;
+        ULONGLONG waitElapsedMs = 0;
+        bool pipeResponseWritten = false;
+        std::string diagnostic;
+    };
+
+    SRWLOCK g_uiDispatchLock = SRWLOCK_INIT;
+    HANDLE g_uiDispatchEvent = nullptr;
+    HWND g_uiDispatchWindow = nullptr;
+    WNDPROC g_uiDispatchOriginalWndProc = nullptr;
+    bool g_uiDispatchActive = false;
+    bool g_uiDispatchNoop = false;
+    ExtractorAttempt g_uiDispatchAccounts;
+    ExtractorAttempt g_uiDispatchPositions;
+    UiDispatchDiagnostics g_uiDispatchDiagnostics;
+
+    bool MemoryRangeHasProtection(const void* address, std::size_t bytes, bool executable)
+    {
+        if (!address || bytes == 0)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi))
+            return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+            return false;
+        const auto begin = reinterpret_cast<std::uintptr_t>(address);
+        const auto regionBegin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+        const auto regionEnd = regionBegin + mbi.RegionSize;
+        if (begin < regionBegin || begin + bytes < begin || begin + bytes > regionEnd)
+            return false;
+        const DWORD basic = mbi.Protect & 0xFFu;
+        if (executable)
+        {
+            return basic == PAGE_EXECUTE || basic == PAGE_EXECUTE_READ ||
+                   basic == PAGE_EXECUTE_READWRITE || basic == PAGE_EXECUTE_WRITECOPY;
+        }
+        return basic == PAGE_READONLY || basic == PAGE_READWRITE ||
+               basic == PAGE_WRITECOPY || basic == PAGE_EXECUTE_READ ||
+               basic == PAGE_EXECUTE_READWRITE || basic == PAGE_EXECUTE_WRITECOPY;
+    }
+
+    bool SafeReadBytes(const void* address, void* destination, std::size_t bytes)
+    {
+        if (!address || !destination || bytes == 0 ||
+            !MemoryRangeHasProtection(address, bytes, false))
+            return false;
+
+        DWORD sehCode = 0;
+        return MCBridge_SafeCopyMemory(destination, address, bytes, &sehCode) != 0;
+    }
+
+    template <typename T>
+    bool SafeReadValue(const void* address, T& value)
+    {
+        return SafeReadBytes(address, &value, sizeof(T));
+    }
+
+    bool PointerLooksLikeObject(std::uintptr_t pointer)
+    {
+        if (pointer < 0x10000 || !MemoryRangeHasProtection(reinterpret_cast<void*>(pointer), sizeof(void*), false))
+            return false;
+        std::uintptr_t vtable = 0;
+        if (!SafeReadValue(reinterpret_cast<void*>(pointer), vtable))
+            return false;
+        return MemoryRangeHasProtection(reinterpret_cast<void*>(vtable), sizeof(void*), false);
+    }
+
+    bool VtableStartsWithExecutableCode(std::uintptr_t object, std::uintptr_t& vtable)
+    {
+        vtable = 0;
+        if (!PointerLooksLikeObject(object) || !SafeReadValue(reinterpret_cast<void*>(object), vtable))
+            return false;
+        std::uintptr_t firstMethod = 0;
+        return SafeReadValue(reinterpret_cast<void*>(vtable), firstMethod) &&
+               MemoryRangeHasProtection(reinterpret_cast<void*>(firstMethod), 1, true);
+    }
+
+    std::uintptr_t DecodeAtlThunkThis(LONG_PTR wndProc)
+    {
+        const auto address = static_cast<std::uintptr_t>(wndProc);
+        if (!MemoryRangeHasProtection(reinterpret_cast<void*>(address), 48, true))
+            return 0;
+        unsigned char bytes[48]{};
+DWORD sehCode = 0;
+        if (!MCBridge_SafeCopyMemory(bytes, reinterpret_cast<void*>(address), sizeof(bytes), &sehCode))
+            return 0;
+        for (std::size_t i = 0; i + 10 <= sizeof(bytes); ++i)
+        {
+            if (bytes[i] == 0x48 && bytes[i + 1] == 0xB9) // mov rcx, imm64
+            {
+                std::uint64_t candidate = 0;
+                memcpy(&candidate, bytes + i + 2, sizeof(candidate));
+                std::uintptr_t vtable = 0;
+                if (VtableStartsWithExecutableCode(static_cast<std::uintptr_t>(candidate), vtable))
+                    return static_cast<std::uintptr_t>(candidate);
+            }
+        }
+        return 0;
+    }
+
+    bool IsReadableProtection(DWORD protect)
+    {
+        if (protect & (PAGE_GUARD | PAGE_NOACCESS))
+            return false;
+        const DWORD basic = protect & 0xFFu;
+        return basic == PAGE_READONLY || basic == PAGE_READWRITE ||
+               basic == PAGE_WRITECOPY || basic == PAGE_EXECUTE_READ ||
+               basic == PAGE_EXECUTE_READWRITE || basic == PAGE_EXECUTE_WRITECOPY;
+    }
+
+    int CountWindowReferencesInObject(
+        std::uintptr_t object,
+        const std::vector<std::uintptr_t>& values,
+        std::size_t bytes = 0x500)
+    {
+        if (!object || values.empty() ||
+            !MemoryRangeHasProtection(reinterpret_cast<void*>(object), bytes, false))
+            return 0;
+
+        int count = 0;
+        for (std::size_t offset = 0; offset + sizeof(std::uintptr_t) <= bytes;
+             offset += sizeof(std::uintptr_t))
+        {
+            std::uintptr_t value = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(object + offset), value))
+                continue;
+            if (std::find(values.begin(), values.end(), value) != values.end())
+                ++count;
+        }
+        return count;
+    }
+
+    std::vector<TabViewCandidate> FindKnownTabViewVtableObjects(
+        const Snapshot& snapshot,
+        std::string& scanDiagnostic)
+    {
+        // V147 diagnostic change: keep the targeted scan bounded, but allow up to 30 seconds. Build a small set
+        // of live ATL/WTL object anchors from Tracker-owned window thunks and scan
+        // only their allocation neighborhoods for the exact known CATPTTabView
+        // vtable. Every read is validated, the diagnostic work is time-bounded, and candidate
+        // growth is capped before any extractor call can be considered.
+        constexpr std::uintptr_t kKnownTabViewVtableRva = 0x1D78E0;
+        constexpr ULONGLONG kTimeBudgetMs = 30000;
+        constexpr std::size_t kMaxAllocationBytes = 8ull * 1024ull * 1024ull;
+        constexpr std::size_t kMaxTotalInspectedBytes = 32ull * 1024ull * 1024ull;
+        constexpr std::size_t kMaxCandidates = 64;
+
+        const std::uintptr_t targetVtable = snapshot.atonpTrackerBase + kKnownTabViewVtableRva;
+        std::vector<TabViewCandidate> candidates;
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize != kKnownAtonpSize ||
+            !MemoryRangeHasProtection(reinterpret_cast<void*>(targetVtable), sizeof(void*), false))
+        {
+            scanDiagnostic = "known vtable unavailable or ATOnPTracker build mismatch";
+            return candidates;
+        }
+
+        std::vector<std::uintptr_t> trackerValues;
+        std::vector<std::uintptr_t> pageValues;
+        std::vector<std::uintptr_t> gridValues;
+        std::vector<std::uintptr_t> anchors;
+        if (snapshot.trackerWindow)
+            trackerValues.push_back(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow));
+
+        for (const WindowRecord& record : snapshot.windows)
+        {
+            const std::uintptr_t hwndValue = reinterpret_cast<std::uintptr_t>(record.hwnd);
+            if (Lower(record.className) == L"#32770")
+                pageValues.push_back(hwndValue);
+            if (IsFlexGridClass(record.className))
+                gridValues.push_back(hwndValue);
+
+            const std::uintptr_t classObject = ParseAtlClassAddress(record.className);
+            if (classObject)
+                anchors.push_back(classObject);
+            const std::uintptr_t thunkObject = DecodeAtlThunkThis(record.wndProc);
+            if (thunkObject)
+                anchors.push_back(thunkObject);
+            const std::uintptr_t userObject = static_cast<std::uintptr_t>(record.userData);
+            std::uintptr_t userVtable = 0;
+            if (userObject && VtableStartsWithExecutableCode(userObject, userVtable))
+                anchors.push_back(userObject);
+        }
+
+        std::sort(anchors.begin(), anchors.end());
+        anchors.erase(std::unique(anchors.begin(), anchors.end()), anchors.end());
+
+        struct AllocationRange { std::uintptr_t begin = 0; std::uintptr_t end = 0; };
+        std::vector<AllocationRange> ranges;
+        for (const std::uintptr_t anchor : anchors)
+        {
+            MEMORY_BASIC_INFORMATION anchorMbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(anchor), &anchorMbi, sizeof(anchorMbi)) != sizeof(anchorMbi) ||
+                anchorMbi.State != MEM_COMMIT || !IsReadableProtection(anchorMbi.Protect))
+                continue;
+
+            const std::uintptr_t allocationBase =
+                reinterpret_cast<std::uintptr_t>(anchorMbi.AllocationBase);
+            std::uintptr_t cursor = allocationBase;
+            std::uintptr_t allocationEnd = allocationBase;
+            std::size_t allocationBytes = 0;
+            while (allocationBytes < kMaxAllocationBytes)
+            {
+                MEMORY_BASIC_INFORMATION mbi{};
+                if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi) ||
+                    reinterpret_cast<std::uintptr_t>(mbi.AllocationBase) != allocationBase)
+                    break;
+                const std::uintptr_t regionBegin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+                if (mbi.RegionSize == 0 || regionBegin + mbi.RegionSize <= regionBegin)
+                    break;
+                allocationEnd = regionBegin + mbi.RegionSize;
+                allocationBytes = static_cast<std::size_t>(allocationEnd - allocationBase);
+                cursor = allocationEnd;
+            }
+            if (allocationEnd > allocationBase && allocationBytes <= kMaxAllocationBytes)
+                ranges.push_back({ allocationBase, allocationEnd });
+        }
+
+        std::sort(ranges.begin(), ranges.end(), [](const AllocationRange& a, const AllocationRange& b) {
+            if (a.begin != b.begin) return a.begin < b.begin;
+            return a.end < b.end;
+        });
+        ranges.erase(std::unique(ranges.begin(), ranges.end(), [](const AllocationRange& a, const AllocationRange& b) {
+            return a.begin == b.begin && a.end == b.end;
+        }), ranges.end());
+
+        const ULONGLONG started = GetTickCount64();
+        std::size_t inspectedBytes = 0;
+        std::size_t readableRegions = 0;
+        bool timedOut = false;
+        bool candidateLimitHit = false;
+
+        for (const AllocationRange& range : ranges)
+        {
+            if (GetTickCount64() - started >= kTimeBudgetMs ||
+                inspectedBytes >= kMaxTotalInspectedBytes)
+            {
+                timedOut = true;
+                break;
+            }
+
+            std::uintptr_t cursor = range.begin;
+            while (cursor < range.end)
+            {
+                MEMORY_BASIC_INFORMATION mbi{};
+                if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+                    break;
+                const std::uintptr_t regionBegin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+                const std::uintptr_t regionEnd = regionBegin + mbi.RegionSize;
+                if (mbi.RegionSize == 0 || regionEnd <= cursor)
+                    break;
+
+                if (mbi.State == MEM_COMMIT && IsReadableProtection(mbi.Protect))
+                {
+                    ++readableRegions;
+                    const std::uintptr_t scanBegin = (std::max)(cursor, regionBegin);
+                    const std::uintptr_t scanEnd = (std::min)(range.end, regionEnd);
+                    inspectedBytes += static_cast<std::size_t>(scanEnd - scanBegin);
+
+                    for (std::uintptr_t address = scanBegin;
+                         address <= scanEnd - sizeof(std::uintptr_t);
+                         address += sizeof(std::uintptr_t))
+                    {
+                        if ((address & 0x3FFFu) == 0 && GetTickCount64() - started >= kTimeBudgetMs)
+                        {
+                            timedOut = true;
+                            break;
+                        }
+                        std::uintptr_t value = 0;
+                        if (!SafeReadValue(reinterpret_cast<void*>(address), value) || value != targetVtable)
+                            continue;
+
+                        TabViewCandidate candidate;
+                        candidate.object = address;
+                        candidate.vtable = value;
+                        std::uintptr_t verifiedVtable = 0;
+                        if (!VtableStartsWithExecutableCode(candidate.object, verifiedVtable) ||
+                            verifiedVtable != targetVtable)
+                            continue;
+
+                        candidate.trackerWindowReferences =
+                            CountWindowReferencesInObject(candidate.object, trackerValues);
+                        candidate.pageWindowReferences =
+                            CountWindowReferencesInObject(candidate.object, pageValues, 0x2000);
+                        candidate.flexGridReferences =
+                            CountWindowReferencesInObject(candidate.object, gridValues, 0x2000);
+                        candidate.score = 100 + candidate.trackerWindowReferences * 12 +
+                                          candidate.pageWindowReferences * 4 +
+                                          candidate.flexGridReferences * 4;
+                        candidates.push_back(candidate);
+                        if (candidates.size() >= kMaxCandidates)
+                        {
+                            candidateLimitHit = true;
+                            break;
+                        }
+                    }
+                }
+                if (timedOut || candidateLimitHit || inspectedBytes >= kMaxTotalInspectedBytes)
+                    break;
+                cursor = regionEnd;
+            }
+            if (timedOut || candidateLimitHit)
+                break;
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const TabViewCandidate& left,
+                                                            const TabViewCandidate& right) {
+            if (left.score != right.score) return left.score > right.score;
+            return left.object < right.object;
+        });
+        candidates.erase(std::unique(candidates.begin(), candidates.end(),
+            [](const TabViewCandidate& left, const TabViewCandidate& right) {
+                return left.object == right.object;
+            }), candidates.end());
+
+        std::ostringstream diag;
+        diag << "targeted locator anchors=" << anchors.size()
+             << " allocations=" << ranges.size()
+             << " readable_regions=" << readableRegions
+             << " inspected_bytes=" << inspectedBytes
+             << " elapsed_ms=" << (GetTickCount64() - started);
+        if (timedOut) diag << " timeout=true";
+        if (candidateLimitHit) diag << " candidate_limit=true";
+        scanDiagnostic = diag.str();
+        return candidates;
+    }
+
+
+    struct NonVisualObjectRecord
+    {
+        std::uintptr_t object = 0;
+        std::uintptr_t vtable = 0;
+        std::vector<std::uintptr_t> methods;
+        int accessorLikeMethods = 0;
+    };
+
+    bool LooksLikeSmallAccessor(std::uintptr_t function)
+    {
+        unsigned char bytes[48]{};
+        if (!MemoryRangeHasProtection(reinterpret_cast<void*>(function), sizeof(bytes), true))
+            return false;
+DWORD sehCode = 0;
+        if (!MCBridge_SafeCopyMemory(bytes, reinterpret_cast<void*>(function), sizeof(bytes), &sehCode))
+            return false;
+        bool sawCall = false;
+        for (std::size_t i = 0; i < sizeof(bytes); ++i)
+        {
+            if (bytes[i] == 0xE8 || (bytes[i] == 0xFF && i + 1 < sizeof(bytes) && (bytes[i + 1] & 0x38) == 0x10))
+                sawCall = true;
+            if (bytes[i] == 0xC3 || bytes[i] == 0xC2)
+                return i <= 32 && !sawCall;
+        }
+        return false;
+    }
+
+    std::string DiscoverRttiNames(const Snapshot& snapshot)
+    {
+        std::ostringstream out;
+        if (!snapshot.atonpTrackerBase || !snapshot.atonpTrackerSize)
+            return "RTTI module unavailable\r\n";
+        constexpr std::size_t kMaxNames = 256;
+        std::size_t names = 0;
+        const std::uintptr_t begin = snapshot.atonpTrackerBase;
+        const std::uintptr_t end = begin + snapshot.atonpTrackerSize;
+        for (std::uintptr_t cursor = begin; cursor < end && names < kMaxNames; )
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+                break;
+            const std::uintptr_t regionBegin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+            const std::uintptr_t regionEnd = regionBegin + mbi.RegionSize;
+            if (mbi.RegionSize == 0 || regionEnd <= cursor)
+                break;
+            if (mbi.State == MEM_COMMIT && IsReadableProtection(mbi.Protect))
+            {
+                const std::uintptr_t scanBegin = (std::max)(cursor, regionBegin);
+                const std::uintptr_t scanEnd = (std::min)(end, regionEnd);
+                const std::size_t size = static_cast<std::size_t>(scanEnd - scanBegin);
+                std::vector<char> bytes(size);
+                DWORD sehCode = 0;
+                const bool copied = MCBridge_SafeCopyMemory(
+                    bytes.data(), reinterpret_cast<void*>(scanBegin), size, &sehCode) != 0;
+                if (copied)
+                {
+                    for (std::size_t i = 0; i + 8 < bytes.size() && names < kMaxNames; ++i)
+                    {
+                        if (memcmp(bytes.data() + i, ".?AV", 4) != 0)
+                            continue;
+                        std::size_t length = 0;
+                        while (i + length < bytes.size() && length < 255)
+                        {
+                            const unsigned char ch = static_cast<unsigned char>(bytes[i + length]);
+                            if (ch == 0) break;
+                            if (ch < 0x20 || ch > 0x7E) { length = 0; break; }
+                            ++length;
+                        }
+                        if (length >= 6 && i + length < bytes.size() && bytes[i + length] == '\0')
+                        {
+                            const std::uintptr_t address = scanBegin + i;
+                            out << "rtti_type_descriptor_name="
+                                << std::string(bytes.data() + i, length)
+                                << " address=" << HexValue(address)
+                                << " rva=" << HexValue(address - snapshot.atonpTrackerBase) << "\r\n";
+                            ++names;
+                            i += length;
+                        }
+                    }
+                }
+            }
+            cursor = regionEnd;
+        }
+        out << "rtti_name_count=" << names << "\r\n";
+        return out.str();
+    }
+
+    std::string WriteNonVisualObjectMethodReport(const Snapshot& snapshot)
+    {
+        constexpr ULONGLONG kTimeBudgetMs = 20000;
+        constexpr std::size_t kMaxAllocationBytes = 8ull * 1024ull * 1024ull;
+        constexpr std::size_t kMaxTotalBytes = 16ull * 1024ull * 1024ull;
+        constexpr std::size_t kMaxObjects = 256;
+        constexpr std::size_t kMaxMethods = 16;
+
+        std::vector<std::uintptr_t> anchors;
+        for (const WindowRecord& record : snapshot.windows)
+        {
+            const std::uintptr_t classObject = ParseAtlClassAddress(record.className);
+            if (classObject) anchors.push_back(classObject);
+            const std::uintptr_t thunkObject = DecodeAtlThunkThis(record.wndProc);
+            if (thunkObject) anchors.push_back(thunkObject);
+        }
+        std::sort(anchors.begin(), anchors.end());
+        anchors.erase(std::unique(anchors.begin(), anchors.end()), anchors.end());
+
+        struct Range { std::uintptr_t begin = 0; std::uintptr_t end = 0; };
+        std::vector<Range> ranges;
+        for (const std::uintptr_t anchor : anchors)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(anchor), &mbi, sizeof(mbi)) != sizeof(mbi) ||
+                mbi.State != MEM_COMMIT || !IsReadableProtection(mbi.Protect))
+                continue;
+            const std::uintptr_t allocationBase = reinterpret_cast<std::uintptr_t>(mbi.AllocationBase);
+            std::uintptr_t cursor = allocationBase;
+            std::uintptr_t allocationEnd = allocationBase;
+            while (allocationEnd - allocationBase < kMaxAllocationBytes)
+            {
+                MEMORY_BASIC_INFORMATION part{};
+                if (VirtualQuery(reinterpret_cast<void*>(cursor), &part, sizeof(part)) != sizeof(part) ||
+                    reinterpret_cast<std::uintptr_t>(part.AllocationBase) != allocationBase || part.RegionSize == 0)
+                    break;
+                const std::uintptr_t next = reinterpret_cast<std::uintptr_t>(part.BaseAddress) + part.RegionSize;
+                if (next <= cursor) break;
+                allocationEnd = next;
+                cursor = next;
+            }
+            if (allocationEnd > allocationBase && allocationEnd - allocationBase <= kMaxAllocationBytes)
+                ranges.push_back({ allocationBase, allocationEnd });
+        }
+        std::sort(ranges.begin(), ranges.end(), [](const Range& a, const Range& b) { return a.begin < b.begin; });
+        ranges.erase(std::unique(ranges.begin(), ranges.end(), [](const Range& a, const Range& b) {
+            return a.begin == b.begin && a.end == b.end;
+        }), ranges.end());
+
+        const ULONGLONG started = GetTickCount64();
+        std::size_t inspected = 0;
+        std::vector<NonVisualObjectRecord> objects;
+        for (const Range& range : ranges)
+        {
+            for (std::uintptr_t address = range.begin;
+                 address + sizeof(std::uintptr_t) <= range.end && objects.size() < kMaxObjects;
+                 address += sizeof(std::uintptr_t))
+            {
+                if (GetTickCount64() - started >= kTimeBudgetMs || inspected >= kMaxTotalBytes)
+                    break;
+                inspected += sizeof(std::uintptr_t);
+                std::uintptr_t vtable = 0;
+                if (!SafeReadValue(reinterpret_cast<void*>(address), vtable)) continue;
+                if (vtable < snapshot.atonpTrackerBase ||
+                    vtable >= snapshot.atonpTrackerBase + snapshot.atonpTrackerSize) continue;
+                std::uintptr_t firstMethod = 0;
+                if (!SafeReadValue(reinterpret_cast<void*>(vtable), firstMethod) ||
+                    !MemoryRangeHasProtection(reinterpret_cast<void*>(firstMethod), 1, true)) continue;
+
+                NonVisualObjectRecord record;
+                record.object = address;
+                record.vtable = vtable;
+                for (std::size_t slot = 0; slot < kMaxMethods; ++slot)
+                {
+                    std::uintptr_t method = 0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(vtable + slot * sizeof(void*)), method)) break;
+                    if (method < snapshot.atonpTrackerBase ||
+                        method >= snapshot.atonpTrackerBase + snapshot.atonpTrackerSize ||
+                        !MemoryRangeHasProtection(reinterpret_cast<void*>(method), 1, true)) break;
+                    record.methods.push_back(method);
+                    if (LooksLikeSmallAccessor(method)) ++record.accessorLikeMethods;
+                }
+                objects.push_back(record);
+            }
+            if (GetTickCount64() - started >= kTimeBudgetMs || inspected >= kMaxTotalBytes || objects.size() >= kMaxObjects)
+                break;
+        }
+        std::sort(objects.begin(), objects.end(), [](const NonVisualObjectRecord& a, const NonVisualObjectRecord& b) {
+            if (a.vtable != b.vtable) return a.vtable < b.vtable;
+            return a.object < b.object;
+        });
+        objects.erase(std::unique(objects.begin(), objects.end(), [](const NonVisualObjectRecord& a, const NonVisualObjectRecord& b) {
+            return a.object == b.object;
+        }), objects.end());
+
+        std::ostringstream report;
+        report << "MC V147 Non-Visual C++ Object and Method Discovery\r\n"
+               << "=================================================\r\n"
+               << "process_id=" << snapshot.processId << "\r\n"
+               << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n"
+               << "anchors=" << anchors.size() << " allocations=" << ranges.size()
+               << " inspected_bytes=" << inspected << " elapsed_ms=" << (GetTickCount64() - started)
+               << " object_candidates=" << objects.size() << "\r\n\r\n"
+               << "RTTI TYPE NAMES\r\n"
+               << "---------------\r\n" << DiscoverRttiNames(snapshot) << "\r\n"
+               << "OBJECTS AND VTABLE METHODS\r\n"
+               << "--------------------------\r\n";
+        for (const NonVisualObjectRecord& object : objects)
+        {
+            report << "object=" << HexValue(object.object)
+                   << " vtable=" << HexValue(object.vtable)
+                   << " vtable_rva=" << HexValue(object.vtable - snapshot.atonpTrackerBase)
+                   << " method_count=" << object.methods.size()
+                   << " accessor_like=" << object.accessorLikeMethods << "\r\n";
+            for (std::size_t slot = 0; slot < object.methods.size(); ++slot)
+            {
+                report << "  slot=" << slot
+                       << " method=" << HexValue(object.methods[slot])
+                       << " method_rva=" << HexValue(object.methods[slot] - snapshot.atonpTrackerBase)
+                       << " accessor_like=" << (LooksLikeSmallAccessor(object.methods[slot]) ? "true" : "false")
+                       << "\r\n";
+            }
+        }
+        EnsureOutputDirectory();
+        const std::wstring path = ReportPath(L"MC_V147_Bridge_NonVisual_Object_Method_Discovery", snapshot.processId);
+        const bool written = WriteUtf8File(path, report.str());
+        std::ostringstream summary;
+        summary << "nonvisual_report=" << WideToUtf8(path)
+                << " written=" << (written ? "true" : "false")
+                << " anchors=" << anchors.size()
+                << " allocations=" << ranges.size()
+                << " objects=" << objects.size()
+                << " inspected_bytes=" << inspected;
+        return summary.str();
+    }
+
+    struct RttiVtableRecord
+    {
+        std::uintptr_t typeNameAddress = 0;
+        std::uintptr_t typeDescriptor = 0;
+        std::uintptr_t completeObjectLocator = 0;
+        std::uintptr_t vtable = 0;
+    };
+
+    bool ModuleContains(const Snapshot& snapshot, std::uintptr_t address, std::size_t bytes = 1)
+    {
+        if (!snapshot.atonpTrackerBase || !snapshot.atonpTrackerSize || bytes == 0)
+            return false;
+        const std::uintptr_t end = snapshot.atonpTrackerBase + snapshot.atonpTrackerSize;
+        return address >= snapshot.atonpTrackerBase && address + bytes >= address && address + bytes <= end;
+    }
+
+    std::vector<std::uintptr_t> FindAsciiStringInModule(
+        const Snapshot& snapshot,
+        const char* needle)
+    {
+        std::vector<std::uintptr_t> matches;
+        if (!needle || !*needle || !snapshot.atonpTrackerBase || !snapshot.atonpTrackerSize)
+            return matches;
+        const std::size_t needleLength = strlen(needle);
+        constexpr std::size_t kChunkBytes = 256u * 1024u;
+        std::vector<unsigned char> buffer(kChunkBytes + 512u);
+        const std::uintptr_t moduleEnd = snapshot.atonpTrackerBase + snapshot.atonpTrackerSize;
+        for (std::uintptr_t cursor = snapshot.atonpTrackerBase; cursor < moduleEnd; )
+        {
+            const std::size_t bytes = static_cast<std::size_t>((std::min)(
+                moduleEnd - cursor, static_cast<std::uintptr_t>(kChunkBytes)));
+            DWORD sehCode = 0;
+            if (MCBridge_SafeCopyMemory(buffer.data(), reinterpret_cast<void*>(cursor), bytes, &sehCode))
+            {
+                for (std::size_t i = 0; i + needleLength < bytes; ++i)
+                {
+                    if (memcmp(buffer.data() + i, needle, needleLength) == 0 &&
+                        buffer[i + needleLength] == 0)
+                    {
+                        matches.push_back(cursor + i);
+                    }
+                }
+            }
+            cursor += bytes;
+        }
+        return matches;
+    }
+
+    std::vector<RttiVtableRecord> ResolveRttiVtables(
+        const Snapshot& snapshot,
+        const char* decoratedTypeName,
+        std::string& diagnostic)
+    {
+        std::vector<RttiVtableRecord> result;
+        const std::vector<std::uintptr_t> names = FindAsciiStringInModule(snapshot, decoratedTypeName);
+        std::size_t colCandidates = 0;
+        std::size_t colValidated = 0;
+        std::size_t vtableReferences = 0;
+        if (!snapshot.atonpTrackerBase || !snapshot.atonpTrackerSize)
+        {
+            diagnostic = "RTTI module unavailable";
+            return result;
+        }
+
+        const std::uintptr_t moduleBegin = snapshot.atonpTrackerBase;
+        const std::uintptr_t moduleEnd = moduleBegin + snapshot.atonpTrackerSize;
+        constexpr std::size_t kTypeDescriptorPrefixBytes = sizeof(void*) * 2;
+        constexpr std::size_t kColBytes = 6 * sizeof(std::int32_t);
+        constexpr std::size_t kChunkBytes = 256u * 1024u;
+        std::vector<unsigned char> buffer(kChunkBytes + 16u);
+        std::vector<unsigned char> referenceBuffer(kChunkBytes + 16u);
+
+        for (const std::uintptr_t nameAddress : names)
+        {
+            if (nameAddress < moduleBegin + kTypeDescriptorPrefixBytes)
+                continue;
+            const std::uintptr_t typeDescriptor = nameAddress - kTypeDescriptorPrefixBytes;
+            const std::uint32_t typeDescriptorRva =
+                static_cast<std::uint32_t>(typeDescriptor - moduleBegin);
+
+            // MSVC x64 CompleteObjectLocator stores image-relative 32-bit fields.
+            for (std::uintptr_t cursor = moduleBegin; cursor < moduleEnd; )
+            {
+                const std::size_t bytes = static_cast<std::size_t>((std::min)(
+                    moduleEnd - cursor, static_cast<std::uintptr_t>(kChunkBytes)));
+                DWORD sehCode = 0;
+                if (MCBridge_SafeCopyMemory(buffer.data(), reinterpret_cast<void*>(cursor), bytes, &sehCode))
+                {
+                    for (std::size_t i = 12; i + sizeof(std::uint32_t) <= bytes; i += 4)
+                    {
+                        std::uint32_t value = 0;
+                        memcpy(&value, buffer.data() + i, sizeof(value));
+                        if (value != typeDescriptorRva)
+                            continue;
+                        ++colCandidates;
+                        const std::uintptr_t col = cursor + i - 12;
+                        if (!ModuleContains(snapshot, col, kColBytes))
+                            continue;
+                        std::int32_t fields[6]{};
+                        if (!SafeReadValue(reinterpret_cast<void*>(col), fields))
+                            continue;
+                        const std::uint32_t signature = static_cast<std::uint32_t>(fields[0]);
+                        const std::uint32_t classDescriptorRva = static_cast<std::uint32_t>(fields[4]);
+                        const std::uint32_t selfRva = static_cast<std::uint32_t>(fields[5]);
+                        if (signature > 1 || static_cast<std::uint32_t>(fields[3]) != typeDescriptorRva)
+                            continue;
+                        if (classDescriptorRva >= snapshot.atonpTrackerSize)
+                            continue;
+                        if (signature == 1 && selfRva != static_cast<std::uint32_t>(col - moduleBegin))
+                            continue;
+                        ++colValidated;
+
+                        // A vftable is immediately after an absolute pointer to the COL.
+                        for (std::uintptr_t refCursor = moduleBegin; refCursor < moduleEnd; )
+                        {
+                            const std::size_t refBytes = static_cast<std::size_t>((std::min)(
+                                moduleEnd - refCursor, static_cast<std::uintptr_t>(kChunkBytes)));
+                            DWORD refSeh = 0;
+                            if (MCBridge_SafeCopyMemory(referenceBuffer.data(), reinterpret_cast<void*>(refCursor), refBytes, &refSeh))
+                            {
+                                for (std::size_t j = 0; j + sizeof(std::uintptr_t) <= refBytes; j += sizeof(std::uintptr_t))
+                                {
+                                    std::uintptr_t pointer = 0;
+                                    memcpy(&pointer, referenceBuffer.data() + j, sizeof(pointer));
+                                    if (pointer != col)
+                                        continue;
+                                    ++vtableReferences;
+                                    const std::uintptr_t vtable = refCursor + j + sizeof(std::uintptr_t);
+                                    std::uintptr_t firstMethod = 0;
+                                    if (!ModuleContains(snapshot, vtable, sizeof(void*)) ||
+                                        !SafeReadValue(reinterpret_cast<void*>(vtable), firstMethod) ||
+                                        !MemoryRangeHasProtection(reinterpret_cast<void*>(firstMethod), 1, true))
+                                        continue;
+                                    result.push_back({ nameAddress, typeDescriptor, col, vtable });
+                                }
+                            }
+                            refCursor += refBytes;
+                        }
+                    }
+                }
+                cursor += bytes;
+            }
+        }
+
+        std::sort(result.begin(), result.end(), [](const RttiVtableRecord& a, const RttiVtableRecord& b) {
+            return a.vtable < b.vtable;
+        });
+        result.erase(std::unique(result.begin(), result.end(), [](const RttiVtableRecord& a, const RttiVtableRecord& b) {
+            return a.vtable == b.vtable;
+        }), result.end());
+
+        std::ostringstream out;
+        out << "rtti_names=" << names.size()
+            << " col_candidates=" << colCandidates
+            << " col_validated=" << colValidated
+            << " vtable_refs=" << vtableReferences
+            << " resolved_vtables=" << result.size();
+        for (const RttiVtableRecord& item : result)
+        {
+            out << " [td_rva=" << HexValue(item.typeDescriptor - moduleBegin)
+                << " col_rva=" << HexValue(item.completeObjectLocator - moduleBegin)
+                << " vtable_rva=" << HexValue(item.vtable - moduleBegin) << "]";
+        }
+        diagnostic = out.str();
+        return result;
+    }
+
+    const WindowRecord* FindWindowRecord(const Snapshot& snapshot, std::uintptr_t value);
+
+    bool IsKnownTargetVtable(std::uintptr_t value, const std::vector<std::uintptr_t>& targets)
+    {
+        return std::find(targets.begin(), targets.end(), value) != targets.end();
+    }
+
+    void ValidateAndScoreTabViewCandidate(
+        const Snapshot& snapshot,
+        const std::vector<std::uintptr_t>& targets,
+        TabViewCandidate& candidate)
+    {
+        candidate.currentVtable = 0;
+        candidate.stableVtable = SafeReadValue(reinterpret_cast<void*>(candidate.object), candidate.currentVtable) &&
+                                 candidate.currentVtable == candidate.vtable &&
+                                 IsKnownTargetVtable(candidate.currentVtable, targets);
+        if (!candidate.stableVtable)
+        {
+            candidate.rejected = true;
+            candidate.rejectedReason = "vtable_changed_after_scan";
+        }
+
+        std::uintptr_t value = 0;
+        if (SafeReadValue(reinterpret_cast<void*>(candidate.object + 0x48), value))
+        {
+            candidate.secondaryVtable = value;
+            candidate.secondaryTabViewVtableAt48 = IsKnownTargetVtable(value, targets) && value != candidate.vtable;
+        }
+
+        const std::uintptr_t tracker = reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow);
+        std::uintptr_t internalView = 0;
+        for (const WindowRecord& record : snapshot.windows)
+        {
+            if (record.parent == snapshot.trackerWindow && ParseAtlClassAddress(record.className))
+            {
+                internalView = reinterpret_cast<std::uintptr_t>(record.hwnd);
+                break;
+            }
+        }
+        std::uintptr_t atPlus8 = 0;
+        std::uintptr_t atMinus68 = 0;
+        std::uintptr_t atMinus18 = 0;
+        SafeReadValue(reinterpret_cast<void*>(candidate.object + 0x08), atPlus8);
+        if (candidate.object >= 0x68) SafeReadValue(reinterpret_cast<void*>(candidate.object - 0x68), atMinus68);
+        if (candidate.object >= 0x18) SafeReadValue(reinterpret_cast<void*>(candidate.object - 0x18), atMinus18);
+        candidate.trackerLayoutSignature =
+            (FindWindowRecord(snapshot, atPlus8) != nullptr) &&
+            ((tracker && atMinus68 == tracker) || FindWindowRecord(snapshot, atMinus68) != nullptr) &&
+            (FindWindowRecord(snapshot, atMinus18) != nullptr || (internalView && atMinus18 == internalView));
+
+        for (std::size_t offset = 0x60; offset <= 0x88; offset += sizeof(std::uintptr_t))
+        {
+            std::uintptr_t pointer = 0;
+            if (SafeReadValue(reinterpret_cast<void*>(candidate.object + offset), pointer) && PointerLooksLikeObject(pointer))
+                ++candidate.pageObjectPointers;
+        }
+
+        const ModuleRecord* bridgeModule = nullptr;
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            if (Lower(module.name).find(L"mctrackerbridge") != std::wstring::npos)
+            {
+                bridgeModule = &module;
+                break;
+            }
+        }
+        for (std::ptrdiff_t relative = -0x100; relative <= 0x400; relative += sizeof(std::uintptr_t))
+        {
+            const std::intptr_t signedAddress = static_cast<std::intptr_t>(candidate.object) + relative;
+            if (signedAddress <= 0) continue;
+            std::uintptr_t qword = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(static_cast<std::uintptr_t>(signedAddress)), qword)) continue;
+            if (qword == 0xCCCCCCCCCCCCCCCCull || qword == 0xCDCDCDCDCDCDCDCDull ||
+                qword == 0xFEEEFEEEFEEEFEEEull)
+                ++candidate.debugFillQwords;
+            if (bridgeModule && qword >= bridgeModule->base && qword < bridgeModule->base + bridgeModule->size)
+                ++candidate.bridgeModulePointers;
+        }
+
+        candidate.score = 100 + candidate.trackerWindowReferences * 12 +
+                          candidate.pageWindowReferences * 4 + candidate.flexGridReferences * 4;
+        if (candidate.stableVtable) candidate.score += 40;
+        else candidate.score -= 1000;
+        if (candidate.secondaryTabViewVtableAt48) candidate.score += 45;
+        if (candidate.trackerLayoutSignature) candidate.score += 55;
+        candidate.score += (std::min)(candidate.pageObjectPointers, 6) * 8;
+        candidate.score -= (std::min)(candidate.debugFillQwords, 20) * 10;
+        candidate.score -= (std::min)(candidate.bridgeModulePointers, 20) * 4;
+        if (candidate.debugFillQwords >= 4)
+        {
+            candidate.rejected = true;
+            if (!candidate.rejectedReason.empty()) candidate.rejectedReason += ",";
+            candidate.rejectedReason += "debug_fill_pattern";
+        }
+    }
+
+    std::vector<TabViewCandidate> FindRttiVtableObjectsProcessWide(
+        const Snapshot& snapshot,
+        const std::vector<RttiVtableRecord>& vtables,
+        std::string& diagnostic)
+    {
+        constexpr std::size_t kMaxInspectedBytes = 512ull * 1024ull * 1024ull;
+        constexpr std::size_t kChunkBytes = 256u * 1024u;
+        constexpr std::size_t kMaxCandidates = 64;
+        std::vector<TabViewCandidate> candidates;
+        if (vtables.empty())
+        {
+            diagnostic = "no RTTI vtables to scan";
+            return candidates;
+        }
+        std::vector<std::uintptr_t> targets;
+        for (const auto& item : vtables) targets.push_back(item.vtable);
+
+        std::vector<std::uintptr_t> trackerValues;
+        std::vector<std::uintptr_t> pageValues;
+        std::vector<std::uintptr_t> gridValues;
+        if (snapshot.trackerWindow)
+            trackerValues.push_back(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow));
+        for (const WindowRecord& record : snapshot.windows)
+        {
+            const std::uintptr_t hwndValue = reinterpret_cast<std::uintptr_t>(record.hwnd);
+            if (Lower(record.className) == L"#32770") pageValues.push_back(hwndValue);
+            if (IsFlexGridClass(record.className)) gridValues.push_back(hwndValue);
+        }
+
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        std::uintptr_t cursor = reinterpret_cast<std::uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+        const std::uintptr_t maximum = reinterpret_cast<std::uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+        const ULONGLONG started = GetTickCount64();
+        std::size_t inspectedBytes = 0;
+        std::size_t readablePrivateRegions = 0;
+        bool byteLimitHit = false;
+        bool candidateLimitHit = false;
+        std::vector<unsigned char> buffer(kChunkBytes);
+
+        while (cursor < maximum)
+        {
+            if (inspectedBytes >= kMaxInspectedBytes) { byteLimitHit = true; break; }
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+                break;
+            const std::uintptr_t regionBegin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+            const std::uintptr_t regionEnd = regionBegin + mbi.RegionSize;
+            if (mbi.RegionSize == 0 || regionEnd <= cursor)
+                break;
+            if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && IsReadableProtection(mbi.Protect))
+            {
+                ++readablePrivateRegions;
+                for (std::uintptr_t chunk = regionBegin; chunk < regionEnd; )
+                {
+                            if (inspectedBytes >= kMaxInspectedBytes) { byteLimitHit = true; break; }
+                    const std::size_t bytes = static_cast<std::size_t>((std::min)(
+                        regionEnd - chunk, static_cast<std::uintptr_t>(kChunkBytes)));
+                    DWORD sehCode = 0;
+                    if (MCBridge_SafeCopyMemory(buffer.data(), reinterpret_cast<void*>(chunk), bytes, &sehCode))
+                    {
+                        inspectedBytes += bytes;
+                        const std::size_t first = static_cast<std::size_t>((sizeof(void*) - (chunk & (sizeof(void*) - 1))) & (sizeof(void*) - 1));
+                        for (std::size_t offset = first; offset + sizeof(std::uintptr_t) <= bytes; offset += sizeof(std::uintptr_t))
+                        {
+                            std::uintptr_t value = 0;
+                            memcpy(&value, buffer.data() + offset, sizeof(value));
+                            if (std::find(targets.begin(), targets.end(), value) == targets.end())
+                                continue;
+                            TabViewCandidate candidate;
+                            candidate.object = chunk + offset;
+                            candidate.vtable = value;
+                            MEMORY_BASIC_INFORMATION candidateMbi{};
+                            if (VirtualQuery(reinterpret_cast<void*>(candidate.object), &candidateMbi, sizeof(candidateMbi)) == sizeof(candidateMbi))
+                            {
+                                candidate.allocationBase = reinterpret_cast<std::uintptr_t>(candidateMbi.AllocationBase);
+                                candidate.regionBase = reinterpret_cast<std::uintptr_t>(candidateMbi.BaseAddress);
+                                candidate.regionSize = candidateMbi.RegionSize;
+                                candidate.memoryType = candidateMbi.Type;
+                                candidate.memoryProtect = candidateMbi.Protect;
+                            }
+                            candidate.trackerWindowReferences = CountWindowReferencesInObject(candidate.object, trackerValues, 0x2000);
+                            candidate.pageWindowReferences = CountWindowReferencesInObject(candidate.object, pageValues);
+                            candidate.flexGridReferences = CountWindowReferencesInObject(candidate.object, gridValues);
+                            ValidateAndScoreTabViewCandidate(snapshot, targets, candidate);
+                            candidates.push_back(candidate);
+                            if (candidates.size() >= kMaxCandidates) { candidateLimitHit = true; break; }
+                        }
+                    }
+                    if (candidateLimitHit) break;
+                    chunk += bytes;
+                }
+            }
+            if (byteLimitHit || candidateLimitHit) break;
+            cursor = regionEnd;
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const TabViewCandidate& a, const TabViewCandidate& b) {
+            if (a.score != b.score) return a.score > b.score;
+            return a.object < b.object;
+        });
+        candidates.erase(std::unique(candidates.begin(), candidates.end(), [](const TabViewCandidate& a, const TabViewCandidate& b) {
+            return a.object == b.object;
+        }), candidates.end());
+        std::ostringstream out;
+        out << "time_limit=none process_scan_regions=" << readablePrivateRegions
+            << " inspected_bytes=" << inspectedBytes
+            << " elapsed_ms=" << (GetTickCount64() - started)
+            << " candidates=" << candidates.size();
+        if (byteLimitHit) out << " byte_limit=true";
+        if (candidateLimitHit) out << " candidate_limit=true";
+        diagnostic = out.str();
+        return candidates;
+    }
+
+    std::string MemoryTypeName(DWORD type)
+    {
+        if (type == MEM_PRIVATE) return "MEM_PRIVATE";
+        if (type == MEM_IMAGE) return "MEM_IMAGE";
+        if (type == MEM_MAPPED) return "MEM_MAPPED";
+        return "UNKNOWN";
+    }
+
+    const WindowRecord* FindWindowRecord(const Snapshot& snapshot, std::uintptr_t value)
+    {
+        for (const WindowRecord& record : snapshot.windows)
+        {
+            if (reinterpret_cast<std::uintptr_t>(record.hwnd) == value)
+                return &record;
+        }
+        return nullptr;
+    }
+
+    const ModuleRecord* FindModuleRecord(const Snapshot& snapshot, std::uintptr_t value)
+    {
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            if (value >= module.base && value < module.base + module.size)
+                return &module;
+        }
+        return nullptr;
+    }
+
+    std::string ClassifyCandidateValue(const Snapshot& snapshot, std::uintptr_t value,
+        const std::vector<TabViewCandidate>& candidates)
+    {
+        if (!value) return "null";
+        if (const WindowRecord* window = FindWindowRecord(snapshot, value))
+        {
+            std::ostringstream out;
+            out << "HWND class=[" << WideToUtf8(window->className) << "] text=["
+                << WideToUtf8(window->text) << "] parent="
+                << HexValue(reinterpret_cast<std::uintptr_t>(window->parent))
+                << " visible=" << (window->visible ? "yes" : "no");
+            return out.str();
+        }
+        if (const ModuleRecord* module = FindModuleRecord(snapshot, value))
+        {
+            std::ostringstream out;
+            out << "module=[" << WideToUtf8(module->name) << "]+"
+                << HexValue(value - module->base);
+            if (MemoryRangeHasProtection(reinterpret_cast<void*>(value), 1, true))
+                out << " executable";
+            return out.str();
+        }
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            if (candidates[i].object == value)
+            {
+                std::ostringstream out;
+                out << "CATPTTabView_candidate#" << (i + 1);
+                return out.str();
+            }
+        }
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(reinterpret_cast<void*>(value), &mbi, sizeof(mbi)) == sizeof(mbi) &&
+            mbi.State == MEM_COMMIT && IsReadableProtection(mbi.Protect))
+        {
+            std::ostringstream out;
+            out << "readable_" << MemoryTypeName(mbi.Type)
+                << " allocation_base=" << HexValue(reinterpret_cast<std::uintptr_t>(mbi.AllocationBase));
+            return out.str();
+        }
+        return "scalar_or_unreadable";
+    }
+
+    void CollectIncomingReferencesInCandidateAllocations(
+        const std::vector<TabViewCandidate>& candidates,
+        std::vector<std::size_t>& counts,
+        std::vector<std::vector<std::string>>& examples)
+    {
+        counts.assign(candidates.size(), 0);
+        examples.assign(candidates.size(), {});
+        std::vector<std::uintptr_t> visited;
+        constexpr std::size_t kMaxAllocationScan = 16u * 1024u * 1024u;
+        constexpr std::size_t kMaxExamples = 32;
+        for (const TabViewCandidate& owner : candidates)
+        {
+            if (!owner.allocationBase || std::find(visited.begin(), visited.end(), owner.allocationBase) != visited.end())
+                continue;
+            visited.push_back(owner.allocationBase);
+            MEMORY_BASIC_INFORMATION mbi{};
+            std::uintptr_t cursor = owner.allocationBase;
+            std::size_t scanned = 0;
+            while (scanned < kMaxAllocationScan &&
+                   VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) == sizeof(mbi) &&
+                   reinterpret_cast<std::uintptr_t>(mbi.AllocationBase) == owner.allocationBase)
+            {
+                const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+                const std::uintptr_t end = begin + mbi.RegionSize;
+                if (mbi.State == MEM_COMMIT && IsReadableProtection(mbi.Protect))
+                {
+                    for (std::uintptr_t address = begin; address + sizeof(std::uintptr_t) <= end;
+                         address += sizeof(std::uintptr_t))
+                    {
+                        std::uintptr_t value = 0;
+                        if (!SafeReadValue(reinterpret_cast<void*>(address), value))
+                            continue;
+                        for (std::size_t i = 0; i < candidates.size(); ++i)
+                        {
+                            if (value != candidates[i].object)
+                                continue;
+                            ++counts[i];
+                            if (examples[i].size() < kMaxExamples)
+                            {
+                                std::ostringstream line;
+                                line << "address=" << HexValue(address)
+                                     << " owner_allocation=" << HexValue(owner.allocationBase)
+                                     << " offset=" << HexValue(address - owner.allocationBase);
+                                examples[i].push_back(line.str());
+                            }
+                        }
+                    }
+                }
+                scanned += mbi.RegionSize;
+                if (end <= cursor) break;
+                cursor = end;
+            }
+        }
+    }
+
+    void WriteCatptCandidateReport(const Snapshot& snapshot,
+        const std::vector<RttiVtableRecord>& primaryVtables,
+        const std::vector<TabViewCandidate>& candidates,
+        const std::string& rttiDiagnostic,
+        const std::string& scanDiagnostic)
+    {
+        (void)primaryVtables;
+        EnsureOutputDirectory();
+        const std::wstring path = ReportPath(L"MC_V147_CATPTTabView_Candidates", snapshot.processId);
+        std::ostringstream out;
+        out << "MC V147 CATPTTabView Candidate Object Graph Analyzer\r\n"
+            << "===================================================\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "tracker_hwnd=" << HexValue(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow)) << "\r\n"
+            << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n"
+            << "candidate_count=" << candidates.size() << "\r\n"
+            << "object_dump_range=object-0x100..object+0x1000\r\n"
+            << "window_reference_scan_bytes=0x2000\r\n"
+            << "incoming_reference_scope=candidate_allocation_regions\r\n"
+            << "rtti=" << rttiDiagnostic << "\r\n"
+            << "scan=" << scanDiagnostic << "\r\n\r\n";
+
+        const char* relatedTypes[] = {
+            ".?AVCATPTViewController@ATOnPTracker@@",
+            ".?AVCATPTWindowImpl@ATOnPTracker@@",
+            ".?AVCAccountsPage@ATOnPTracker@@",
+            ".?AVCOpenPositionsPage@ATOnPTracker@@",
+            ".?AVCPositionsHistoryPage@ATOnPTracker@@",
+            ".?AVCStrategyPositionsPage@ATOnPTracker@@",
+            ".?AVCLogsPage@ATOnPTracker@@"
+        };
+        out << "RELATED_RTTI_TYPES\r\n------------------\r\n";
+        for (const char* typeName : relatedTypes)
+        {
+            std::string diag;
+            const auto records = ResolveRttiVtables(snapshot, typeName, diag);
+            out << "type=" << typeName << " " << diag << "\r\n";
+        }
+
+        std::vector<std::size_t> incomingCounts;
+        std::vector<std::vector<std::string>> incomingExamplesByCandidate;
+        CollectIncomingReferencesInCandidateAllocations(candidates, incomingCounts, incomingExamplesByCandidate);
+
+        out << "\r\nSUMMARY\r\n-------\r\n";
+        out << "index object scan_vtable current_vtable stable rejected score tracker_refs page_refs grid_refs page_objects secondary_at_48 layout_signature debug_fill bridge_ptrs allocation_base region_base region_size type protect incoming_refs\r\n";
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            const std::size_t incoming = incomingCounts[i];
+            const TabViewCandidate& c = candidates[i];
+            out << (i + 1) << ' ' << HexValue(c.object) << ' ' << HexValue(c.vtable) << ' '
+                << HexValue(c.currentVtable) << ' ' << (c.stableVtable ? "yes" : "no") << ' '
+                << (c.rejected ? "yes" : "no") << ' ' << c.score << ' ' << c.trackerWindowReferences << ' '
+                << c.pageWindowReferences << ' ' << c.flexGridReferences << ' ' << c.pageObjectPointers << ' '
+                << (c.secondaryTabViewVtableAt48 ? "yes" : "no") << ' '
+                << (c.trackerLayoutSignature ? "yes" : "no") << ' ' << c.debugFillQwords << ' '
+                << c.bridgeModulePointers << ' ' << HexValue(c.allocationBase) << ' '
+                << HexValue(c.regionBase) << ' ' << c.regionSize << ' '
+                << MemoryTypeName(c.memoryType) << ' ' << HexValue(c.memoryProtect) << ' ' << incoming << "\r\n";
+        }
+
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            const TabViewCandidate& c = candidates[i];
+            out << "\r\nCANDIDATE #" << (i + 1) << "\r\n------------\r\n"
+                << "object=" << HexValue(c.object) << "\r\n"
+                << "scan_vtable=" << HexValue(c.vtable) << "\r\n"
+                << "current_vtable=" << HexValue(c.currentVtable) << "\r\n"
+                << "stable_vtable=" << (c.stableVtable ? "yes" : "no") << "\r\n"
+                << "rejected=" << (c.rejected ? "yes" : "no") << "\r\n"
+                << "rejected_reason=" << c.rejectedReason << "\r\n"
+                << "secondary_vtable_at_0x48=" << HexValue(c.secondaryVtable) << "\r\n"
+                << "secondary_tabview_vtable_at_0x48=" << (c.secondaryTabViewVtableAt48 ? "yes" : "no") << "\r\n"
+                << "tracker_layout_signature=" << (c.trackerLayoutSignature ? "yes" : "no") << "\r\n"
+                << "page_object_pointers_0x60_0x88=" << c.pageObjectPointers << "\r\n"
+                << "debug_fill_qwords=" << c.debugFillQwords << "\r\n"
+                << "bridge_module_pointers=" << c.bridgeModulePointers << "\r\n"
+                << "vtable_rva=" << (snapshot.atonpTrackerBase && c.vtable >= snapshot.atonpTrackerBase ? HexValue(c.vtable - snapshot.atonpTrackerBase) : "n/a") << "\r\n"
+                << "score=" << c.score << "\r\n"
+                << "allocation_base=" << HexValue(c.allocationBase) << "\r\n"
+                << "region_base=" << HexValue(c.regionBase) << "\r\n"
+                << "region_size=" << c.regionSize << "\r\n"
+                << "distance_from_allocation_base=" << (c.allocationBase ? HexValue(c.object - c.allocationBase) : "n/a") << "\r\n"
+                << "memory_type=" << MemoryTypeName(c.memoryType) << "\r\n"
+                << "memory_protect=" << HexValue(c.memoryProtect) << "\r\n"
+                << "tracker_refs=" << c.trackerWindowReferences << " page_refs=" << c.pageWindowReferences
+                << " grid_refs=" << c.flexGridReferences << "\r\n";
+
+            const std::size_t incoming = incomingCounts[i];
+            out << "incoming_reference_count=" << incoming << "\r\n";
+            for (const std::string& example : incomingExamplesByCandidate[i])
+                out << "incoming " << example << "\r\n";
+
+            out << "QWORDS\r\n";
+            for (std::ptrdiff_t relative = -0x100; relative <= 0x1000 - static_cast<std::ptrdiff_t>(sizeof(std::uintptr_t)); relative += sizeof(std::uintptr_t))
+            {
+                const std::uintptr_t address = static_cast<std::uintptr_t>(static_cast<std::intptr_t>(c.object) + relative);
+                std::uintptr_t value = 0;
+                if (!SafeReadValue(reinterpret_cast<void*>(address), value))
+                {
+                    out << "offset=" << (relative < 0 ? "-" : "+") << HexValue(static_cast<std::uintptr_t>(relative < 0 ? -relative : relative))
+                        << " address=" << HexValue(address) << " unreadable\r\n";
+                    continue;
+                }
+                out << "offset=" << (relative < 0 ? "-" : "+") << HexValue(static_cast<std::uintptr_t>(relative < 0 ? -relative : relative))
+                    << " address=" << HexValue(address)
+                    << " value=" << HexValue(value)
+                    << " class=" << ClassifyCandidateValue(snapshot, value, candidates) << "\r\n";
+            }
+        }
+        WriteUtf8File(path, out.str());
+    }
+
+    std::uintptr_t FindTabViewObject(const Snapshot& snapshot, std::string& diagnostic)
+    {
+        std::string rttiDiagnostic;
+        const std::vector<RttiVtableRecord> vtables = ResolveRttiVtables(
+            snapshot, ".?AVCATPTTabView@ATOnPTracker@@", rttiDiagnostic);
+
+        AcquireSRWLockShared(&g_tabViewCacheLock);
+        const std::uintptr_t cached = g_cachedTabView;
+        const std::uintptr_t cachedBase = g_cachedAtonpBase;
+        const HWND cachedTracker = g_cachedTrackerWindow;
+        ReleaseSRWLockShared(&g_tabViewCacheLock);
+        if (cached && cachedBase == snapshot.atonpTrackerBase && cachedTracker == snapshot.trackerWindow)
+        {
+            std::uintptr_t cachedVtable = 0;
+            if (VtableStartsWithExecutableCode(cached, cachedVtable) &&
+                std::any_of(vtables.begin(), vtables.end(), [cachedVtable](const RttiVtableRecord& item) {
+                    return item.vtable == cachedVtable;
+                }))
+            {
+                diagnostic = "V147 RTTI COL locator cache hit object=" + HexValue(cached) +
+                             " vtable=" + HexValue(cachedVtable) + "; " + rttiDiagnostic;
+                return cached;
+            }
+        }
+
+        std::string scanDiagnostic;
+        std::vector<TabViewCandidate> candidates;
+        bool candidateCacheHit = false;
+        AcquireSRWLockShared(&g_candidateCacheLock);
+        if (g_candidateCacheAtonpBase == snapshot.atonpTrackerBase &&
+            g_candidateCacheTrackerWindow == snapshot.trackerWindow &&
+            !g_cachedCandidates.empty())
+        {
+            candidates = g_cachedCandidates;
+            scanDiagnostic = g_cachedCandidateScanDiagnostic;
+            candidateCacheHit = true;
+        }
+        ReleaseSRWLockShared(&g_candidateCacheLock);
+        if (!candidateCacheHit)
+        {
+            candidates = FindRttiVtableObjectsProcessWide(snapshot, vtables, scanDiagnostic);
+            AcquireSRWLockExclusive(&g_candidateCacheLock);
+            g_cachedCandidates = candidates;
+            g_cachedCandidateScanDiagnostic = scanDiagnostic;
+            g_candidateCacheAtonpBase = snapshot.atonpTrackerBase;
+            g_candidateCacheTrackerWindow = snapshot.trackerWindow;
+            ReleaseSRWLockExclusive(&g_candidateCacheLock);
+            WriteCatptCandidateReport(snapshot, vtables, candidates, rttiDiagnostic, scanDiagnostic);
+        }
+        else
+        {
+            scanDiagnostic += " candidate_cache_hit=true";
+        }
+        std::ostringstream out;
+        out << "V147 RTTI Complete Object Locator " << rttiDiagnostic << "; " << scanDiagnostic;
+        if (!candidates.empty())
+        {
+            const TabViewCandidate& best = candidates.front();
+            out << " best_object=" << HexValue(best.object)
+                << " vtable=" << HexValue(best.vtable)
+                << " score=" << best.score
+                << " tracker_refs=" << best.trackerWindowReferences
+                << " page_refs=" << best.pageWindowReferences
+                << " grid_refs=" << best.flexGridReferences;
+        }
+
+        std::vector<const TabViewCandidate*> validCandidates;
+        for (const TabViewCandidate& candidate : candidates)
+        {
+            if (candidate.stableVtable && !candidate.rejected)
+                validCandidates.push_back(&candidate);
+        }
+        std::sort(validCandidates.begin(), validCandidates.end(), [](const TabViewCandidate* left, const TabViewCandidate* right) {
+            if (left->score != right->score) return left->score > right->score;
+            return left->object < right->object;
+        });
+
+        std::uintptr_t accepted = 0;
+        if (validCandidates.size() == 1)
+        {
+            accepted = validCandidates.front()->object;
+            out << "; unique stable RTTI-vtable object accepted";
+        }
+        else if (validCandidates.size() > 1)
+        {
+            const TabViewCandidate& best = *validCandidates[0];
+            const TabViewCandidate& second = *validCandidates[1];
+            if (best.score >= 140 && best.score >= second.score + 20 &&
+                (best.secondaryTabViewVtableAt48 || best.trackerLayoutSignature))
+            {
+                accepted = best.object;
+                out << "; uniquely strongest stable structural RTTI-vtable object accepted";
+            }
+            else
+            {
+                out << "; ambiguous stable RTTI-vtable objects, live call blocked";
+            }
+        }
+        else
+        {
+            out << "; no stable CATPTTabView RTTI-vtable object found";
+        }
+
+        if (accepted)
+        {
+            AcquireSRWLockExclusive(&g_tabViewCacheLock);
+            g_cachedTabView = accepted;
+            g_cachedAtonpBase = snapshot.atonpTrackerBase;
+            g_cachedTrackerWindow = snapshot.trackerWindow;
+            ReleaseSRWLockExclusive(&g_tabViewCacheLock);
+        }
+        diagnostic = out.str();
+        return accepted;
+    }
+
+    HRESULT SafeQueryTradeInfo(IUnknown* candidate, IUnknown** result, DWORD& sehCode)
+    {
+        if (result) *result = nullptr;
+        sehCode = 0;
+        if (!candidate || !result)
+            return E_POINTER;
+        return MCBridge_QueryInterfaceWithSeh(
+            candidate, &kIidTradeInfo, reinterpret_cast<void**>(result), &sehCode);
+    }
+
+    std::uintptr_t FindTradeInfoPointer(std::uintptr_t tabView, std::string& diagnostic)
+    {
+        if (!tabView)
+            return 0;
+        // Search only the local CATPTTabView object prefix. A candidate must expose
+        // the exact ITC_TradeInfo IID through QueryInterface before it is accepted.
+        for (std::size_t offset = 0; offset < 0x800; offset += sizeof(void*))
+        {
+            std::uintptr_t raw = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(tabView + offset), raw) || raw == tabView)
+                continue;
+            std::uintptr_t vtable = 0;
+            if (!VtableStartsWithExecutableCode(raw, vtable))
+                continue;
+            IUnknown* queried = nullptr;
+            DWORD sehCode = 0;
+            const HRESULT hr = SafeQueryTradeInfo(reinterpret_cast<IUnknown*>(raw), &queried, sehCode);
+            if (SUCCEEDED(hr) && queried)
+            {
+                DWORD releaseSeh = 0;
+                int releaseSucceeded = 0;
+                (void)MCBridge_ReleaseWithSeh(queried, &releaseSeh, &releaseSucceeded);
+                std::ostringstream out;
+                out << "ITC_TradeInfo resolved at CATPTTabView+0x" << std::hex << offset;
+                diagnostic = out.str();
+                return raw;
+            }
+        }
+        diagnostic = "no unique ITC_TradeInfo pointer in CATPTTabView prefix";
+        return 0;
+    }
+
+    bool ValidateKnownExtractorFunction(const Snapshot& snapshot, std::uintptr_t rva, std::uintptr_t& function)
+    {
+        function = snapshot.atonpTrackerBase + rva;
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize != kKnownAtonpSize)
+            return false;
+        if (rva >= snapshot.atonpTrackerSize)
+            return false;
+        return MemoryRangeHasProtection(reinterpret_cast<void*>(function), 32, true);
+    }
+
+    ExtractorAttempt BuildExtractorProbe(
+        const Snapshot& snapshot,
+        const char* name,
+        std::uintptr_t rva)
+    {
+        ExtractorAttempt attempt;
+        attempt.name = name;
+        attempt.functionValid = ValidateKnownExtractorFunction(snapshot, rva, attempt.function);
+        std::string tabDiagnostic;
+        attempt.tabView = FindTabViewObject(snapshot, tabDiagnostic);
+        attempt.tabViewValid = attempt.tabView != 0;
+        std::string tradeDiagnostic;
+        if (attempt.tabViewValid)
+            attempt.tradeInfo = FindTradeInfoPointer(attempt.tabView, tradeDiagnostic);
+        attempt.tradeInfoValid = attempt.tradeInfo != 0;
+        std::ostringstream out;
+        out << tabDiagnostic << "; " << tradeDiagnostic;
+        if (!attempt.functionValid)
+            out << "; function contract rejected (module size/RVA/executable validation)";
+        else
+            out << "; function_valid means executable address only, not a verified function begin";
+        attempt.diagnostic = out.str();
+        return attempt;
+    }
+
+    // V147 compile fix: keep the analysis byte reader next to its callers so
+    // this section has no dependency on declaration order elsewhere.
+    bool ReadAnalysisBytes(const void* address, void* destination, std::size_t bytes)
+    {
+        if (!address || !destination || bytes == 0)
+            return false;
+        DWORD sehCode = 0;
+        return MCBridge_SafeCopyMemory(
+            destination,
+            address,
+            bytes,
+            &sehCode) != 0;
+    }
+
+    std::string HexBytesWithProtection(
+        std::uintptr_t address,
+        std::size_t count,
+        bool executable)
+    {
+        if (!address || count == 0 || count > 512 ||
+            !MemoryRangeHasProtection(reinterpret_cast<void*>(address), count, executable))
+        {
+            return {};
+        }
+
+        std::vector<unsigned char> bytes(count);
+        if (!ReadAnalysisBytes(reinterpret_cast<void*>(address), bytes.data(), bytes.size()))
+            return {};
+
+        std::ostringstream out;
+        out << std::hex << std::setfill('0');
+        for (std::size_t i = 0; i < bytes.size(); ++i)
+        {
+            if (i) out << ' ';
+            out << std::setw(2) << static_cast<unsigned int>(bytes[i]);
+        }
+        return out.str();
+    }
+
+    std::string HexReadableBytes(std::uintptr_t address, std::size_t count)
+    {
+        return HexBytesWithProtection(address, count, false);
+    }
+
+    std::string HexModuleBytes(
+        const Snapshot& snapshot,
+        std::uintptr_t address,
+        std::size_t count,
+        bool executable)
+    {
+        if (!snapshot.atonpTrackerBase || !snapshot.atonpTrackerSize || !address || !count)
+            return {};
+
+        const std::uintptr_t moduleBegin = snapshot.atonpTrackerBase;
+        const std::uintptr_t moduleEnd = moduleBegin + snapshot.atonpTrackerSize;
+        if (moduleEnd < moduleBegin || address < moduleBegin || address >= moduleEnd)
+            return {};
+
+        const std::size_t available = static_cast<std::size_t>(moduleEnd - address);
+        count = (std::min)(count, available);
+        count = (std::min)(count, static_cast<std::size_t>(512));
+        return HexBytesWithProtection(address, count, executable);
+    }
+
+    std::uintptr_t ResolveInitialThunk(std::uintptr_t function, std::string& kind)
+    {
+        kind = "none";
+        unsigned char b[16]{};
+        if (!function || !ReadAnalysisBytes(reinterpret_cast<void*>(function), b, sizeof(b)))
+            return 0;
+        if (b[0] == 0xE9)
+        {
+            std::int32_t rel = 0; std::memcpy(&rel, b + 1, sizeof(rel));
+            kind = "jmp_rel32"; return function + 5 + rel;
+        }
+        if (b[0] == 0xEB)
+        {
+            std::int8_t rel = static_cast<std::int8_t>(b[1]);
+            kind = "jmp_rel8"; return function + 2 + rel;
+        }
+        if (b[0] == 0xFF && b[1] == 0x25)
+        {
+            std::int32_t rel = 0; std::memcpy(&rel, b + 2, sizeof(rel));
+            const std::uintptr_t slot = function + 6 + rel;
+            std::uintptr_t target = 0;
+            if (SafeReadValue(reinterpret_cast<void*>(slot), target))
+            { kind = "jmp_rip_indirect"; return target; }
+        }
+        return function;
+    }
+
+#pragma pack(push, 1)
+    struct RuntimeFunctionRaw
+    {
+        std::uint32_t beginAddress = 0;
+        std::uint32_t endAddress = 0;
+        std::uint32_t unwindData = 0;
+    };
+#pragma pack(pop)
+
+    static_assert(sizeof(RuntimeFunctionRaw) == 12, "Unexpected x64 RUNTIME_FUNCTION size");
+
+    struct PeExceptionDirectoryAnalysis
+    {
+        bool headersValid = false;
+        bool pe64 = false;
+        bool exceptionDirectoryValid = false;
+        std::uint16_t machine = 0;
+        std::uint32_t timeDateStamp = 0;
+        std::uint32_t sizeOfImage = 0;
+        std::uint32_t checksum = 0;
+        std::uint32_t exceptionDirectoryRva = 0;
+        std::uint32_t exceptionDirectorySize = 0;
+        std::size_t runtimeFunctionCount = 0;
+        std::size_t trailingBytes = 0;
+        std::uintptr_t exceptionDirectoryVa = 0;
+        std::string diagnostic;
+    };
+
+    struct UnwindInfoAnalysis
+    {
+        bool valid = false;
+        std::uint32_t rawUnwindData = 0;
+        std::uint32_t unwindInfoRva = 0;
+        std::uintptr_t unwindInfoVa = 0;
+        unsigned int version = 0;
+        unsigned int flags = 0;
+        unsigned int sizeOfProlog = 0;
+        unsigned int countOfCodes = 0;
+        unsigned int frameRegister = 0;
+        unsigned int frameOffset = 0;
+        bool hasExceptionHandler = false;
+        bool hasTerminationHandler = false;
+        bool hasChainInfo = false;
+        std::uint32_t handlerRva = 0;
+        RuntimeFunctionRaw chainedFunction{};
+        std::string bytes64;
+        std::string diagnostic;
+    };
+
+    struct RuntimeFunctionBoundaryAnalysis
+    {
+        std::uintptr_t targetVa = 0;
+        std::uint32_t targetRva = 0;
+        bool targetInModule = false;
+        bool enclosingFound = false;
+        std::size_t entryIndex = 0;
+        std::uintptr_t pdataEntryVa = 0;
+        RuntimeFunctionRaw entry{};
+        bool previousFound = false;
+        std::size_t previousIndex = 0;
+        RuntimeFunctionRaw previous{};
+        bool nextFound = false;
+        std::size_t nextIndex = 0;
+        RuntimeFunctionRaw next{};
+        std::uint32_t functionSize = 0;
+        std::uint32_t offsetInsideFunction = 0;
+        std::uint32_t bytesUntilFunctionEnd = 0;
+        std::string classification;
+        std::string diagnostic;
+        PeExceptionDirectoryAnalysis pe;
+        UnwindInfoAnalysis unwind;
+        std::uintptr_t candidateWindowStartVa = 0;
+        std::size_t candidateWindowOffset = 0;
+        std::string candidateWindowBytes;
+        std::string functionHeadBytes;
+        std::string functionTailBytes;
+        std::string beforeFunctionBytes;
+        std::string afterFunctionBytes;
+    };
+
+    bool ParsePeExceptionDirectory(
+        const Snapshot& snapshot,
+        PeExceptionDirectoryAnalysis& result)
+    {
+        result = PeExceptionDirectoryAnalysis{};
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize < sizeof(IMAGE_DOS_HEADER))
+        {
+            result.diagnostic = "ATOnPTracker module base or size is unavailable";
+            return false;
+        }
+
+        IMAGE_DOS_HEADER dos{};
+        if (!SafeReadValue(reinterpret_cast<void*>(snapshot.atonpTrackerBase), dos))
+        {
+            result.diagnostic = "DOS header could not be read";
+            return false;
+        }
+        if (dos.e_magic != IMAGE_DOS_SIGNATURE)
+        {
+            result.diagnostic = "DOS signature is invalid";
+            return false;
+        }
+        if (dos.e_lfanew <= 0)
+        {
+            result.diagnostic = "PE header offset is invalid";
+            return false;
+        }
+
+        const std::uintptr_t peOffset = static_cast<std::uintptr_t>(dos.e_lfanew);
+        if (peOffset > snapshot.atonpTrackerSize ||
+            sizeof(IMAGE_NT_HEADERS64) > snapshot.atonpTrackerSize - peOffset)
+        {
+            result.diagnostic = "PE headers are outside the loaded module range";
+            return false;
+        }
+
+        IMAGE_NT_HEADERS64 nt{};
+        const std::uintptr_t ntAddress = snapshot.atonpTrackerBase + peOffset;
+        if (!SafeReadValue(reinterpret_cast<void*>(ntAddress), nt))
+        {
+            result.diagnostic = "PE headers could not be read";
+            return false;
+        }
+        if (nt.Signature != IMAGE_NT_SIGNATURE)
+        {
+            result.diagnostic = "PE signature is invalid";
+            return false;
+        }
+
+        result.machine = nt.FileHeader.Machine;
+        result.timeDateStamp = nt.FileHeader.TimeDateStamp;
+        result.pe64 = nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+        result.sizeOfImage = nt.OptionalHeader.SizeOfImage;
+        result.checksum = nt.OptionalHeader.CheckSum;
+        result.headersValid = result.pe64 && nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64;
+        if (!result.headersValid)
+        {
+            result.diagnostic = "loaded image is not an AMD64 PE32+ image";
+            return false;
+        }
+        if (nt.OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXCEPTION)
+        {
+            result.diagnostic = "PE optional header has no exception directory slot";
+            return false;
+        }
+
+        const IMAGE_DATA_DIRECTORY directory =
+            nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+        result.exceptionDirectoryRva = directory.VirtualAddress;
+        result.exceptionDirectorySize = directory.Size;
+        if (!directory.VirtualAddress || directory.Size < sizeof(RuntimeFunctionRaw))
+        {
+            result.diagnostic = "x64 exception directory is empty";
+            return false;
+        }
+
+        const std::uint64_t directoryEnd =
+            static_cast<std::uint64_t>(directory.VirtualAddress) + directory.Size;
+        const std::uint64_t imageLimit = result.sizeOfImage
+            ? (std::min)(static_cast<std::uint64_t>(result.sizeOfImage),
+                         static_cast<std::uint64_t>(snapshot.atonpTrackerSize))
+            : static_cast<std::uint64_t>(snapshot.atonpTrackerSize);
+        if (directoryEnd > imageLimit)
+        {
+            result.diagnostic = "exception directory extends outside the loaded image";
+            return false;
+        }
+
+        result.exceptionDirectoryVa = snapshot.atonpTrackerBase + directory.VirtualAddress;
+        result.runtimeFunctionCount = directory.Size / sizeof(RuntimeFunctionRaw);
+        result.trailingBytes = directory.Size % sizeof(RuntimeFunctionRaw);
+        if (!result.runtimeFunctionCount)
+        {
+            result.diagnostic = "exception directory contains no complete RUNTIME_FUNCTION entries";
+            return false;
+        }
+
+        RuntimeFunctionRaw firstEntry{};
+        RuntimeFunctionRaw lastEntry{};
+        const std::uintptr_t lastEntryVa = result.exceptionDirectoryVa +
+            (result.runtimeFunctionCount - 1) * sizeof(RuntimeFunctionRaw);
+        if (!ReadAnalysisBytes(
+                reinterpret_cast<void*>(result.exceptionDirectoryVa),
+                &firstEntry,
+                sizeof(firstEntry)) ||
+            !ReadAnalysisBytes(
+                reinterpret_cast<void*>(lastEntryVa),
+                &lastEntry,
+                sizeof(lastEntry)))
+        {
+            result.diagnostic = "first or last exception-directory entry is not readable";
+            return false;
+        }
+
+        result.exceptionDirectoryValid = true;
+        result.diagnostic = result.trailingBytes
+            ? "exception directory valid; trailing non-entry bytes present"
+            : "exception directory valid";
+        return true;
+    }
+
+    bool ReadRuntimeFunctionEntry(
+        const PeExceptionDirectoryAnalysis& pe,
+        std::size_t index,
+        RuntimeFunctionRaw& entry,
+        std::uintptr_t& entryVa)
+    {
+        entry = RuntimeFunctionRaw{};
+        entryVa = 0;
+        if (!pe.exceptionDirectoryValid || index >= pe.runtimeFunctionCount)
+            return false;
+        entryVa = pe.exceptionDirectoryVa + index * sizeof(RuntimeFunctionRaw);
+        return SafeReadValue(reinterpret_cast<void*>(entryVa), entry);
+    }
+
+    bool RuntimeFunctionLooksValid(
+        const Snapshot& snapshot,
+        const PeExceptionDirectoryAnalysis& pe,
+        const RuntimeFunctionRaw& entry)
+    {
+        if (!entry.beginAddress || entry.beginAddress >= entry.endAddress)
+            return false;
+        const std::uint64_t imageLimit = pe.sizeOfImage
+            ? (std::min)(static_cast<std::uint64_t>(pe.sizeOfImage),
+                         static_cast<std::uint64_t>(snapshot.atonpTrackerSize))
+            : static_cast<std::uint64_t>(snapshot.atonpTrackerSize);
+        return entry.endAddress <= imageLimit;
+    }
+
+    UnwindInfoAnalysis AnalyzeUnwindInfo(
+        const Snapshot& snapshot,
+        const PeExceptionDirectoryAnalysis& pe,
+        const RuntimeFunctionRaw& entry)
+    {
+        UnwindInfoAnalysis result;
+        result.rawUnwindData = entry.unwindData;
+        result.unwindInfoRva = entry.unwindData & ~static_cast<std::uint32_t>(3u);
+        if (!result.unwindInfoRva)
+        {
+            result.diagnostic = "RUNTIME_FUNCTION has no UNWIND_INFO RVA";
+            return result;
+        }
+
+        const std::uint64_t imageLimit = pe.sizeOfImage
+            ? (std::min)(static_cast<std::uint64_t>(pe.sizeOfImage),
+                         static_cast<std::uint64_t>(snapshot.atonpTrackerSize))
+            : static_cast<std::uint64_t>(snapshot.atonpTrackerSize);
+        if (static_cast<std::uint64_t>(result.unwindInfoRva) + 4 > imageLimit)
+        {
+            result.diagnostic = "UNWIND_INFO header is outside the image";
+            return result;
+        }
+
+        result.unwindInfoVa = snapshot.atonpTrackerBase + result.unwindInfoRva;
+        unsigned char header[4]{};
+        if (!ReadAnalysisBytes(
+                reinterpret_cast<void*>(result.unwindInfoVa),
+                header,
+                sizeof(header)))
+        {
+            result.diagnostic = "UNWIND_INFO header could not be read";
+            return result;
+        }
+
+        result.version = header[0] & 0x07u;
+        result.flags = header[0] >> 3u;
+        result.sizeOfProlog = header[1];
+        result.countOfCodes = header[2];
+        result.frameRegister = header[3] & 0x0Fu;
+        result.frameOffset = header[3] >> 4u;
+        result.hasExceptionHandler = (result.flags & 0x01u) != 0;
+        result.hasTerminationHandler = (result.flags & 0x02u) != 0;
+        result.hasChainInfo = (result.flags & 0x04u) != 0;
+
+        const std::size_t alignedCodeSlots =
+            (static_cast<std::size_t>(result.countOfCodes) + 1u) & ~static_cast<std::size_t>(1u);
+        const std::uint64_t optionalRva64 =
+            static_cast<std::uint64_t>(result.unwindInfoRva) + 4u + alignedCodeSlots * 2u;
+        if (optionalRva64 > imageLimit)
+        {
+            result.diagnostic = "UNWIND_INFO unwind-code array extends outside the image";
+            return result;
+        }
+
+        const std::uint32_t optionalRva = static_cast<std::uint32_t>(optionalRva64);
+        if (result.hasChainInfo)
+        {
+            if (static_cast<std::uint64_t>(optionalRva) + sizeof(RuntimeFunctionRaw) <= imageLimit)
+            {
+                (void)SafeReadValue(
+                    reinterpret_cast<void*>(snapshot.atonpTrackerBase + optionalRva),
+                    result.chainedFunction);
+            }
+        }
+        else if (result.hasExceptionHandler || result.hasTerminationHandler)
+        {
+            if (static_cast<std::uint64_t>(optionalRva) + sizeof(std::uint32_t) <= imageLimit)
+            {
+                (void)SafeReadValue(
+                    reinterpret_cast<void*>(snapshot.atonpTrackerBase + optionalRva),
+                    result.handlerRva);
+            }
+        }
+
+        const std::size_t unwindBytes = static_cast<std::size_t>(
+            (std::min)(static_cast<std::uint64_t>(64), imageLimit - result.unwindInfoRva));
+        result.bytes64 = HexReadableBytes(result.unwindInfoVa, unwindBytes);
+        result.valid = result.version != 0;
+        result.diagnostic = result.valid
+            ? "UNWIND_INFO header parsed"
+            : "UNWIND_INFO version is zero or invalid";
+        return result;
+    }
+
+    RuntimeFunctionBoundaryAnalysis AnalyzeRuntimeFunctionBoundary(
+        const Snapshot& snapshot,
+        std::uintptr_t targetVa)
+    {
+        RuntimeFunctionBoundaryAnalysis result;
+        result.targetVa = targetVa;
+        if (!ParsePeExceptionDirectory(snapshot, result.pe))
+        {
+            result.classification = "pe_exception_directory_unavailable";
+            result.diagnostic = result.pe.diagnostic;
+            return result;
+        }
+
+        const std::uintptr_t moduleBegin = snapshot.atonpTrackerBase;
+        const std::uintptr_t moduleEnd = moduleBegin + snapshot.atonpTrackerSize;
+        if (!targetVa || moduleEnd < moduleBegin || targetVa < moduleBegin || targetVa >= moduleEnd)
+        {
+            result.classification = "target_outside_module";
+            result.diagnostic = "target address is outside ATOnPTracker";
+            return result;
+        }
+
+        result.targetInModule = true;
+        const std::uintptr_t targetOffset = targetVa - moduleBegin;
+        if (targetOffset > 0xFFFFFFFFu)
+        {
+            result.classification = "target_rva_overflow";
+            result.diagnostic = "target RVA does not fit in 32 bits";
+            return result;
+        }
+        result.targetRva = static_cast<std::uint32_t>(targetOffset);
+
+        std::size_t low = 0;
+        std::size_t high = result.pe.runtimeFunctionCount;
+        while (low < high)
+        {
+            const std::size_t middle = low + (high - low) / 2;
+            RuntimeFunctionRaw candidate{};
+            std::uintptr_t ignored = 0;
+            if (!ReadRuntimeFunctionEntry(result.pe, middle, candidate, ignored))
+            {
+                result.classification = "pdata_read_failed";
+                result.diagnostic = "RUNTIME_FUNCTION binary search could not read an entry";
+                return result;
+            }
+            if (candidate.beginAddress <= result.targetRva)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        const bool hasFloorEntry = low > 0;
+        const std::size_t floorIndex = hasFloorEntry ? low - 1 : 0;
+        RuntimeFunctionRaw floorEntry{};
+        std::uintptr_t floorEntryVa = 0;
+        if (hasFloorEntry &&
+            ReadRuntimeFunctionEntry(result.pe, floorIndex, floorEntry, floorEntryVa))
+        {
+            if (RuntimeFunctionLooksValid(snapshot, result.pe, floorEntry) &&
+                result.targetRva >= floorEntry.beginAddress &&
+                result.targetRva < floorEntry.endAddress)
+            {
+                result.enclosingFound = true;
+                result.entryIndex = floorIndex;
+                result.pdataEntryVa = floorEntryVa;
+                result.entry = floorEntry;
+            }
+        }
+
+        // Defensive local scan handles unusual duplicate begin RVAs or a malformed sorted entry.
+        if (!result.enclosingFound)
+        {
+            const std::size_t scanBegin = floorIndex > 8 ? floorIndex - 8 : 0;
+            const std::size_t scanEnd = (std::min)(
+                result.pe.runtimeFunctionCount,
+                floorIndex + static_cast<std::size_t>(10));
+            for (std::size_t index = scanBegin; index < scanEnd; ++index)
+            {
+                RuntimeFunctionRaw candidate{};
+                std::uintptr_t candidateVa = 0;
+                if (!ReadRuntimeFunctionEntry(result.pe, index, candidate, candidateVa) ||
+                    !RuntimeFunctionLooksValid(snapshot, result.pe, candidate))
+                {
+                    continue;
+                }
+                if (result.targetRva >= candidate.beginAddress && result.targetRva < candidate.endAddress)
+                {
+                    result.enclosingFound = true;
+                    result.entryIndex = index;
+                    result.pdataEntryVa = candidateVa;
+                    result.entry = candidate;
+                    break;
+                }
+            }
+        }
+
+        std::size_t previousIndex = 0;
+        bool previousIndexValid = false;
+        std::size_t nextIndex = 0;
+        bool nextIndexValid = false;
+        if (result.enclosingFound)
+        {
+            if (result.entryIndex > 0)
+            {
+                previousIndex = result.entryIndex - 1;
+                previousIndexValid = true;
+            }
+            if (result.entryIndex + 1 < result.pe.runtimeFunctionCount)
+            {
+                nextIndex = result.entryIndex + 1;
+                nextIndexValid = true;
+            }
+        }
+        else
+        {
+            if (hasFloorEntry)
+            {
+                previousIndex = floorIndex;
+                previousIndexValid = true;
+            }
+            if (low < result.pe.runtimeFunctionCount)
+            {
+                nextIndex = low;
+                nextIndexValid = true;
+            }
+        }
+
+        std::uintptr_t ignoredVa = 0;
+        if (previousIndexValid &&
+            ReadRuntimeFunctionEntry(result.pe, previousIndex, result.previous, ignoredVa) &&
+            RuntimeFunctionLooksValid(snapshot, result.pe, result.previous))
+        {
+            result.previousFound = true;
+            result.previousIndex = previousIndex;
+        }
+        if (nextIndexValid &&
+            ReadRuntimeFunctionEntry(result.pe, nextIndex, result.next, ignoredVa) &&
+            RuntimeFunctionLooksValid(snapshot, result.pe, result.next))
+        {
+            result.nextFound = true;
+            result.nextIndex = nextIndex;
+        }
+
+        if (result.enclosingFound)
+        {
+            result.functionSize = result.entry.endAddress - result.entry.beginAddress;
+            result.offsetInsideFunction = result.targetRva - result.entry.beginAddress;
+            result.bytesUntilFunctionEnd = result.entry.endAddress - result.targetRva;
+            result.classification = result.offsetInsideFunction == 0
+                ? "exact_runtime_function_begin"
+                : "inside_runtime_function";
+            result.diagnostic = result.offsetInsideFunction == 0
+                ? "target exactly matches a .pdata RUNTIME_FUNCTION begin RVA"
+                : "target lies inside a .pdata RUNTIME_FUNCTION and is not its begin RVA";
+            result.unwind = AnalyzeUnwindInfo(snapshot, result.pe, result.entry);
+
+            const std::uintptr_t functionBeginVa = moduleBegin + result.entry.beginAddress;
+            const std::uintptr_t functionEndVa = moduleBegin + result.entry.endAddress;
+            const std::size_t functionSize = result.functionSize;
+            result.functionHeadBytes = HexModuleBytes(
+                snapshot, functionBeginVa, (std::min)(functionSize, static_cast<std::size_t>(256)), true);
+
+            const std::size_t tailCount = (std::min)(functionSize, static_cast<std::size_t>(128));
+            result.functionTailBytes = HexModuleBytes(
+                snapshot, functionEndVa - tailCount, tailCount, true);
+
+            const std::size_t beforeCount = (std::min)(
+                static_cast<std::size_t>(64),
+                static_cast<std::size_t>(functionBeginVa - moduleBegin));
+            if (beforeCount)
+                result.beforeFunctionBytes = HexModuleBytes(
+                    snapshot, functionBeginVa - beforeCount, beforeCount, true);
+
+            const std::size_t afterCount = (std::min)(
+                static_cast<std::size_t>(64),
+                static_cast<std::size_t>(moduleEnd - functionEndVa));
+            if (afterCount)
+                result.afterFunctionBytes = HexModuleBytes(
+                    snapshot, functionEndVa, afterCount, true);
+        }
+        else if (result.previousFound && result.nextFound &&
+                 result.targetRva >= result.previous.endAddress &&
+                 result.targetRva < result.next.beginAddress)
+        {
+            result.classification = "between_runtime_functions";
+            result.diagnostic = "target lies in a gap between adjacent .pdata functions";
+        }
+        else
+        {
+            result.classification = "no_enclosing_runtime_function";
+            result.diagnostic = "no .pdata RUNTIME_FUNCTION encloses the target";
+        }
+
+        const std::size_t bytesBeforeTarget = (std::min)(
+            static_cast<std::size_t>(96),
+            static_cast<std::size_t>(targetVa - moduleBegin));
+        result.candidateWindowStartVa = targetVa - bytesBeforeTarget;
+        result.candidateWindowOffset = bytesBeforeTarget;
+        const std::size_t candidateAvailable = static_cast<std::size_t>(moduleEnd - result.candidateWindowStartVa);
+        const std::size_t candidateWindowCount = (std::min)(
+            candidateAvailable,
+            static_cast<std::size_t>(256));
+        result.candidateWindowBytes = HexModuleBytes(
+            snapshot,
+            result.candidateWindowStartVa,
+            candidateWindowCount,
+            true);
+        return result;
+    }
+
+    std::string RuntimeFunctionRawJson(
+        const Snapshot& snapshot,
+        const RuntimeFunctionRaw& entry,
+        std::size_t index,
+        bool present)
+    {
+        if (!present)
+            return "null";
+        std::ostringstream out;
+        out << '{'
+            << "\"index\":" << index << ','
+            << "\"begin_rva\":\"" << HexValue(entry.beginAddress) << "\","
+            << "\"begin_va\":\"" << HexValue(snapshot.atonpTrackerBase + entry.beginAddress) << "\","
+            << "\"end_rva\":\"" << HexValue(entry.endAddress) << "\","
+            << "\"end_va\":\"" << HexValue(snapshot.atonpTrackerBase + entry.endAddress) << "\","
+            << "\"size\":" << (entry.endAddress >= entry.beginAddress
+                ? entry.endAddress - entry.beginAddress : 0) << ','
+            << "\"unwind_data\":\"" << HexValue(entry.unwindData) << "\"}"
+            ;
+        return out.str();
+    }
+
+    std::string UnwindInfoJson(const UnwindInfoAnalysis& unwind)
+    {
+        std::ostringstream out;
+        out << '{'
+            << "\"valid\":" << (unwind.valid ? "true" : "false") << ','
+            << "\"raw_unwind_data\":\"" << HexValue(unwind.rawUnwindData) << "\","
+            << "\"unwind_info_rva\":\"" << HexValue(unwind.unwindInfoRva) << "\","
+            << "\"unwind_info_va\":\"" << HexValue(unwind.unwindInfoVa) << "\","
+            << "\"version\":" << unwind.version << ','
+            << "\"flags\":" << unwind.flags << ','
+            << "\"size_of_prolog\":" << unwind.sizeOfProlog << ','
+            << "\"count_of_codes\":" << unwind.countOfCodes << ','
+            << "\"frame_register\":" << unwind.frameRegister << ','
+            << "\"frame_offset\":" << unwind.frameOffset << ','
+            << "\"has_exception_handler\":" << (unwind.hasExceptionHandler ? "true" : "false") << ','
+            << "\"has_termination_handler\":" << (unwind.hasTerminationHandler ? "true" : "false") << ','
+            << "\"has_chain_info\":" << (unwind.hasChainInfo ? "true" : "false") << ','
+            << "\"handler_rva\":\"" << HexValue(unwind.handlerRva) << "\","
+            << "\"chained_begin_rva\":\"" << HexValue(unwind.chainedFunction.beginAddress) << "\","
+            << "\"chained_end_rva\":\"" << HexValue(unwind.chainedFunction.endAddress) << "\","
+            << "\"chained_unwind_data\":\"" << HexValue(unwind.chainedFunction.unwindData) << "\","
+            << "\"bytes_64\":\"" << unwind.bytes64 << "\","
+            << "\"diagnostic\":\"" << JsonEscape(unwind.diagnostic) << "\"}"
+            ;
+        return out.str();
+    }
+
+    std::string RuntimeFunctionBoundaryJson(
+        const Snapshot& snapshot,
+        const RuntimeFunctionBoundaryAnalysis& boundary)
+    {
+        const std::uintptr_t functionBeginVa = boundary.enclosingFound
+            ? snapshot.atonpTrackerBase + boundary.entry.beginAddress : 0;
+        const std::uintptr_t functionEndVa = boundary.enclosingFound
+            ? snapshot.atonpTrackerBase + boundary.entry.endAddress : 0;
+        std::ostringstream out;
+        out << '{'
+            << "\"target_va\":\"" << HexValue(boundary.targetVa) << "\","
+            << "\"target_rva\":\"" << HexValue(boundary.targetRva) << "\","
+            << "\"target_in_module\":" << (boundary.targetInModule ? "true" : "false") << ','
+            << "\"classification\":\"" << JsonEscape(boundary.classification) << "\","
+            << "\"candidate_is_function_begin\":"
+            << (boundary.enclosingFound && boundary.offsetInsideFunction == 0 ? "true" : "false") << ','
+            << "\"candidate_is_inside_function\":"
+            << (boundary.enclosingFound && boundary.offsetInsideFunction != 0 ? "true" : "false") << ','
+            << "\"enclosing_found\":" << (boundary.enclosingFound ? "true" : "false") << ','
+            << "\"pdata_entry_index\":" << (boundary.enclosingFound ? boundary.entryIndex : 0) << ','
+            << "\"pdata_entry_va\":\"" << HexValue(boundary.pdataEntryVa) << "\","
+            << "\"function_begin_rva\":\"" << HexValue(boundary.entry.beginAddress) << "\","
+            << "\"function_begin_va\":\"" << HexValue(functionBeginVa) << "\","
+            << "\"function_end_rva\":\"" << HexValue(boundary.entry.endAddress) << "\","
+            << "\"function_end_va\":\"" << HexValue(functionEndVa) << "\","
+            << "\"function_size\":" << boundary.functionSize << ','
+            << "\"offset_inside_function\":" << boundary.offsetInsideFunction << ','
+            << "\"bytes_until_function_end\":" << boundary.bytesUntilFunctionEnd << ','
+            << "\"unwind_data\":\"" << HexValue(boundary.entry.unwindData) << "\","
+            << "\"previous_function\":"
+            << RuntimeFunctionRawJson(snapshot, boundary.previous, boundary.previousIndex, boundary.previousFound) << ','
+            << "\"next_function\":"
+            << RuntimeFunctionRawJson(snapshot, boundary.next, boundary.nextIndex, boundary.nextFound) << ','
+            << "\"pe_headers_valid\":" << (boundary.pe.headersValid ? "true" : "false") << ','
+            << "\"pe64\":" << (boundary.pe.pe64 ? "true" : "false") << ','
+            << "\"machine\":\"" << HexValue(boundary.pe.machine) << "\","
+            << "\"pe_timestamp\":\"" << HexValue(boundary.pe.timeDateStamp) << "\","
+            << "\"pe_size_of_image\":" << boundary.pe.sizeOfImage << ','
+            << "\"pe_checksum\":\"" << HexValue(boundary.pe.checksum) << "\","
+            << "\"exception_directory_valid\":"
+            << (boundary.pe.exceptionDirectoryValid ? "true" : "false") << ','
+            << "\"exception_directory_rva\":\"" << HexValue(boundary.pe.exceptionDirectoryRva) << "\","
+            << "\"exception_directory_va\":\"" << HexValue(boundary.pe.exceptionDirectoryVa) << "\","
+            << "\"exception_directory_size\":" << boundary.pe.exceptionDirectorySize << ','
+            << "\"runtime_function_count\":" << boundary.pe.runtimeFunctionCount << ','
+            << "\"exception_directory_trailing_bytes\":" << boundary.pe.trailingBytes << ','
+            << "\"unwind_info\":" << UnwindInfoJson(boundary.unwind) << ','
+            << "\"candidate_window_start_va\":\"" << HexValue(boundary.candidateWindowStartVa) << "\","
+            << "\"candidate_window_offset\":" << boundary.candidateWindowOffset << ','
+            << "\"candidate_window_bytes_256\":\"" << boundary.candidateWindowBytes << "\","
+            << "\"function_head_bytes_256\":\"" << boundary.functionHeadBytes << "\","
+            << "\"function_tail_bytes_128\":\"" << boundary.functionTailBytes << "\","
+            << "\"bytes_before_function_begin_64\":\"" << boundary.beforeFunctionBytes << "\","
+            << "\"bytes_after_function_end_64\":\"" << boundary.afterFunctionBytes << "\","
+            << "\"pe_diagnostic\":\"" << JsonEscape(boundary.pe.diagnostic) << "\","
+            << "\"diagnostic\":\"" << JsonEscape(boundary.diagnostic) << "\"}"
+            ;
+        return out.str();
+    }
+
+    std::string ExtractorContractAnalysisJson(
+        const Snapshot& snapshot,
+        const ExtractorAttempt& attempt)
+    {
+        std::uintptr_t primaryVtable = 0;
+        std::uintptr_t secondaryVtable = 0;
+        if (attempt.tabView)
+            (void)SafeReadValue(reinterpret_cast<void*>(attempt.tabView), primaryVtable);
+        if (attempt.tabView)
+            (void)SafeReadValue(reinterpret_cast<void*>(attempt.tabView + 0x48), secondaryVtable);
+
+        std::string thunkKind;
+        const std::uintptr_t resolved = ResolveInitialThunk(attempt.function, thunkKind);
+        const RuntimeFunctionBoundaryAnalysis boundary =
+            AnalyzeRuntimeFunctionBoundary(snapshot, attempt.function);
+        RuntimeFunctionBoundaryAnalysis resolvedBoundary;
+        const bool resolvedDiffers = resolved && resolved != attempt.function;
+        if (resolvedDiffers)
+            resolvedBoundary = AnalyzeRuntimeFunctionBoundary(snapshot, resolved);
+
+        std::ostringstream out;
+        out << '{'
+            << "\"name\":\"" << JsonEscape(attempt.name) << "\","
+            << "\"module_base\":\"" << HexValue(snapshot.atonpTrackerBase) << "\","
+            << "\"module_size\":" << snapshot.atonpTrackerSize << ','
+            << "\"candidate_va\":\"" << HexValue(attempt.function) << "\","
+            << "\"candidate_rva\":\""
+            << HexValue(attempt.function >= snapshot.atonpTrackerBase
+                ? attempt.function - snapshot.atonpTrackerBase : 0) << "\","
+            << "\"resolved_entry\":\"" << HexValue(resolved) << "\","
+            << "\"initial_thunk\":\"" << JsonEscape(thunkKind) << "\","
+            << "\"boundary\":" << RuntimeFunctionBoundaryJson(snapshot, boundary) << ','
+            << "\"resolved_boundary\":"
+            << (resolvedDiffers ? RuntimeFunctionBoundaryJson(snapshot, resolvedBoundary) : "null") << ','
+            << "\"primary_this\":\"" << HexValue(attempt.tabView) << "\","
+            << "\"primary_vtable\":\"" << HexValue(primaryVtable) << "\","
+            << "\"secondary_this\":\"" << HexValue(attempt.tabView ? attempt.tabView + 0x48 : 0) << "\","
+            << "\"secondary_vtable\":\"" << HexValue(secondaryVtable) << "\","
+            << "\"trade_info\":\"" << HexValue(attempt.tradeInfo) << "\","
+            << "\"live_call_performed\":false,"
+            << "\"safety_note\":\"V147 parses PE .pdata and UNWIND_INFO only; no extractor is called\"}"
+            ;
+        return out.str();
+    }
+
+    void AppendBoundaryReportSection(
+        std::ostringstream& out,
+        const Snapshot& snapshot,
+        const ExtractorAttempt& attempt)
+    {
+        std::string thunkKind;
+        const std::uintptr_t resolved = ResolveInitialThunk(attempt.function, thunkKind);
+        const RuntimeFunctionBoundaryAnalysis boundary =
+            AnalyzeRuntimeFunctionBoundary(snapshot, attempt.function);
+        const std::uintptr_t functionBeginVa = boundary.enclosingFound
+            ? snapshot.atonpTrackerBase + boundary.entry.beginAddress : 0;
+        const std::uintptr_t functionEndVa = boundary.enclosingFound
+            ? snapshot.atonpTrackerBase + boundary.entry.endAddress : 0;
+        out << "\r\n[" << attempt.name << "]\r\n"
+            << "candidate_va=" << HexValue(attempt.function) << "\r\n"
+            << "candidate_rva=" << HexValue(boundary.targetRva) << "\r\n"
+            << "initial_thunk=" << thunkKind << "\r\n"
+            << "resolved_entry=" << HexValue(resolved) << "\r\n"
+            << "classification=" << boundary.classification << "\r\n"
+            << "candidate_is_function_begin="
+            << (boundary.enclosingFound && boundary.offsetInsideFunction == 0 ? "yes" : "no") << "\r\n"
+            << "candidate_is_inside_function="
+            << (boundary.enclosingFound && boundary.offsetInsideFunction != 0 ? "yes" : "no") << "\r\n"
+            << "enclosing_found=" << (boundary.enclosingFound ? "yes" : "no") << "\r\n"
+            << "pdata_entry_index=" << (boundary.enclosingFound ? boundary.entryIndex : 0) << "\r\n"
+            << "pdata_entry_va=" << HexValue(boundary.pdataEntryVa) << "\r\n"
+            << "function_begin_rva=" << HexValue(boundary.entry.beginAddress) << "\r\n"
+            << "function_begin_va=" << HexValue(functionBeginVa) << "\r\n"
+            << "function_end_rva=" << HexValue(boundary.entry.endAddress) << "\r\n"
+            << "function_end_va=" << HexValue(functionEndVa) << "\r\n"
+            << "function_size=" << boundary.functionSize << "\r\n"
+            << "offset_inside_function=" << boundary.offsetInsideFunction << "\r\n"
+            << "bytes_until_function_end=" << boundary.bytesUntilFunctionEnd << "\r\n"
+            << "unwind_data=" << HexValue(boundary.entry.unwindData) << "\r\n"
+            << "unwind_info_rva=" << HexValue(boundary.unwind.unwindInfoRva) << "\r\n"
+            << "unwind_version=" << boundary.unwind.version << "\r\n"
+            << "unwind_flags=" << boundary.unwind.flags << "\r\n"
+            << "unwind_size_of_prolog=" << boundary.unwind.sizeOfProlog << "\r\n"
+            << "unwind_code_count=" << boundary.unwind.countOfCodes << "\r\n"
+            << "previous_function="
+            << RuntimeFunctionRawJson(snapshot, boundary.previous, boundary.previousIndex, boundary.previousFound)
+            << "\r\n"
+            << "next_function="
+            << RuntimeFunctionRawJson(snapshot, boundary.next, boundary.nextIndex, boundary.nextFound)
+            << "\r\n"
+            << "candidate_window_start_va=" << HexValue(boundary.candidateWindowStartVa) << "\r\n"
+            << "candidate_window_target_offset=" << boundary.candidateWindowOffset << "\r\n"
+            << "candidate_window_bytes_256=" << boundary.candidateWindowBytes << "\r\n"
+            << "function_head_bytes_256=" << boundary.functionHeadBytes << "\r\n"
+            << "function_tail_bytes_128=" << boundary.functionTailBytes << "\r\n"
+            << "bytes_before_function_begin_64=" << boundary.beforeFunctionBytes << "\r\n"
+            << "bytes_after_function_end_64=" << boundary.afterFunctionBytes << "\r\n"
+            << "unwind_info_bytes_64=" << boundary.unwind.bytes64 << "\r\n"
+            << "diagnostic=" << boundary.diagnostic << "\r\n";
+    }
+
+    bool WriteContractAnalysisReport(
+        const Snapshot& snapshot,
+        const ExtractorAttempt& accounts,
+        const ExtractorAttempt& positions,
+        std::wstring& path)
+    {
+        path = ReportPath(L"MC_V147_Extractor_Function_Boundary_Analysis", snapshot.processId);
+        RuntimeFunctionBoundaryAnalysis headerBoundary =
+            AnalyzeRuntimeFunctionBoundary(snapshot, accounts.function);
+        std::ostringstream out;
+        out << "MC V147 Extractor Function Boundary Analysis\r\n"
+            << "============================================\r\n"
+            << "NO LIVE EXTRACTOR CALLS ARE PERFORMED IN V147.\r\n"
+            << "This report parses the loaded ATOnPTracker PE32+ exception directory (.pdata).\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "tracker_thread_id=" << snapshot.trackerThreadId << "\r\n"
+            << "module_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n"
+            << "module_size=" << snapshot.atonpTrackerSize << "\r\n"
+            << "pe_headers_valid=" << (headerBoundary.pe.headersValid ? "yes" : "no") << "\r\n"
+            << "pe64=" << (headerBoundary.pe.pe64 ? "yes" : "no") << "\r\n"
+            << "machine=" << HexValue(headerBoundary.pe.machine) << "\r\n"
+            << "pe_timestamp=" << HexValue(headerBoundary.pe.timeDateStamp) << "\r\n"
+            << "pe_size_of_image=" << headerBoundary.pe.sizeOfImage << "\r\n"
+            << "pe_checksum=" << HexValue(headerBoundary.pe.checksum) << "\r\n"
+            << "exception_directory_rva=" << HexValue(headerBoundary.pe.exceptionDirectoryRva) << "\r\n"
+            << "exception_directory_va=" << HexValue(headerBoundary.pe.exceptionDirectoryVa) << "\r\n"
+            << "exception_directory_size=" << headerBoundary.pe.exceptionDirectorySize << "\r\n"
+            << "runtime_function_count=" << headerBoundary.pe.runtimeFunctionCount << "\r\n"
+            << "exception_directory_trailing_bytes=" << headerBoundary.pe.trailingBytes << "\r\n"
+            << "pe_diagnostic=" << headerBoundary.pe.diagnostic << "\r\n";
+        AppendBoundaryReportSection(out, snapshot, accounts);
+        AppendBoundaryReportSection(out, snapshot, positions);
+        out << "\r\naccounts_json=" << ExtractorContractAnalysisJson(snapshot, accounts) << "\r\n"
+            << "open_positions_json=" << ExtractorContractAnalysisJson(snapshot, positions) << "\r\n";
+        return WriteUtf8File(path, out.str());
+    }
+
+
+    struct PeSectionAnalysis
+    {
+        std::string name;
+        std::uint32_t virtualAddress = 0;
+        std::uint32_t virtualSize = 0;
+        std::uint32_t rawSize = 0;
+        std::uint32_t characteristics = 0;
+        std::uintptr_t beginVa = 0;
+        std::uintptr_t endVa = 0;
+        bool executable = false;
+        bool readable = false;
+    };
+
+    struct RuntimeFunctionTableAnalysis
+    {
+        PeExceptionDirectoryAnalysis pe;
+        std::vector<RuntimeFunctionRaw> entries;
+        bool valid = false;
+        bool sortedByBegin = false;
+        std::string diagnostic;
+    };
+
+    struct VtableSlotAnalysis
+    {
+        std::string tableName;
+        std::size_t slotIndex = 0;
+        std::uintptr_t slotVa = 0;
+        std::uintptr_t methodVa = 0;
+        bool executable = false;
+        bool inAtonpTracker = false;
+        std::string moduleName;
+        bool boundaryFound = false;
+        std::size_t boundaryIndex = 0;
+        RuntimeFunctionRaw boundary{};
+        std::uint32_t offsetInsideFunction = 0;
+    };
+
+    struct VtableAnalysis
+    {
+        std::string name;
+        std::uintptr_t objectVa = 0;
+        std::uintptr_t vtableVa = 0;
+        std::size_t requestedSlots = 0;
+        bool exactSlotLimit = false;
+        std::vector<VtableSlotAnalysis> slots;
+        std::string stopReason;
+    };
+
+    struct RawCodeReference
+    {
+        std::string kind;
+        std::uintptr_t siteVa = 0;
+        std::uint32_t siteRva = 0;
+        std::uintptr_t targetVa = 0;
+        std::uint32_t targetRva = 0;
+        std::uintptr_t pointerSlotVa = 0;
+    };
+
+    struct CallerGraphEdge
+    {
+        RawCodeReference reference;
+        unsigned int rootMask = 0;
+        unsigned int depth = 0;
+        bool callerFound = false;
+        std::size_t callerIndex = 0;
+        RuntimeFunctionRaw caller{};
+        std::uint32_t callerOffset = 0;
+        std::string callWindowBytes;
+    };
+
+    struct CallerGraphNode
+    {
+        std::size_t functionIndex = 0;
+        RuntimeFunctionRaw function{};
+        unsigned int rootMask = 0;
+        unsigned int minAccountsDepth = 0;
+        unsigned int minPositionsDepth = 0;
+        std::vector<std::size_t> edgeIndexes;
+        std::vector<std::string> vtableMatches;
+        std::size_t displacement1d0Count = 0;
+        std::size_t displacement48Count = 0;
+        int score = 0;
+        std::string classification;
+        std::string functionHeadBytes;
+        std::string functionTailBytes;
+    };
+
+    struct CallerXrefAnalysis
+    {
+        RuntimeFunctionTableAnalysis runtimeTable;
+        std::vector<PeSectionAnalysis> sections;
+        std::size_t executableBytesScanned = 0;
+        std::size_t rawReferenceCount = 0;
+        bool rawReferenceLimitReached = false;
+        RuntimeFunctionBoundaryAnalysis accountsBoundary;
+        RuntimeFunctionBoundaryAnalysis positionsBoundary;
+        std::vector<RawCodeReference> rawReferences;
+        std::vector<CallerGraphEdge> selectedEdges;
+        std::vector<CallerGraphNode> rankedNodes;
+        VtableAnalysis primaryVtable;
+        VtableAnalysis secondaryVtable;
+        std::size_t accountsInteriorReferenceCount = 0;
+        std::size_t positionsInteriorReferenceCount = 0;
+        std::string diagnostic;
+    };
+
+    constexpr unsigned int kCallerRootAccounts = 0x01u;
+    constexpr unsigned int kCallerRootPositions = 0x02u;
+    constexpr unsigned int kCallerGraphMaximumDepth = 3u;
+    constexpr std::size_t kMaximumRawCodeReferences = 250000u;
+    constexpr std::size_t kMaximumSelectedGraphEdges = 8192u;
+    constexpr std::size_t kMaximumVtableSlots = 128u;
+
+    bool ParsePeSections(
+        const Snapshot& snapshot,
+        std::vector<PeSectionAnalysis>& sections,
+        std::string& diagnostic)
+    {
+        sections.clear();
+        diagnostic.clear();
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize < sizeof(IMAGE_DOS_HEADER))
+        {
+            diagnostic = "ATOnPTracker module is unavailable";
+            return false;
+        }
+
+        IMAGE_DOS_HEADER dos{};
+        if (!SafeReadValue(reinterpret_cast<void*>(snapshot.atonpTrackerBase), dos) ||
+            dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0)
+        {
+            diagnostic = "DOS header is invalid";
+            return false;
+        }
+
+        const std::uintptr_t ntAddress = snapshot.atonpTrackerBase +
+            static_cast<std::uintptr_t>(dos.e_lfanew);
+        IMAGE_NT_HEADERS64 nt{};
+        if (!SafeReadValue(reinterpret_cast<void*>(ntAddress), nt) ||
+            nt.Signature != IMAGE_NT_SIGNATURE ||
+            nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        {
+            diagnostic = "PE32+ header is invalid";
+            return false;
+        }
+        if (!nt.FileHeader.NumberOfSections || nt.FileHeader.NumberOfSections > 96)
+        {
+            diagnostic = "PE section count is invalid";
+            return false;
+        }
+
+        const std::uintptr_t sectionTableVa = ntAddress +
+            offsetof(IMAGE_NT_HEADERS64, OptionalHeader) +
+            nt.FileHeader.SizeOfOptionalHeader;
+        const std::size_t sectionTableBytes =
+            static_cast<std::size_t>(nt.FileHeader.NumberOfSections) * sizeof(IMAGE_SECTION_HEADER);
+        if (!ModuleContains(snapshot, sectionTableVa, sectionTableBytes))
+        {
+            diagnostic = "PE section table is outside the module";
+            return false;
+        }
+
+        for (std::size_t index = 0; index < nt.FileHeader.NumberOfSections; ++index)
+        {
+            IMAGE_SECTION_HEADER raw{};
+            const std::uintptr_t entryVa = sectionTableVa + index * sizeof(IMAGE_SECTION_HEADER);
+            if (!SafeReadValue(reinterpret_cast<void*>(entryVa), raw))
+            {
+                diagnostic = "PE section header could not be read";
+                return false;
+            }
+
+            PeSectionAnalysis section;
+            char name[9]{};
+            std::memcpy(name, raw.Name, 8);
+            std::size_t nameLength = 0;
+            while (nameLength < 8 && name[nameLength] != '\0') ++nameLength;
+            section.name.assign(name, nameLength);
+            section.virtualAddress = raw.VirtualAddress;
+            section.virtualSize = raw.Misc.VirtualSize;
+            section.rawSize = raw.SizeOfRawData;
+            section.characteristics = raw.Characteristics;
+            section.executable = (raw.Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
+            section.readable = (raw.Characteristics & IMAGE_SCN_MEM_READ) != 0;
+
+            if (section.virtualAddress >= snapshot.atonpTrackerSize)
+                continue;
+            std::uint64_t span = (std::max)(
+                static_cast<std::uint64_t>(section.virtualSize),
+                static_cast<std::uint64_t>(section.rawSize));
+            span = (std::min)(span,
+                static_cast<std::uint64_t>(snapshot.atonpTrackerSize - section.virtualAddress));
+            section.beginVa = snapshot.atonpTrackerBase + section.virtualAddress;
+            section.endVa = section.beginVa + static_cast<std::uintptr_t>(span);
+            sections.push_back(section);
+        }
+
+        diagnostic = "PE section table parsed";
+        return !sections.empty();
+    }
+
+    bool LoadRuntimeFunctionTable(
+        const Snapshot& snapshot,
+        RuntimeFunctionTableAnalysis& table)
+    {
+        table = RuntimeFunctionTableAnalysis{};
+        if (!ParsePeExceptionDirectory(snapshot, table.pe))
+        {
+            table.diagnostic = table.pe.diagnostic;
+            return false;
+        }
+        if (table.pe.runtimeFunctionCount > 1000000u)
+        {
+            table.diagnostic = "RUNTIME_FUNCTION count exceeds safety limit";
+            return false;
+        }
+
+        table.entries.resize(table.pe.runtimeFunctionCount);
+        const std::size_t bytes = table.entries.size() * sizeof(RuntimeFunctionRaw);
+        if (!ReadAnalysisBytes(
+                reinterpret_cast<void*>(table.pe.exceptionDirectoryVa),
+                table.entries.data(),
+                bytes))
+        {
+            table.entries.clear();
+            table.diagnostic = "RUNTIME_FUNCTION table could not be copied";
+            return false;
+        }
+
+        table.sortedByBegin = true;
+        for (std::size_t index = 0; index < table.entries.size(); ++index)
+        {
+            if (!RuntimeFunctionLooksValid(snapshot, table.pe, table.entries[index]))
+            {
+                table.diagnostic = "RUNTIME_FUNCTION table contains an invalid entry";
+                return false;
+            }
+            if (index && table.entries[index - 1].beginAddress > table.entries[index].beginAddress)
+                table.sortedByBegin = false;
+        }
+        if (!table.sortedByBegin)
+        {
+            table.diagnostic = "RUNTIME_FUNCTION table is not sorted by begin RVA";
+            return false;
+        }
+
+        table.valid = true;
+        std::ostringstream out;
+        out << "RUNTIME_FUNCTION table loaded entries=" << table.entries.size();
+        table.diagnostic = out.str();
+        return true;
+    }
+
+    bool FindRuntimeFunctionInTable(
+        const RuntimeFunctionTableAnalysis& table,
+        std::uint32_t targetRva,
+        std::size_t& index,
+        RuntimeFunctionRaw& entry)
+    {
+        index = 0;
+        entry = RuntimeFunctionRaw{};
+        if (!table.valid || table.entries.empty())
+            return false;
+
+        std::size_t low = 0;
+        std::size_t high = table.entries.size();
+        while (low < high)
+        {
+            const std::size_t middle = low + (high - low) / 2;
+            if (table.entries[middle].beginAddress <= targetRva)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        const std::size_t floorIndex = low ? low - 1 : 0;
+        const std::size_t scanBegin = floorIndex > 8 ? floorIndex - 8 : 0;
+        const std::size_t scanEnd = (std::min)(table.entries.size(), floorIndex + 10u);
+        for (std::size_t candidateIndex = scanBegin; candidateIndex < scanEnd; ++candidateIndex)
+        {
+            const RuntimeFunctionRaw& candidate = table.entries[candidateIndex];
+            if (targetRva >= candidate.beginAddress && targetRva < candidate.endAddress)
+            {
+                index = candidateIndex;
+                entry = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::string ModuleNameForAddress(const Snapshot& snapshot, std::uintptr_t address)
+    {
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            const std::uintptr_t end = module.base + module.size;
+            if (end >= module.base && address >= module.base && address < end)
+            {
+                const std::wstring display = module.name.empty()
+                    ? BaseName(module.path) : module.name;
+                return WideToUtf8(display);
+            }
+        }
+        return "unknown";
+    }
+
+    VtableAnalysis AnalyzeVtableSlots(
+        const Snapshot& snapshot,
+        const RuntimeFunctionTableAnalysis& runtimeTable,
+        const char* name,
+        std::uintptr_t objectVa,
+        std::uintptr_t vtableVa,
+        std::uintptr_t exactEndVa)
+    {
+        VtableAnalysis result;
+        result.name = name ? name : "vtable";
+        result.objectVa = objectVa;
+        result.vtableVa = vtableVa;
+        if (!vtableVa)
+        {
+            result.stopReason = "vtable address is zero";
+            return result;
+        }
+
+        std::size_t slotLimit = kMaximumVtableSlots;
+        if (exactEndVa > vtableVa &&
+            (exactEndVa - vtableVa) % sizeof(std::uintptr_t) == 0 &&
+            exactEndVa - vtableVa <= kMaximumVtableSlots * sizeof(std::uintptr_t))
+        {
+            slotLimit = static_cast<std::size_t>((exactEndVa - vtableVa) / sizeof(std::uintptr_t));
+            result.exactSlotLimit = true;
+        }
+        result.requestedSlots = slotLimit;
+
+        for (std::size_t slotIndex = 0; slotIndex < slotLimit; ++slotIndex)
+        {
+            const std::uintptr_t slotVa = vtableVa + slotIndex * sizeof(std::uintptr_t);
+            std::uintptr_t methodVa = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(slotVa), methodVa))
+            {
+                result.stopReason = "vtable slot is unreadable";
+                break;
+            }
+            if (!methodVa)
+            {
+                result.stopReason = "zero method pointer terminates vtable";
+                break;
+            }
+            if (!MemoryRangeHasProtection(reinterpret_cast<void*>(methodVa), 1, true))
+            {
+                result.stopReason = "first non-executable pointer terminates vtable";
+                break;
+            }
+
+            VtableSlotAnalysis slot;
+            slot.tableName = result.name;
+            slot.slotIndex = slotIndex;
+            slot.slotVa = slotVa;
+            slot.methodVa = methodVa;
+            slot.executable = true;
+            slot.inAtonpTracker = ModuleContains(snapshot, methodVa, 1);
+            slot.moduleName = ModuleNameForAddress(snapshot, methodVa);
+            if (slot.inAtonpTracker)
+            {
+                const std::uint32_t methodRva = static_cast<std::uint32_t>(methodVa - snapshot.atonpTrackerBase);
+                if (FindRuntimeFunctionInTable(
+                        runtimeTable,
+                        methodRva,
+                        slot.boundaryIndex,
+                        slot.boundary))
+                {
+                    slot.boundaryFound = true;
+                    slot.offsetInsideFunction = methodRva - slot.boundary.beginAddress;
+                }
+            }
+            result.slots.push_back(slot);
+        }
+
+        if (result.stopReason.empty())
+        {
+            result.stopReason = result.exactSlotLimit
+                ? "exact next-vtable boundary reached"
+                : "maximum vtable slot safety limit reached";
+        }
+        return result;
+    }
+
+    bool AddressInsideAtonp(const Snapshot& snapshot, std::uintptr_t address)
+    {
+        return ModuleContains(snapshot, address, 1);
+    }
+
+    void AddRawReference(
+        const Snapshot& snapshot,
+        std::vector<RawCodeReference>& references,
+        bool& limitReached,
+        const char* kind,
+        std::uintptr_t siteVa,
+        std::uintptr_t targetVa,
+        std::uintptr_t pointerSlotVa)
+    {
+        if (!AddressInsideAtonp(snapshot, targetVa))
+            return;
+        if (references.size() >= kMaximumRawCodeReferences)
+        {
+            limitReached = true;
+            return;
+        }
+        RawCodeReference reference;
+        reference.kind = kind ? kind : "unknown";
+        reference.siteVa = siteVa;
+        reference.siteRva = static_cast<std::uint32_t>(siteVa - snapshot.atonpTrackerBase);
+        reference.targetVa = targetVa;
+        reference.targetRva = static_cast<std::uint32_t>(targetVa - snapshot.atonpTrackerBase);
+        reference.pointerSlotVa = pointerSlotVa;
+        references.push_back(reference);
+    }
+
+    bool ScanExecutableCodeReferences(
+        const Snapshot& snapshot,
+        const std::vector<PeSectionAnalysis>& sections,
+        std::vector<RawCodeReference>& references,
+        std::size_t& bytesScanned,
+        bool& limitReached,
+        std::string& diagnostic)
+    {
+        references.clear();
+        bytesScanned = 0;
+        limitReached = false;
+        diagnostic.clear();
+
+        for (const PeSectionAnalysis& section : sections)
+        {
+            if (!section.executable || section.endVa <= section.beginVa)
+                continue;
+            const std::size_t sectionBytes = static_cast<std::size_t>(section.endVa - section.beginVa);
+            if (!sectionBytes || sectionBytes > 64u * 1024u * 1024u)
+                continue;
+
+            std::vector<unsigned char> bytes(sectionBytes);
+            if (!ReadAnalysisBytes(
+                    reinterpret_cast<void*>(section.beginVa),
+                    bytes.data(),
+                    bytes.size()))
+            {
+                diagnostic += " unreadable_section=" + section.name;
+                continue;
+            }
+            bytesScanned += bytes.size();
+
+            for (std::size_t offset = 0; offset < bytes.size(); ++offset)
+            {
+                if (limitReached)
+                    break;
+                const std::uintptr_t siteVa = section.beginVa + offset;
+                const unsigned char opcode = bytes[offset];
+                if ((opcode == 0xE8 || opcode == 0xE9) && offset + 5 <= bytes.size())
+                {
+                    std::int32_t relative = 0;
+                    std::memcpy(&relative, bytes.data() + offset + 1, sizeof(relative));
+                    const std::intptr_t targetSigned =
+                        static_cast<std::intptr_t>(siteVa + 5) + relative;
+                    if (targetSigned > 0)
+                    {
+                        AddRawReference(
+                            snapshot,
+                            references,
+                            limitReached,
+                            opcode == 0xE8 ? "call_rel32" : "jmp_rel32",
+                            siteVa,
+                            static_cast<std::uintptr_t>(targetSigned),
+                            0);
+                    }
+                }
+                else if (opcode == 0xFF && offset + 6 <= bytes.size() &&
+                         (bytes[offset + 1] == 0x15 || bytes[offset + 1] == 0x25))
+                {
+                    std::int32_t displacement = 0;
+                    std::memcpy(&displacement, bytes.data() + offset + 2, sizeof(displacement));
+                    const std::intptr_t slotSigned =
+                        static_cast<std::intptr_t>(siteVa + 6) + displacement;
+                    if (slotSigned > 0)
+                    {
+                        const std::uintptr_t pointerSlotVa = static_cast<std::uintptr_t>(slotSigned);
+                        std::uintptr_t targetVa = 0;
+                        if (SafeReadValue(reinterpret_cast<void*>(pointerSlotVa), targetVa))
+                        {
+                            AddRawReference(
+                                snapshot,
+                                references,
+                                limitReached,
+                                bytes[offset + 1] == 0x15
+                                    ? "call_rip_indirect" : "jmp_rip_indirect",
+                                siteVa,
+                                targetVa,
+                                pointerSlotVa);
+                        }
+                    }
+                }
+            }
+        }
+
+        std::sort(references.begin(), references.end(), [](const RawCodeReference& a, const RawCodeReference& b) {
+            if (a.siteRva != b.siteRva) return a.siteRva < b.siteRva;
+            if (a.targetRva != b.targetRva) return a.targetRva < b.targetRva;
+            return a.kind < b.kind;
+        });
+        references.erase(std::unique(references.begin(), references.end(),
+            [](const RawCodeReference& a, const RawCodeReference& b) {
+                return a.siteRva == b.siteRva && a.targetRva == b.targetRva && a.kind == b.kind;
+            }), references.end());
+
+        std::ostringstream out;
+        out << "raw x64 opcode scan completed executable_bytes=" << bytesScanned
+            << " internal_references=" << references.size()
+            << " limit_reached=" << (limitReached ? "yes" : "no");
+        if (!diagnostic.empty()) out << diagnostic;
+        diagnostic = out.str();
+        return bytesScanned != 0;
+    }
+
+    bool ReferenceIsTailTransfer(
+        const RawCodeReference& reference,
+        const RuntimeFunctionRaw& caller)
+    {
+        if (reference.kind == "call_rel32" || reference.kind == "call_rip_indirect")
+            return true;
+        if (reference.kind != "jmp_rel32" && reference.kind != "jmp_rip_indirect")
+            return false;
+        if (reference.targetRva >= caller.beginAddress && reference.targetRva < caller.endAddress)
+            return false;
+        return reference.siteRva + 32u >= caller.endAddress;
+    }
+
+    std::size_t CountDwordPattern(
+        const std::vector<unsigned char>& bytes,
+        std::uint32_t value)
+    {
+        unsigned char pattern[4]{};
+        std::memcpy(pattern, &value, sizeof(pattern));
+        std::size_t count = 0;
+        for (std::size_t index = 0; index + sizeof(pattern) <= bytes.size(); ++index)
+        {
+            if (std::memcmp(bytes.data() + index, pattern, sizeof(pattern)) == 0)
+                ++count;
+        }
+        return count;
+    }
+
+    std::vector<std::string> FindVtableMatches(
+        const CallerGraphNode& node,
+        const VtableAnalysis& primary,
+        const VtableAnalysis& secondary)
+    {
+        std::vector<std::string> matches;
+        auto appendMatches = [&](const VtableAnalysis& table) {
+            for (const VtableSlotAnalysis& slot : table.slots)
+            {
+                if (!slot.boundaryFound ||
+                    slot.boundary.beginAddress != node.function.beginAddress)
+                {
+                    continue;
+                }
+                std::ostringstream label;
+                label << table.name << '[' << slot.slotIndex << ']';
+                matches.push_back(label.str());
+            }
+        };
+        appendMatches(primary);
+        appendMatches(secondary);
+        std::sort(matches.begin(), matches.end());
+        matches.erase(std::unique(matches.begin(), matches.end()), matches.end());
+        return matches;
+    }
+
+    void AnalyzeCallerNodeCode(
+        const Snapshot& snapshot,
+        CallerGraphNode& node)
+    {
+        const std::uintptr_t beginVa = snapshot.atonpTrackerBase + node.function.beginAddress;
+        const std::size_t functionSize = node.function.endAddress - node.function.beginAddress;
+        const std::size_t bytesToRead = (std::min)(functionSize, static_cast<std::size_t>(65536));
+        std::vector<unsigned char> bytes(bytesToRead);
+        if (!bytes.empty() && ReadAnalysisBytes(
+                reinterpret_cast<void*>(beginVa), bytes.data(), bytes.size()))
+        {
+            node.displacement1d0Count = CountDwordPattern(bytes, 0x000001D0u);
+            node.displacement48Count = CountDwordPattern(bytes, 0x00000048u);
+        }
+        node.functionHeadBytes = HexModuleBytes(
+            snapshot, beginVa, (std::min)(functionSize, static_cast<std::size_t>(256)), true);
+        const std::size_t tailBytes = (std::min)(functionSize, static_cast<std::size_t>(128));
+        node.functionTailBytes = HexModuleBytes(
+            snapshot,
+            snapshot.atonpTrackerBase + node.function.endAddress - tailBytes,
+            tailBytes,
+            true);
+    }
+
+    void BuildCallerGraph(
+        const Snapshot& snapshot,
+        CallerXrefAnalysis& analysis)
+    {
+        if (!analysis.runtimeTable.valid ||
+            !analysis.accountsBoundary.enclosingFound ||
+            !analysis.positionsBoundary.enclosingFound)
+        {
+            analysis.diagnostic += "; caller graph roots are unavailable";
+            return;
+        }
+
+        const std::uint32_t accountsRoot = analysis.accountsBoundary.entry.beginAddress;
+        const std::uint32_t positionsRoot = analysis.positionsBoundary.entry.beginAddress;
+        std::map<std::uint32_t, unsigned int> frontier;
+        frontier[accountsRoot] |= kCallerRootAccounts;
+        frontier[positionsRoot] |= kCallerRootPositions;
+        std::map<std::uint32_t, unsigned int> discovered;
+        discovered[accountsRoot] |= kCallerRootAccounts;
+        discovered[positionsRoot] |= kCallerRootPositions;
+        std::map<std::uint32_t, CallerGraphNode> nodes;
+
+        for (unsigned int depth = 1; depth <= kCallerGraphMaximumDepth && !frontier.empty(); ++depth)
+        {
+            std::map<std::uint32_t, unsigned int> nextFrontier;
+            for (const RawCodeReference& reference : analysis.rawReferences)
+            {
+                const auto target = frontier.find(reference.targetRva);
+                if (target == frontier.end())
+                    continue;
+
+                std::size_t callerIndex = 0;
+                RuntimeFunctionRaw caller{};
+                if (!FindRuntimeFunctionInTable(
+                        analysis.runtimeTable,
+                        reference.siteRva,
+                        callerIndex,
+                        caller))
+                {
+                    continue;
+                }
+                if (!ReferenceIsTailTransfer(reference, caller))
+                    continue;
+                if (analysis.selectedEdges.size() >= kMaximumSelectedGraphEdges)
+                {
+                    analysis.diagnostic += "; selected caller edge limit reached";
+                    break;
+                }
+
+                CallerGraphEdge edge;
+                edge.reference = reference;
+                edge.rootMask = target->second;
+                edge.depth = depth;
+                edge.callerFound = true;
+                edge.callerIndex = callerIndex;
+                edge.caller = caller;
+                edge.callerOffset = reference.siteRva - caller.beginAddress;
+                const std::uintptr_t callerBeginVa =
+                    snapshot.atonpTrackerBase + caller.beginAddress;
+                const std::uintptr_t callerEndVa =
+                    snapshot.atonpTrackerBase + caller.endAddress;
+                const std::uintptr_t windowStart = reference.siteVa >= callerBeginVa + 64
+                    ? reference.siteVa - 64 : callerBeginVa;
+                const std::size_t windowBytes = callerEndVa > windowStart
+                    ? (std::min)(static_cast<std::size_t>(callerEndVa - windowStart),
+                                 static_cast<std::size_t>(160))
+                    : 0;
+                edge.callWindowBytes = HexModuleBytes(snapshot, windowStart, windowBytes, true);
+                const std::size_t edgeIndex = analysis.selectedEdges.size();
+                analysis.selectedEdges.push_back(edge);
+
+                CallerGraphNode& node = nodes[caller.beginAddress];
+                node.functionIndex = callerIndex;
+                node.function = caller;
+                node.rootMask |= target->second;
+                node.edgeIndexes.push_back(edgeIndex);
+                if ((target->second & kCallerRootAccounts) != 0 &&
+                    (!node.minAccountsDepth || depth < node.minAccountsDepth))
+                {
+                    node.minAccountsDepth = depth;
+                }
+                if ((target->second & kCallerRootPositions) != 0 &&
+                    (!node.minPositionsDepth || depth < node.minPositionsDepth))
+                {
+                    node.minPositionsDepth = depth;
+                }
+
+                const unsigned int newMask = target->second & ~discovered[caller.beginAddress];
+                if (newMask)
+                {
+                    discovered[caller.beginAddress] |= newMask;
+                    nextFrontier[caller.beginAddress] |= newMask;
+                }
+            }
+            frontier.swap(nextFrontier);
+        }
+
+        for (auto& item : nodes)
+        {
+            CallerGraphNode& node = item.second;
+            AnalyzeCallerNodeCode(snapshot, node);
+            node.vtableMatches = FindVtableMatches(
+                node, analysis.primaryVtable, analysis.secondaryVtable);
+
+            const bool accounts = (node.rootMask & kCallerRootAccounts) != 0;
+            const bool positions = (node.rootMask & kCallerRootPositions) != 0;
+            if (accounts) node.score += 80;
+            if (positions) node.score += 80;
+            if (accounts && positions) node.score += 90;
+            if (!node.vtableMatches.empty()) node.score += 70;
+            if (node.displacement1d0Count) node.score += 60;
+            if (node.displacement48Count) node.score += 10;
+            const std::size_t functionSize = node.function.endAddress - node.function.beginAddress;
+            if (functionSize <= 8192) node.score += 10;
+            if (node.minAccountsDepth)
+                node.score += static_cast<int>(40u - (std::min)(node.minAccountsDepth, 3u) * 8u);
+            if (node.minPositionsDepth)
+                node.score += static_cast<int>(40u - (std::min)(node.minPositionsDepth, 3u) * 8u);
+
+            if (accounts && positions &&
+                (!node.vtableMatches.empty() || node.displacement1d0Count))
+                node.classification = "strong_shared_high_level_candidate";
+            else if (!node.vtableMatches.empty() && (accounts || positions))
+                node.classification = "CATPTTabView_vtable_path_candidate";
+            else if (node.displacement1d0Count && (accounts || positions))
+                node.classification = "trade_info_field_path_candidate";
+            else if (accounts && positions)
+                node.classification = "shared_caller_graph_candidate";
+            else
+                node.classification = "single_branch_caller_graph_candidate";
+
+            analysis.rankedNodes.push_back(node);
+        }
+
+        std::sort(analysis.rankedNodes.begin(), analysis.rankedNodes.end(),
+            [](const CallerGraphNode& a, const CallerGraphNode& b) {
+                if (a.score != b.score) return a.score > b.score;
+                return a.function.beginAddress < b.function.beginAddress;
+            });
+    }
+
+    std::string RootMaskText(unsigned int mask)
+    {
+        if (mask == (kCallerRootAccounts | kCallerRootPositions)) return "accounts+open_positions";
+        if ((mask & kCallerRootAccounts) != 0) return "accounts";
+        if ((mask & kCallerRootPositions) != 0) return "open_positions";
+        return "none";
+    }
+
+    CallerXrefAnalysis BuildCallerXrefAnalysis(
+        const Snapshot& snapshot,
+        const ExtractorAttempt& accounts,
+        const ExtractorAttempt& positions)
+    {
+        CallerXrefAnalysis analysis;
+        analysis.accountsBoundary = AnalyzeRuntimeFunctionBoundary(snapshot, accounts.function);
+        analysis.positionsBoundary = AnalyzeRuntimeFunctionBoundary(snapshot, positions.function);
+
+        std::string sectionDiagnostic;
+        (void)ParsePeSections(snapshot, analysis.sections, sectionDiagnostic);
+        (void)LoadRuntimeFunctionTable(snapshot, analysis.runtimeTable);
+
+        std::uintptr_t primaryVtable = 0;
+        std::uintptr_t secondaryVtable = 0;
+        if (accounts.tabView)
+        {
+            (void)SafeReadValue(reinterpret_cast<void*>(accounts.tabView), primaryVtable);
+            (void)SafeReadValue(reinterpret_cast<void*>(accounts.tabView + 0x48), secondaryVtable);
+        }
+        analysis.primaryVtable = AnalyzeVtableSlots(
+            snapshot,
+            analysis.runtimeTable,
+            "primary",
+            accounts.tabView,
+            primaryVtable,
+            secondaryVtable > primaryVtable ? secondaryVtable : 0);
+        analysis.secondaryVtable = AnalyzeVtableSlots(
+            snapshot,
+            analysis.runtimeTable,
+            "secondary_at_0x48",
+            accounts.tabView ? accounts.tabView + 0x48 : 0,
+            secondaryVtable,
+            0);
+
+        std::string scanDiagnostic;
+        (void)ScanExecutableCodeReferences(
+            snapshot,
+            analysis.sections,
+            analysis.rawReferences,
+            analysis.executableBytesScanned,
+            analysis.rawReferenceLimitReached,
+            scanDiagnostic);
+        analysis.rawReferenceCount = analysis.rawReferences.size();
+
+        for (const RawCodeReference& reference : analysis.rawReferences)
+        {
+            if (reference.targetRva == analysis.accountsBoundary.targetRva)
+                ++analysis.accountsInteriorReferenceCount;
+            if (reference.targetRva == analysis.positionsBoundary.targetRva)
+                ++analysis.positionsInteriorReferenceCount;
+        }
+
+        analysis.diagnostic = sectionDiagnostic + "; " +
+            analysis.runtimeTable.diagnostic + "; " + scanDiagnostic;
+        BuildCallerGraph(snapshot, analysis);
+        return analysis;
+    }
+
+    std::string VtableSummaryJson(
+        const Snapshot& snapshot,
+        const VtableAnalysis& table)
+    {
+        std::ostringstream out;
+        out << '{'
+            << "\"name\":\"" << JsonEscape(table.name) << "\","
+            << "\"object_va\":\"" << HexValue(table.objectVa) << "\","
+            << "\"vtable_va\":\"" << HexValue(table.vtableVa) << "\","
+            << "\"vtable_rva\":\""
+            << HexValue(table.vtableVa >= snapshot.atonpTrackerBase
+                ? table.vtableVa - snapshot.atonpTrackerBase : 0) << "\","
+            << "\"slot_count\":" << table.slots.size() << ','
+            << "\"exact_slot_limit\":" << (table.exactSlotLimit ? "true" : "false") << ','
+            << "\"stop_reason\":\"" << JsonEscape(table.stopReason) << "\"}";
+        return out.str();
+    }
+
+    std::string CallerNodeSummaryJson(
+        const Snapshot& snapshot,
+        const CallerGraphNode& node)
+    {
+        std::ostringstream out;
+        out << '{'
+            << "\"function_begin_rva\":\"" << HexValue(node.function.beginAddress) << "\","
+            << "\"function_begin_va\":\""
+            << HexValue(snapshot.atonpTrackerBase + node.function.beginAddress) << "\","
+            << "\"function_end_rva\":\"" << HexValue(node.function.endAddress) << "\","
+            << "\"score\":" << node.score << ','
+            << "\"root_paths\":\"" << RootMaskText(node.rootMask) << "\","
+            << "\"accounts_depth\":" << node.minAccountsDepth << ','
+            << "\"open_positions_depth\":" << node.minPositionsDepth << ','
+            << "\"vtable_match_count\":" << node.vtableMatches.size() << ','
+            << "\"disp_0x1d0_count\":" << node.displacement1d0Count << ','
+            << "\"classification\":\"" << JsonEscape(node.classification) << "\"}";
+        return out.str();
+    }
+
+    std::string CallerXrefSummaryJson(
+        const Snapshot& snapshot,
+        const CallerXrefAnalysis& analysis,
+        const std::wstring& reportPath,
+        bool reportWritten)
+    {
+        std::ostringstream out;
+        out << '{'
+            << "\"bridge_version\":" << kBridgeVersion << ','
+            << "\"analysis_mode\":\"safe_recursive_caller_xref_v147\","
+            << "\"live_call_performed\":false,"
+            << "\"executable_bytes_scanned\":" << analysis.executableBytesScanned << ','
+            << "\"raw_internal_reference_count\":" << analysis.rawReferenceCount << ','
+            << "\"selected_graph_edge_count\":" << analysis.selectedEdges.size() << ','
+            << "\"ranked_caller_count\":" << analysis.rankedNodes.size() << ','
+            << "\"accounts_candidate_interior_xrefs\":"
+            << analysis.accountsInteriorReferenceCount << ','
+            << "\"open_positions_candidate_interior_xrefs\":"
+            << analysis.positionsInteriorReferenceCount << ','
+            << "\"primary_vtable\":" << VtableSummaryJson(snapshot, analysis.primaryVtable) << ','
+            << "\"secondary_vtable\":" << VtableSummaryJson(snapshot, analysis.secondaryVtable) << ','
+            << "\"top_callers\":[";
+        const std::size_t topCount = (std::min)(analysis.rankedNodes.size(), static_cast<std::size_t>(10));
+        for (std::size_t index = 0; index < topCount; ++index)
+        {
+            if (index) out << ',';
+            out << CallerNodeSummaryJson(snapshot, analysis.rankedNodes[index]);
+        }
+        out << "],\"report_written\":" << (reportWritten ? "true" : "false")
+            << ",\"report_path\":" << JsonString(reportPath)
+            << ",\"diagnostic\":\"" << JsonEscape(analysis.diagnostic) << "\"}";
+        return out.str();
+    }
+
+    void AppendVtableReport(
+        std::ostringstream& out,
+        const Snapshot& snapshot,
+        const VtableAnalysis& table)
+    {
+        out << "\r\n[VTABLE " << table.name << "]\r\n"
+            << "object_va=" << HexValue(table.objectVa) << "\r\n"
+            << "vtable_va=" << HexValue(table.vtableVa) << "\r\n"
+            << "vtable_rva="
+            << HexValue(table.vtableVa >= snapshot.atonpTrackerBase
+                ? table.vtableVa - snapshot.atonpTrackerBase : 0) << "\r\n"
+            << "slot_count=" << table.slots.size() << "\r\n"
+            << "exact_slot_limit=" << (table.exactSlotLimit ? "yes" : "no") << "\r\n"
+            << "stop_reason=" << table.stopReason << "\r\n";
+        for (const VtableSlotAnalysis& slot : table.slots)
+        {
+            out << "slot=" << slot.slotIndex
+                << " slot_va=" << HexValue(slot.slotVa)
+                << " method_va=" << HexValue(slot.methodVa)
+                << " module=" << slot.moduleName
+                << " in_ATOnPTracker=" << (slot.inAtonpTracker ? "yes" : "no")
+                << " boundary_found=" << (slot.boundaryFound ? "yes" : "no")
+                << " function_begin_rva=" << HexValue(slot.boundary.beginAddress)
+                << " function_end_rva=" << HexValue(slot.boundary.endAddress)
+                << " offset_inside_function=" << slot.offsetInsideFunction
+                << "\r\n";
+        }
+    }
+
+    bool WriteCallerXrefAnalysisReport(
+        const Snapshot& snapshot,
+        const ExtractorAttempt& accounts,
+        const ExtractorAttempt& positions,
+        const CallerXrefAnalysis& analysis,
+        std::wstring& path)
+    {
+        path = ReportPath(L"MC_V147_Extractor_Caller_Xref_Analysis", snapshot.processId);
+        std::ostringstream out;
+        out << "MC V147 Extractor Caller and Cross-Reference Analysis\r\n"
+            << "=====================================================\r\n"
+            << "NO INTERNAL EXTRACTOR OR CANDIDATE FUNCTION IS CALLED IN V147.\r\n"
+            << "The xref scanner is a conservative raw x64 opcode scan. It does not prove instruction boundaries.\r\n"
+            << "Caller candidates are ranked heuristically and must not be called without further validation.\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "tracker_thread_id=" << snapshot.trackerThreadId << "\r\n"
+            << "module_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n"
+            << "module_size=" << snapshot.atonpTrackerSize << "\r\n"
+            << "runtime_function_count=" << analysis.runtimeTable.entries.size() << "\r\n"
+            << "executable_bytes_scanned=" << analysis.executableBytesScanned << "\r\n"
+            << "raw_internal_reference_count=" << analysis.rawReferenceCount << "\r\n"
+            << "raw_reference_limit_reached=" << (analysis.rawReferenceLimitReached ? "yes" : "no") << "\r\n"
+            << "caller_graph_maximum_depth=" << kCallerGraphMaximumDepth << "\r\n"
+            << "selected_graph_edge_count=" << analysis.selectedEdges.size() << "\r\n"
+            << "ranked_caller_count=" << analysis.rankedNodes.size() << "\r\n"
+            << "diagnostic=" << analysis.diagnostic << "\r\n";
+
+        out << "\r\n[TARGETS]\r\n"
+            << "accounts_candidate_va=" << HexValue(accounts.function) << "\r\n"
+            << "accounts_candidate_rva=" << HexValue(analysis.accountsBoundary.targetRva) << "\r\n"
+            << "accounts_enclosing_begin_rva=" << HexValue(analysis.accountsBoundary.entry.beginAddress) << "\r\n"
+            << "accounts_enclosing_end_rva=" << HexValue(analysis.accountsBoundary.entry.endAddress) << "\r\n"
+            << "accounts_candidate_interior_xrefs=" << analysis.accountsInteriorReferenceCount << "\r\n"
+            << "open_positions_candidate_va=" << HexValue(positions.function) << "\r\n"
+            << "open_positions_candidate_rva=" << HexValue(analysis.positionsBoundary.targetRva) << "\r\n"
+            << "open_positions_enclosing_begin_rva=" << HexValue(analysis.positionsBoundary.entry.beginAddress) << "\r\n"
+            << "open_positions_enclosing_end_rva=" << HexValue(analysis.positionsBoundary.entry.endAddress) << "\r\n"
+            << "open_positions_candidate_interior_xrefs=" << analysis.positionsInteriorReferenceCount << "\r\n";
+
+        out << "\r\n[PE SECTIONS]\r\n";
+        for (const PeSectionAnalysis& section : analysis.sections)
+        {
+            out << "name=" << section.name
+                << " rva=" << HexValue(section.virtualAddress)
+                << " virtual_size=" << section.virtualSize
+                << " raw_size=" << section.rawSize
+                << " characteristics=" << HexValue(section.characteristics)
+                << " executable=" << (section.executable ? "yes" : "no")
+                << " readable=" << (section.readable ? "yes" : "no")
+                << " begin_va=" << HexValue(section.beginVa)
+                << " end_va=" << HexValue(section.endVa)
+                << "\r\n";
+        }
+
+        AppendVtableReport(out, snapshot, analysis.primaryVtable);
+        AppendVtableReport(out, snapshot, analysis.secondaryVtable);
+
+        out << "\r\n[SELECTED CALLER GRAPH EDGES]\r\n";
+        for (std::size_t index = 0; index < analysis.selectedEdges.size(); ++index)
+        {
+            const CallerGraphEdge& edge = analysis.selectedEdges[index];
+            out << "edge=" << index
+                << " depth=" << edge.depth
+                << " root=" << RootMaskText(edge.rootMask)
+                << " kind=" << edge.reference.kind
+                << " site_rva=" << HexValue(edge.reference.siteRva)
+                << " site_va=" << HexValue(edge.reference.siteVa)
+                << " target_rva=" << HexValue(edge.reference.targetRva)
+                << " target_va=" << HexValue(edge.reference.targetVa)
+                << " pointer_slot_va=" << HexValue(edge.reference.pointerSlotVa)
+                << " caller_index=" << edge.callerIndex
+                << " caller_begin_rva=" << HexValue(edge.caller.beginAddress)
+                << " caller_end_rva=" << HexValue(edge.caller.endAddress)
+                << " caller_offset=" << edge.callerOffset
+                << "\r\n"
+                << "call_window_bytes_160=" << edge.callWindowBytes << "\r\n";
+        }
+
+        out << "\r\n[RANKED CALLER CANDIDATES]\r\n";
+        for (std::size_t rank = 0; rank < analysis.rankedNodes.size(); ++rank)
+        {
+            const CallerGraphNode& node = analysis.rankedNodes[rank];
+            out << "\r\nrank=" << (rank + 1) << "\r\n"
+                << "score=" << node.score << "\r\n"
+                << "classification=" << node.classification << "\r\n"
+                << "root_paths=" << RootMaskText(node.rootMask) << "\r\n"
+                << "accounts_depth=" << node.minAccountsDepth << "\r\n"
+                << "open_positions_depth=" << node.minPositionsDepth << "\r\n"
+                << "function_index=" << node.functionIndex << "\r\n"
+                << "function_begin_rva=" << HexValue(node.function.beginAddress) << "\r\n"
+                << "function_begin_va=" << HexValue(snapshot.atonpTrackerBase + node.function.beginAddress) << "\r\n"
+                << "function_end_rva=" << HexValue(node.function.endAddress) << "\r\n"
+                << "function_end_va=" << HexValue(snapshot.atonpTrackerBase + node.function.endAddress) << "\r\n"
+                << "function_size=" << (node.function.endAddress - node.function.beginAddress) << "\r\n"
+                << "disp_0x1d0_count=" << node.displacement1d0Count << "\r\n"
+                << "disp_0x48_count=" << node.displacement48Count << "\r\n"
+                << "vtable_matches=";
+            if (node.vtableMatches.empty()) out << "none";
+            for (std::size_t match = 0; match < node.vtableMatches.size(); ++match)
+            {
+                if (match) out << ',';
+                out << node.vtableMatches[match];
+            }
+            out << "\r\nedge_indexes=";
+            for (std::size_t edgeIndex = 0; edgeIndex < node.edgeIndexes.size(); ++edgeIndex)
+            {
+                if (edgeIndex) out << ',';
+                out << node.edgeIndexes[edgeIndex];
+            }
+            out << "\r\nfunction_head_bytes_256=" << node.functionHeadBytes << "\r\n"
+                << "function_tail_bytes_128=" << node.functionTailBytes << "\r\n";
+        }
+
+        out << "\r\n[INTERPRETATION RULES]\r\n"
+            << "- A raw E8/E9/FF15/FF25 match is only a possible xref because V147 does not use a full disassembler.\r\n"
+            << "- A CATPTTabView vtable match means the caller function shares a .pdata boundary with a vtable slot.\r\n"
+            << "- disp_0x1d0_count is a byte-pattern hint for CATPTTabView+0x1d0, not proof of object usage.\r\n"
+            << "- A candidate that reaches both roots, matches a vtable slot, and contains 0x1d0 is the strongest static lead.\r\n"
+            << "- No address reported here is authorized for live execution.\r\n";
+        return WriteUtf8File(path, out.str());
+    }
+
+    LRESULT CALLBACK TrackerDispatchWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (message == kUiExtractorDispatchMessage)
+        {
+            AppendExecutionTrace("ui_callback_entered");
+            AcquireSRWLockExclusive(&g_uiDispatchLock);
+            if (g_uiDispatchActive)
+            {
+                g_uiDispatchDiagnostics.uiCallbackEntered = true;
+                g_uiDispatchDiagnostics.uiCallbackThreadId = GetCurrentThreadId();
+                if (g_uiDispatchNoop)
+                {
+                    AppendExecutionTrace("ui_noop_test_entered");
+                    g_uiDispatchAccounts.diagnostic += "; V147 no-op UI dispatch completed; extractor not called";
+                    g_uiDispatchPositions.diagnostic += "; V147 no-op UI dispatch completed; extractor not called";
+                    AppendExecutionTrace("ui_noop_test_completed");
+                }
+                else
+                {
+                    // V147 deliberately blocks all live internal extractor calls.
+                    g_uiDispatchAccounts.diagnostic += "; V147 safety block: live extractor call disabled";
+                    g_uiDispatchPositions.diagnostic += "; V147 safety block: live extractor call disabled";
+                }
+                g_uiDispatchDiagnostics.uiCallbackCompleted = true;
+                g_uiDispatchActive = false;
+            }
+            ReleaseSRWLockExclusive(&g_uiDispatchLock);
+            if (g_uiDispatchEvent) SetEvent(g_uiDispatchEvent);
+            AppendExecutionTrace("ui_callback_exit");
+            return 0;
+        }
+
+        WNDPROC original = g_uiDispatchOriginalWndProc;
+        return original ? CallWindowProcW(original, hwnd, message, wParam, lParam)
+                        : DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool EnsureTrackerDispatchSubclass(HWND trackerWindow, std::string& diagnostic)
+    {
+        diagnostic.clear();
+        if (!trackerWindow || !IsWindow(trackerWindow))
+        {
+            diagnostic = "tracker window is not valid";
+            return false;
+        }
+
+        if (g_uiDispatchWindow == trackerWindow &&
+            reinterpret_cast<WNDPROC>(GetWindowLongPtrW(trackerWindow, GWLP_WNDPROC)) == TrackerDispatchWndProc)
+            return true;
+
+        if (g_uiDispatchWindow && IsWindow(g_uiDispatchWindow) && g_uiDispatchOriginalWndProc)
+        {
+            if (reinterpret_cast<WNDPROC>(GetWindowLongPtrW(g_uiDispatchWindow, GWLP_WNDPROC)) == TrackerDispatchWndProc)
+                SetWindowLongPtrW(g_uiDispatchWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_uiDispatchOriginalWndProc));
+        }
+        g_uiDispatchWindow = nullptr;
+        g_uiDispatchOriginalWndProc = nullptr;
+
+        SetLastError(ERROR_SUCCESS);
+        const LONG_PTR previous = SetWindowLongPtrW(
+            trackerWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(TrackerDispatchWndProc));
+        if (previous == 0 && GetLastError() != ERROR_SUCCESS)
+        {
+            std::ostringstream out;
+            out << "SetWindowLongPtrW failed error=" << GetLastError();
+            diagnostic = out.str();
+            return false;
+        }
+        g_uiDispatchWindow = trackerWindow;
+        g_uiDispatchOriginalWndProc = reinterpret_cast<WNDPROC>(previous);
+        return true;
+    }
+
+    bool DispatchBothExtractorsOnTrackerThread(
+        const Snapshot& snapshot,
+        ExtractorAttempt& accounts,
+        ExtractorAttempt& positions,
+        UiDispatchDiagnostics& diagnostics)
+    {
+        diagnostics = UiDispatchDiagnostics{};
+        diagnostics.requestReceivedThreadId = GetCurrentThreadId();
+        diagnostics.dispatchTargetThreadId = snapshot.trackerThreadId;
+
+        std::string subclassDiagnostic;
+        if (!EnsureTrackerDispatchSubclass(snapshot.trackerWindow, subclassDiagnostic))
+        {
+            diagnostics.diagnostic = subclassDiagnostic;
+            return false;
+        }
+
+        if (!g_uiDispatchEvent)
+            g_uiDispatchEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!g_uiDispatchEvent)
+        {
+            std::ostringstream out;
+            out << "CreateEventW failed error=" << GetLastError();
+            diagnostics.diagnostic = out.str();
+            return false;
+        }
+
+        AcquireSRWLockExclusive(&g_uiDispatchLock);
+        if (g_uiDispatchActive)
+        {
+            ReleaseSRWLockExclusive(&g_uiDispatchLock);
+            diagnostics.diagnostic = "previous UI extractor dispatch is still active";
+            return false;
+        }
+        ResetEvent(g_uiDispatchEvent);
+        g_uiDispatchAccounts = accounts;
+        g_uiDispatchPositions = positions;
+        g_uiDispatchNoop = true;
+        g_uiDispatchDiagnostics = diagnostics;
+        g_uiDispatchActive = true;
+        ReleaseSRWLockExclusive(&g_uiDispatchLock);
+
+        const ULONGLONG started = GetTickCount64();
+        AppendExecutionTrace("dispatch_before_post");
+        const BOOL posted = PostMessageW(snapshot.trackerWindow, kUiExtractorDispatchMessage, 0, 0);
+        AppendExecutionTrace(posted ? "dispatch_posted" : "dispatch_post_failed");
+        AcquireSRWLockExclusive(&g_uiDispatchLock);
+        g_uiDispatchDiagnostics.dispatchPosted = posted != FALSE;
+        if (!posted)
+        {
+            std::ostringstream out;
+            out << "PostMessageW failed error=" << GetLastError();
+            g_uiDispatchDiagnostics.diagnostic = out.str();
+            g_uiDispatchActive = false;
+        }
+        ReleaseSRWLockExclusive(&g_uiDispatchLock);
+        if (!posted)
+        {
+            AcquireSRWLockShared(&g_uiDispatchLock);
+            diagnostics = g_uiDispatchDiagnostics;
+            ReleaseSRWLockShared(&g_uiDispatchLock);
+            return false;
+        }
+
+        AppendExecutionTrace("dispatch_wait_begin");
+        const DWORD waitResult = WaitForSingleObject(g_uiDispatchEvent, kUiExtractorDispatchTimeoutMs);
+        const ULONGLONG elapsed = GetTickCount64() - started;
+        {
+            std::ostringstream trace;
+            trace << "result=" << waitResult << " elapsed_ms=" << elapsed;
+            AppendExecutionTrace("dispatch_wait_end", trace.str());
+        }
+        AcquireSRWLockExclusive(&g_uiDispatchLock);
+        g_uiDispatchDiagnostics.waitResult = waitResult;
+        g_uiDispatchDiagnostics.waitElapsedMs = elapsed;
+        if (waitResult == WAIT_OBJECT_0 && g_uiDispatchDiagnostics.uiCallbackCompleted)
+        {
+            accounts = g_uiDispatchAccounts;
+            positions = g_uiDispatchPositions;
+        }
+        else if (waitResult == WAIT_TIMEOUT)
+        {
+            g_uiDispatchDiagnostics.diagnostic = "tracker UI dispatch timed out";
+        }
+        else
+        {
+            std::ostringstream out;
+            out << "tracker UI dispatch wait failed result=" << waitResult
+                << " error=" << GetLastError();
+            g_uiDispatchDiagnostics.diagnostic = out.str();
+        }
+        diagnostics = g_uiDispatchDiagnostics;
+        const bool completed = waitResult == WAIT_OBJECT_0 && diagnostics.uiCallbackCompleted;
+        ReleaseSRWLockExclusive(&g_uiDispatchLock);
+        return completed;
+    }
+
+    std::string UiDispatchDiagnosticsJson(const UiDispatchDiagnostics& value)
+    {
+        std::ostringstream out;
+        out << '{'
+            << "\"request_received_thread_id\":" << value.requestReceivedThreadId << ','
+            << "\"dispatch_target_thread_id\":" << value.dispatchTargetThreadId << ','
+            << "\"dispatch_posted\":" << (value.dispatchPosted ? "true" : "false") << ','
+            << "\"ui_callback_entered\":" << (value.uiCallbackEntered ? "true" : "false") << ','
+            << "\"ui_callback_thread_id\":" << value.uiCallbackThreadId << ','
+            << "\"ui_callback_completed\":" << (value.uiCallbackCompleted ? "true" : "false") << ','
+            << "\"wait_result\":" << value.waitResult << ','
+            << "\"wait_elapsed_ms\":" << value.waitElapsedMs << ','
+            << "\"pipe_response_written\":" << (value.pipeResponseWritten ? "true" : "false") << ','
+            << "\"diagnostic\":\"" << JsonEscape(value.diagnostic) << "\"}";
+        return out.str();
+    }
+
+    std::string ExtractorAttemptJson(const ExtractorAttempt& attempt)
+    {
+        std::ostringstream out;
+        out << '{'
+            << "\"name\":\"" << JsonEscape(attempt.name) << "\"," 
+            << "\"function\":\"" << HexValue(attempt.function) << "\"," 
+            << "\"tab_view\":\"" << HexValue(attempt.tabView) << "\"," 
+            << "\"trade_info\":\"" << HexValue(attempt.tradeInfo) << "\"," 
+            << "\"function_valid\":" << (attempt.functionValid ? "true" : "false") << ','
+            << "\"function_valid_meaning\":\"executable_address_only\","
+            << "\"tab_view_valid\":" << (attempt.tabViewValid ? "true" : "false") << ','
+            << "\"trade_info_valid\":" << (attempt.tradeInfoValid ? "true" : "false") << ','
+            << "\"gate_enabled\":" << (attempt.gateEnabled ? "true" : "false") << ','
+            << "\"live_attempted\":" << (attempt.liveAttempted ? "true" : "false") << ','
+            << "\"live_succeeded\":" << (attempt.liveSucceeded ? "true" : "false") << ','
+            << "\"seh_code\":" << attempt.sehCode << ','
+            << "\"returned_interface\":\"" << HexValue(attempt.returnedInterface) << "\"," 
+            << "\"returned_vtable\":\"" << HexValue(attempt.returnedVtable) << "\"," 
+            << "\"query_interface_hr\":" << static_cast<long>(attempt.queryInterfaceHr) << ','
+            << "\"diagnostic\":\"" << JsonEscape(attempt.diagnostic) << "\"}";
+        return out.str();
+    }
+
+    void StoreExtractorAttempts(const ExtractorAttempt& accounts, const ExtractorAttempt& openPositions)
+    {
+        AcquireSRWLockExclusive(&g_extractorLock);
+        g_accountsAttempt = accounts;
+        g_openPositionsAttempt = openPositions;
+        ReleaseSRWLockExclusive(&g_extractorLock);
+    }
+
+    std::string CurrentExtractorStatusJson()
+    {
+        AcquireSRWLockShared(&g_extractorLock);
+        const ExtractorAttempt accounts = g_accountsAttempt;
+        const ExtractorAttempt openPositions = g_openPositionsAttempt;
+        ReleaseSRWLockShared(&g_extractorLock);
+        AcquireSRWLockShared(&g_uiDispatchLock);
+        const UiDispatchDiagnostics dispatch = g_uiDispatchDiagnostics;
+        ReleaseSRWLockShared(&g_uiDispatchLock);
+        std::ostringstream out;
+        out << "{\"bridge_version\":" << kBridgeVersion
+            << ",\"thread_mode\":\"safe_recursive_caller_xref_analysis_v147\""
+            << ",\"accounts\":" << ExtractorAttemptJson(accounts)
+            << ",\"open_positions\":" << ExtractorAttemptJson(openPositions)
+            << ",\"ui_dispatch\":" << UiDispatchDiagnosticsJson(dispatch) << '}';
+        return out.str();
+    }
+
+    bool WriteExtractorReport(const Snapshot& snapshot, const ExtractorAttempt& accounts,
+        const ExtractorAttempt& openPositions, std::wstring& path)
+    {
+        path = ReportPath(L"MC_V147_Bridge_Dual_Extractor_Probe", snapshot.processId);
+        std::ostringstream out;
+        out << "MC V147 Dual Extractor Probe\r\n"
+            << "============================\r\n"
+            << "WARNING: experimental internal calls can crash MultiCharts.\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "tracker_thread_id=" << snapshot.trackerThreadId << "\r\n"
+            << "worker_thread_id=" << snapshot.workerThreadId << "\r\n"
+            << "same_thread=" << (snapshot.trackerThreadId == snapshot.workerThreadId ? "yes" : "no") << "\r\n"
+            << "accounts=" << ExtractorAttemptJson(accounts) << "\r\n"
+            << "open_positions=" << ExtractorAttemptJson(openPositions) << "\r\n";
+        return WriteUtf8File(path, out.str());
+    }
+
+    bool ReadExact(HANDLE handle, void* buffer, DWORD bytes)
+    {
+        auto* cursor = static_cast<unsigned char*>(buffer);
+        DWORD remaining = bytes;
+        while (remaining > 0)
+        {
+            DWORD read = 0;
+            if (!ReadFile(handle, cursor, remaining, &read, nullptr) || read == 0)
+                return false;
+            cursor += read;
+            remaining -= read;
+        }
+        return true;
+    }
+
+    bool WriteExact(HANDLE handle, const void* buffer, DWORD bytes)
+    {
+        const auto* cursor = static_cast<const unsigned char*>(buffer);
+        DWORD remaining = bytes;
+        while (remaining > 0)
+        {
+            DWORD written = 0;
+            if (!WriteFile(handle, cursor, remaining, &written, nullptr) || written == 0)
+                return false;
+            cursor += written;
+            remaining -= written;
+        }
+        return true;
+    }
+
+    bool SendResponse(
+        HANDLE pipe,
+        const mcbridge::MessageHeader& request,
+        mcbridge::Status status,
+        const std::string& payload)
+    {
+        mcbridge::MessageHeader response;
+        response.command = request.command;
+        response.requestId = request.requestId;
+        response.status = static_cast<std::uint32_t>(status);
+        response.payloadBytes = static_cast<std::uint32_t>(payload.size());
+        if (!WriteExact(pipe, &response, sizeof(response)))
+            return false;
+        return payload.empty() || WriteExact(pipe, payload.data(), response.payloadBytes);
+    }
+
+
+    struct ThreeTabTypeSummary
+    {
+        std::string label;
+        std::string typeName;
+        std::string diagnostic;
+        std::vector<RttiVtableRecord> records;
+    };
+
+    bool WriteThreeTabAnchorReport(
+        const Snapshot& snapshot,
+        std::wstring& path,
+        std::string& summaryJson)
+    {
+        const std::pair<const char*, const char*> types[] = {
+            { "accounts", ".?AVCAccountsPage@ATOnPTracker@@" },
+            { "open_positions", ".?AVCOpenPositionsPage@ATOnPTracker@@" },
+            { "logs", ".?AVCLogsPage@ATOnPTracker@@" }
+        };
+
+        std::vector<ThreeTabTypeSummary> summaries;
+        for (const auto& item : types)
+        {
+            ThreeTabTypeSummary summary;
+            summary.label = item.first;
+            summary.typeName = item.second;
+            summary.records = ResolveRttiVtables(snapshot, item.second, summary.diagnostic);
+            summaries.push_back(std::move(summary));
+        }
+
+        path = ReportPath(L"MC_V147_Three_Tab_Anchor_Comparison", snapshot.processId);
+        EnsureOutputDirectory();
+        std::ostringstream out;
+        out << "MC V147 Accounts / Open Positions / Logs Anchor Comparison\r\n"
+            << "===========================================================\r\n"
+            << "STATIC ANALYSIS ONLY. NO INTERNAL METHOD OR EXTRACTOR IS CALLED.\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "tracker_hwnd=" << HexValue(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow)) << "\r\n"
+            << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n\r\n";
+
+        out << "PAGE RTTI ANCHORS\r\n-----------------\r\n";
+        for (const auto& summary : summaries)
+        {
+            out << "tab=" << summary.label << "\r\n"
+                << "type=" << summary.typeName << "\r\n"
+                << "diagnostic=" << summary.diagnostic << "\r\n"
+                << "vtable_count=" << summary.records.size() << "\r\n";
+            for (std::size_t i = 0; i < summary.records.size(); ++i)
+            {
+                const auto& record = summary.records[i];
+                std::uintptr_t firstMethod = 0;
+                SafeReadValue(reinterpret_cast<void*>(record.vtable), firstMethod);
+                out << "  record=" << (i + 1)
+                    << " type_descriptor=" << HexValue(record.typeDescriptor)
+                    << " col=" << HexValue(record.completeObjectLocator)
+                    << " vtable=" << HexValue(record.vtable)
+                    << " vtable_rva=" << HexValue(record.vtable - snapshot.atonpTrackerBase)
+                    << " first_method=" << HexValue(firstMethod);
+                if (firstMethod >= snapshot.atonpTrackerBase &&
+                    firstMethod < snapshot.atonpTrackerBase + snapshot.atonpTrackerSize)
+                {
+                    out << " first_method_rva=" << HexValue(firstMethod - snapshot.atonpTrackerBase);
+                }
+                out << "\r\n";
+            }
+            out << "\r\n";
+        }
+
+        out << "TRACKER WINDOW TEXT ANCHORS\r\n---------------------------\r\n";
+        std::size_t textMatches = 0;
+        for (const WindowRecord& window : snapshot.windows)
+        {
+            std::wstring lower = window.text;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
+            if (lower.find(L"account") == std::wstring::npos &&
+                lower.find(L"open position") == std::wstring::npos &&
+                lower.find(L"logs") == std::wstring::npos &&
+                lower.find(L"log") == std::wstring::npos)
+                continue;
+            ++textMatches;
+            out << "hwnd=" << HexValue(reinterpret_cast<std::uintptr_t>(window.hwnd))
+                << " parent=" << HexValue(reinterpret_cast<std::uintptr_t>(window.parent))
+                << " class=" << WideToUtf8(window.className)
+                << " text=" << WideToUtf8(window.text)
+                << " visible=" << (window.visible ? "yes" : "no")
+                << " thread_id=" << window.threadId << "\r\n";
+        }
+        if (!textMatches) out << "none\r\n";
+
+        out << "\r\nINTERPRETATION RULES\r\n--------------------\r\n"
+            << "- A page RTTI/vtable anchor is an identity clue, not a callable extractor.\r\n"
+            << "- Logs is included as a comparison branch because its UI and text path is easier to recognize.\r\n"
+            << "- Shared vtable methods suggest generic page infrastructure; distinct methods suggest tab-specific logic.\r\n"
+            << "- No address in this report is approved for live execution.\r\n";
+
+        const bool written = WriteUtf8File(path, out.str());
+        std::ostringstream json;
+        json << "{\"analysis\":\"accounts_open_positions_logs\",\"static_only\":true,"
+             << "\"report_written\":" << (written ? "true" : "false")
+             << ",\"report_path\":" << JsonString(path)
+             << ",\"window_text_matches\":" << textMatches << ",\"tabs\":[";
+        for (std::size_t i = 0; i < summaries.size(); ++i)
+        {
+            if (i) json << ',';
+            json << "{\"name\":\"" << summaries[i].label << "\",\"rtti_vtable_count\":"
+                 << summaries[i].records.size() << "}";
+        }
+        json << "]}";
+        summaryJson = json.str();
+        return written;
+    }
+
+
+    struct PageMethodMetric
+    {
+        std::string tab;
+        std::size_t recordIndex = 0;
+        std::size_t slotIndex = 0;
+        std::uintptr_t vtableVa = 0;
+        std::uintptr_t methodVa = 0;
+        bool boundaryFound = false;
+        RuntimeFunctionRaw boundary{};
+        std::uint32_t methodRva = 0;
+        std::uint32_t functionSize = 0;
+        std::size_t callOpcodeCount = 0;
+        std::size_t indirectCallOpcodeCount = 0;
+        std::size_t displacement1d0Count = 0;
+        std::size_t displacement48Count = 0;
+        std::size_t displacementKnownGridCount = 0;
+        int score = 0;
+        std::string headBytes;
+    };
+
+    std::size_t CountBytePattern(const std::vector<unsigned char>& bytes, const std::vector<unsigned char>& pattern)
+    {
+        if (pattern.empty() || bytes.size() < pattern.size()) return 0;
+        std::size_t count = 0;
+        for (std::size_t i = 0; i + pattern.size() <= bytes.size(); ++i)
+        {
+            if (std::equal(pattern.begin(), pattern.end(), bytes.begin() + i)) ++count;
+        }
+        return count;
+    }
+
+    bool ReadFunctionBytesForMetric(
+        const Snapshot& snapshot,
+        const RuntimeFunctionRaw& boundary,
+        std::vector<unsigned char>& bytes)
+    {
+        bytes.clear();
+        if (boundary.endAddress <= boundary.beginAddress) return false;
+        const std::size_t size = static_cast<std::size_t>(boundary.endAddress - boundary.beginAddress);
+        const std::size_t capped = (std::min)(size, static_cast<std::size_t>(4096));
+        bytes.resize(capped);
+        const std::uintptr_t address = snapshot.atonpTrackerBase + boundary.beginAddress;
+        DWORD sehCode = 0;
+        if (!MCBridge_SafeCopyMemory(
+                bytes.data(),
+                reinterpret_cast<const void*>(address),
+                bytes.size(),
+                &sehCode))
+        {
+            bytes.clear();
+            return false;
+        }
+        return true;
+    }
+
+    bool WritePageVirtualMethodExplorerReport(
+        const Snapshot& snapshot,
+        std::wstring& path,
+        std::string& summaryJson)
+    {
+        const std::pair<const char*, const char*> types[] = {
+            { "accounts", ".?AVCAccountsPage@ATOnPTracker@@" },
+            { "open_positions", ".?AVCOpenPositionsPage@ATOnPTracker@@" },
+            { "logs", ".?AVCLogsPage@ATOnPTracker@@" }
+        };
+
+        RuntimeFunctionTableAnalysis runtimeTable;
+        (void)LoadRuntimeFunctionTable(snapshot, runtimeTable);
+        std::vector<PageMethodMetric> metrics;
+        std::map<std::uintptr_t, std::set<std::string>> methodTabs;
+        std::ostringstream out;
+        path = ReportPath(L"MC_V147_Page_Virtual_Method_Explorer", snapshot.processId);
+        EnsureOutputDirectory();
+        out << "MC V147 Page Virtual Method Explorer\r\n"
+            << "====================================\r\n"
+            << "STATIC ANALYSIS ONLY. NO VTABLE METHOD OR EXTRACTOR IS CALLED.\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n"
+            << "runtime_table=" << runtimeTable.diagnostic << "\r\n\r\n";
+
+        for (const auto& type : types)
+        {
+            std::string diagnostic;
+            std::vector<RttiVtableRecord> records = ResolveRttiVtables(snapshot, type.second, diagnostic);
+            std::sort(records.begin(), records.end(), [](const RttiVtableRecord& a, const RttiVtableRecord& b) {
+                return a.vtable < b.vtable;
+            });
+            out << "TAB=" << type.first << "\r\n"
+                << "type=" << type.second << "\r\n"
+                << "diagnostic=" << diagnostic << "\r\n"
+                << "vtable_count=" << records.size() << "\r\n";
+
+            for (std::size_t recordIndex = 0; recordIndex < records.size(); ++recordIndex)
+            {
+                const std::uintptr_t exactEnd = recordIndex + 1 < records.size()
+                    ? records[recordIndex + 1].vtable : 0;
+                VtableAnalysis table = AnalyzeVtableSlots(
+                    snapshot, runtimeTable, type.first, 0, records[recordIndex].vtable, exactEnd);
+                out << "  VTABLE record=" << (recordIndex + 1)
+                    << " address=" << HexValue(records[recordIndex].vtable)
+                    << " rva=" << HexValue(records[recordIndex].vtable - snapshot.atonpTrackerBase)
+                    << " slots=" << table.slots.size()
+                    << " stop=" << table.stopReason << "\r\n";
+
+                for (const VtableSlotAnalysis& slot : table.slots)
+                {
+                    PageMethodMetric metric;
+                    metric.tab = type.first;
+                    metric.recordIndex = recordIndex;
+                    metric.slotIndex = slot.slotIndex;
+                    metric.vtableVa = records[recordIndex].vtable;
+                    metric.methodVa = slot.methodVa;
+                    metric.methodRva = slot.inAtonpTracker
+                        ? static_cast<std::uint32_t>(slot.methodVa - snapshot.atonpTrackerBase) : 0;
+                    metric.boundaryFound = slot.boundaryFound;
+                    metric.boundary = slot.boundary;
+                    if (slot.boundaryFound)
+                    {
+                        metric.functionSize = slot.boundary.endAddress - slot.boundary.beginAddress;
+                        std::vector<unsigned char> bytes;
+                        if (ReadFunctionBytesForMetric(snapshot, slot.boundary, bytes))
+                        {
+                            metric.callOpcodeCount = static_cast<std::size_t>(std::count(bytes.begin(), bytes.end(), 0xE8));
+                            metric.indirectCallOpcodeCount = CountBytePattern(bytes, {0xFF, 0x50}) +
+                                CountBytePattern(bytes, {0xFF, 0x90}) + CountBytePattern(bytes, {0xFF, 0x15});
+                            metric.displacement1d0Count = CountBytePattern(bytes, {0xD0, 0x01, 0x00, 0x00});
+                            metric.displacement48Count = CountBytePattern(bytes, {0x48, 0x00, 0x00, 0x00});
+                            metric.displacementKnownGridCount = CountBytePattern(bytes, {0x20, 0x03, 0x00, 0x00}) +
+                                CountBytePattern(bytes, {0x28, 0x03, 0x00, 0x00});
+                            metric.headBytes = HexBytesWithProtection(
+                                snapshot.atonpTrackerBase + slot.boundary.beginAddress,
+                                (std::min)(static_cast<std::size_t>(64), bytes.size()), true);
+                        }
+                    }
+                    metric.score = static_cast<int>(metric.displacement1d0Count * 40 +
+                        metric.indirectCallOpcodeCount * 8 + metric.callOpcodeCount * 2 +
+                        metric.displacementKnownGridCount * 12);
+                    if (metric.functionSize >= 80 && metric.functionSize <= 2000) metric.score += 5;
+                    metrics.push_back(metric);
+                    methodTabs[metric.methodVa].insert(metric.tab);
+                    out << "    slot=" << slot.slotIndex
+                        << " method=" << HexValue(slot.methodVa)
+                        << " method_rva=" << HexValue(metric.methodRva)
+                        << " boundary=" << (slot.boundaryFound ? "yes" : "no");
+                    if (slot.boundaryFound)
+                    {
+                        out << " function_rva=" << HexValue(slot.boundary.beginAddress)
+                            << "-" << HexValue(slot.boundary.endAddress)
+                            << " size=" << metric.functionSize
+                            << " calls_e8=" << metric.callOpcodeCount
+                            << " indirect_call_patterns=" << metric.indirectCallOpcodeCount
+                            << " disp_1d0=" << metric.displacement1d0Count
+                            << " disp_48=" << metric.displacement48Count
+                            << " grid_disp_hints=" << metric.displacementKnownGridCount
+                            << " score=" << metric.score;
+                    }
+                    out << "\r\n";
+                }
+            }
+            out << "\r\n";
+        }
+
+        for (PageMethodMetric& metric : metrics)
+        {
+            const auto found = methodTabs.find(metric.methodVa);
+            if (found != methodTabs.end() && found->second.size() > 1) metric.score -= 25;
+            else metric.score += 15;
+        }
+        std::sort(metrics.begin(), metrics.end(), [](const PageMethodMetric& a, const PageMethodMetric& b) {
+            if (a.score != b.score) return a.score > b.score;
+            if (a.tab != b.tab) return a.tab < b.tab;
+            if (a.recordIndex != b.recordIndex) return a.recordIndex < b.recordIndex;
+            return a.slotIndex < b.slotIndex;
+        });
+
+        out << "SHARED METHODS ACROSS TABS\r\n--------------------------\r\n";
+        std::size_t sharedCount = 0;
+        for (const auto& item : methodTabs)
+        {
+            if (item.second.size() < 2) continue;
+            ++sharedCount;
+            out << "method=" << HexValue(item.first) << " tabs=";
+            bool first = true;
+            for (const std::string& tab : item.second) { if (!first) out << ','; out << tab; first = false; }
+            out << "\r\n";
+        }
+        if (!sharedCount) out << "none\r\n";
+
+        out << "\r\nTOP TAB-SPECIFIC METHOD CANDIDATES\r\n----------------------------------\r\n";
+        const std::size_t limit = (std::min)(metrics.size(), static_cast<std::size_t>(60));
+        for (std::size_t i = 0; i < limit; ++i)
+        {
+            const PageMethodMetric& m = metrics[i];
+            const bool shared = methodTabs[m.methodVa].size() > 1;
+            out << "rank=" << (i + 1) << " tab=" << m.tab
+                << " record=" << (m.recordIndex + 1) << " slot=" << m.slotIndex
+                << " method_rva=" << HexValue(m.methodRva)
+                << " score=" << m.score << " shared=" << (shared ? "yes" : "no")
+                << " function_size=" << m.functionSize
+                << " calls_e8=" << m.callOpcodeCount
+                << " indirect_calls=" << m.indirectCallOpcodeCount
+                << " disp_1d0=" << m.displacement1d0Count
+                << " disp_48=" << m.displacement48Count
+                << " grid_hints=" << m.displacementKnownGridCount << "\r\n"
+                << "  head=" << m.headBytes << "\r\n";
+        }
+        out << "\r\nINTERPRETATION\r\n--------------\r\n"
+            << "- Shared methods are likely common page infrastructure and receive a score penalty.\r\n"
+            << "- Tab-specific methods, indirect-call patterns, +0x1D0 references and moderate function size increase interest.\r\n"
+            << "- Opcode counts are conservative byte-pattern hints, not a complete x64 disassembly.\r\n"
+            << "- No candidate in this report is approved for execution.\r\n";
+
+        const bool written = WriteUtf8File(path, out.str());
+        std::ostringstream json;
+        json << "{\"analysis\":\"page_virtual_method_explorer\",\"static_only\":true,"
+             << "\"method_entries\":" << metrics.size()
+             << ",\"shared_method_count\":" << sharedCount
+             << ",\"report_written\":" << (written ? "true" : "false")
+             << ",\"report_path\":" << JsonString(path) << "}";
+        summaryJson = json.str();
+        return written;
+    }
+
+
+    struct Slot17Instruction
+    {
+        std::uint32_t rva = 0;
+        std::size_t length = 1;
+        std::string kind = "other";
+        std::string text;
+        bool directCall = false;
+        bool indirectCall = false;
+        bool ripIndirect = false;
+        bool field1d0 = false;
+        bool field48 = false;
+        bool gridHint = false;
+        std::uint32_t targetRva = 0;
+        int virtualSlot = -1;
+    };
+
+    struct Slot17Target
+    {
+        const char* page = "";
+        std::uint32_t methodRva = 0;
+        RuntimeFunctionRaw boundary{};
+        bool boundaryFound = false;
+        bool decodeAborted = false;
+        std::string decodeStopReason;
+        std::vector<unsigned char> bytes;
+        std::vector<Slot17Instruction> instructions;
+    };
+
+    struct Slot17ProgressContext
+    {
+        std::wstring progressPath;
+        std::wstring diagnosticsPath;
+        std::wstring errorsPath;
+        std::wstring cancelPath;
+        ULONGLONG analysisStarted = 0;
+        ULONGLONG lastHeartbeat = 0;
+
+        void Progress(const std::string& line)
+        {
+            AppendUtf8Line(progressPath, line);
+        }
+        void Diagnostic(const std::string& line)
+        {
+            AppendUtf8Line(diagnosticsPath, line);
+        }
+        void Error(const std::string& line)
+        {
+            AppendUtf8Line(errorsPath, line);
+        }
+        bool CancelRequested() const
+        {
+            return FileExists(cancelPath);
+        }
+    };
+
+    bool ReadBoundaryBytes(
+        const Snapshot& snapshot,
+        const RuntimeFunctionRaw& boundary,
+        std::vector<unsigned char>& bytes,
+        std::size_t cap = 16384)
+    {
+        bytes.clear();
+        if (boundary.endAddress <= boundary.beginAddress) return false;
+        const std::size_t size = static_cast<std::size_t>(boundary.endAddress - boundary.beginAddress);
+        bytes.resize((std::min)(size, cap));
+        DWORD sehCode = 0;
+        if (!MCBridge_SafeCopyMemory(
+                bytes.data(),
+                reinterpret_cast<const void*>(snapshot.atonpTrackerBase + boundary.beginAddress),
+                bytes.size(),
+                &sehCode))
+        {
+            bytes.clear();
+            return false;
+        }
+        return true;
+    }
+
+    std::size_t ConservativeX64Length(
+        const unsigned char* p,
+        std::size_t remaining,
+        bool& hasModrm,
+        unsigned char& modrm,
+        std::size_t& dispOffset,
+        std::size_t& dispSize,
+        std::size_t& immOffset,
+        std::size_t& immSize)
+    {
+        hasModrm = false;
+        modrm = 0;
+        dispOffset = dispSize = immOffset = immSize = 0;
+        if (!p || remaining == 0) return 0;
+
+        std::size_t i = 0;
+        bool rexW = false;
+        while (i < remaining)
+        {
+            const unsigned char b = p[i];
+            if (b == 0x66 || b == 0x67 || b == 0xF2 || b == 0xF3 ||
+                b == 0x2E || b == 0x36 || b == 0x3E || b == 0x26 ||
+                b == 0x64 || b == 0x65)
+            {
+                ++i;
+                continue;
+            }
+            if ((b & 0xF0) == 0x40)
+            {
+                rexW = (b & 0x08) != 0;
+                ++i;
+                continue;
+            }
+            break;
+        }
+        if (i >= remaining) return 1;
+
+        const unsigned char op = p[i++];
+        bool twoByte = false;
+        unsigned char op2 = 0;
+        if (op == 0x0F)
+        {
+            if (i >= remaining) return i;
+            twoByte = true;
+            op2 = p[i++];
+        }
+
+        auto needModrm = [&](unsigned char one, bool isTwo, unsigned char two) -> bool
+        {
+            if (isTwo)
+            {
+                if ((two >= 0x10 && two <= 0x1F) ||
+                    (two >= 0x40 && two <= 0x4F) ||
+                    (two >= 0x90 && two <= 0x9F) ||
+                    two == 0xAF || two == 0xB6 || two == 0xB7 ||
+                    two == 0xBE || two == 0xBF) return true;
+                return false;
+            }
+            if ((one >= 0x00 && one <= 0x03) ||
+                (one >= 0x08 && one <= 0x0B) ||
+                (one >= 0x20 && one <= 0x23) ||
+                (one >= 0x28 && one <= 0x2B) ||
+                (one >= 0x30 && one <= 0x33) ||
+                (one >= 0x38 && one <= 0x3B) ||
+                one == 0x63 || one == 0x69 || one == 0x6B ||
+                (one >= 0x80 && one <= 0x8F) ||
+                one == 0xC0 || one == 0xC1 || one == 0xC6 || one == 0xC7 ||
+                one == 0xD0 || one == 0xD1 || one == 0xD2 || one == 0xD3 ||
+                one == 0xF6 || one == 0xF7 || one == 0xFE || one == 0xFF)
+                return true;
+            return false;
+        };
+
+        if (!twoByte)
+        {
+            if (op == 0xE8 || op == 0xE9)
+            {
+                immOffset = i; immSize = 4; return (std::min)(remaining, i + 4);
+            }
+            if (op == 0xEB || (op >= 0x70 && op <= 0x7F))
+            {
+                immOffset = i; immSize = 1; return (std::min)(remaining, i + 1);
+            }
+            if (op >= 0xB8 && op <= 0xBF)
+            {
+                immOffset = i; immSize = rexW ? 8 : 4;
+                return (std::min)(remaining, i + immSize);
+            }
+            if (op == 0x68) { immOffset = i; immSize = 4; return (std::min)(remaining, i + 4); }
+            if (op == 0x6A) { immOffset = i; immSize = 1; return (std::min)(remaining, i + 1); }
+            if (op == 0xC2) { immOffset = i; immSize = 2; return (std::min)(remaining, i + 2); }
+            if (op == 0xA1 || op == 0xA3)
+            {
+                immOffset = i; immSize = 8; return (std::min)(remaining, i + 8);
+            }
+        }
+        else if (op2 >= 0x80 && op2 <= 0x8F)
+        {
+            immOffset = i; immSize = 4; return (std::min)(remaining, i + 4);
+        }
+
+        hasModrm = needModrm(op, twoByte, op2);
+        if (!hasModrm) return (std::max)(static_cast<std::size_t>(1), i);
+        if (i >= remaining) return i;
+
+        modrm = p[i++];
+        const unsigned char mod = (modrm >> 6) & 3;
+        const unsigned char rm = modrm & 7;
+        if (mod != 3 && rm == 4)
+        {
+            if (i >= remaining) return i;
+            const unsigned char sib = p[i++];
+            const unsigned char base = sib & 7;
+            if (mod == 0 && base == 5) { dispOffset = i; dispSize = 4; i += (std::min)(remaining - i, static_cast<std::size_t>(4)); }
+        }
+        if (mod == 0 && rm == 5) { dispOffset = i; dispSize = 4; i += (std::min)(remaining - i, static_cast<std::size_t>(4)); }
+        else if (mod == 1) { dispOffset = i; dispSize = 1; i += (std::min)(remaining - i, static_cast<std::size_t>(1)); }
+        else if (mod == 2) { dispOffset = i; dispSize = 4; i += (std::min)(remaining - i, static_cast<std::size_t>(4)); }
+
+        if (!twoByte)
+        {
+            if (op == 0x69 || op == 0x81 || op == 0xC7) { immOffset = i; immSize = 4; i += (std::min)(remaining - i, static_cast<std::size_t>(4)); }
+            else if (op == 0x6B || op == 0x80 || op == 0x83 || op == 0xC0 || op == 0xC1 || op == 0xC6)
+            { immOffset = i; immSize = 1; i += (std::min)(remaining - i, static_cast<std::size_t>(1)); }
+        }
+        return (std::max)(static_cast<std::size_t>(1), i);
+    }
+
+    std::vector<Slot17Instruction> DecodeSlot17Instructions(
+        Slot17Target& target,
+        Slot17ProgressContext& progress)
+    {
+        constexpr std::size_t kMaxInstructionsPerMethod = 20000;
+        constexpr ULONGLONG kMaxMillisecondsPerMethod = 120000;
+        constexpr ULONGLONG kHeartbeatMilliseconds = 5000;
+        constexpr std::size_t kProgressInstructionInterval = 256;
+
+        std::vector<Slot17Instruction> result;
+        std::size_t offset = 0;
+        const ULONGLONG started = GetTickCount64();
+        ULONGLONG lastHeartbeat = started;
+        std::size_t repeatedOffsetCount = 0;
+        std::size_t previousOffset = static_cast<std::size_t>(-1);
+
+        while (offset < target.bytes.size())
+        {
+            const ULONGLONG now = GetTickCount64();
+            if (progress.CancelRequested())
+            {
+                target.decodeAborted = true;
+                target.decodeStopReason = "cancelled_by_user";
+                progress.Error(std::string("page=") + target.page + " status=cancelled_by_user");
+                break;
+            }
+            if (result.size() >= kMaxInstructionsPerMethod)
+            {
+                target.decodeAborted = true;
+                target.decodeStopReason = "instruction_limit";
+                progress.Error(std::string("page=") + target.page + " status=aborted_safely reason=instruction_limit");
+                break;
+            }
+            if (now - started >= kMaxMillisecondsPerMethod)
+            {
+                target.decodeAborted = true;
+                target.decodeStopReason = "method_timeout";
+                progress.Error(std::string("page=") + target.page + " status=aborted_safely reason=method_timeout");
+                break;
+            }
+            if (offset == previousOffset)
+            {
+                ++repeatedOffsetCount;
+                if (repeatedOffsetCount > 1)
+                {
+                    target.decodeAborted = true;
+                    target.decodeStopReason = "decoder_did_not_advance";
+                    progress.Error(std::string("page=") + target.page + " status=aborted_safely reason=decoder_did_not_advance");
+                    break;
+                }
+            }
+            else
+            {
+                repeatedOffsetCount = 0;
+            }
+            previousOffset = offset;
+
+            const unsigned char* p = target.bytes.data() + offset;
+            const std::size_t remaining = target.bytes.size() - offset;
+            bool hasModrm = false;
+            unsigned char modrm = 0;
+            std::size_t dispOffset = 0, dispSize = 0, immOffset = 0, immSize = 0;
+            std::size_t length = ConservativeX64Length(
+                p, remaining, hasModrm, modrm, dispOffset, dispSize, immOffset, immSize);
+            if (length == 0 || length > remaining)
+            {
+                std::ostringstream warning;
+                warning << "page=" << target.page << " decode_warning=invalid_length"
+                        << " offset=" << offset << " length=" << length
+                        << " remaining=" << remaining << " fallback_length=1";
+                progress.Diagnostic(warning.str());
+                length = 1;
+            }
+
+            Slot17Instruction ins;
+            ins.rva = target.boundary.beginAddress + static_cast<std::uint32_t>(offset);
+            ins.length = length;
+
+            std::size_t opcodeIndex = 0;
+            while (opcodeIndex < length)
+            {
+                const unsigned char b = p[opcodeIndex];
+                if (b == 0x66 || b == 0x67 || b == 0xF2 || b == 0xF3 ||
+                    b == 0x2E || b == 0x36 || b == 0x3E || b == 0x26 ||
+                    b == 0x64 || b == 0x65 || (b & 0xF0) == 0x40)
+                    ++opcodeIndex;
+                else break;
+            }
+
+            if (opcodeIndex < length && p[opcodeIndex] == 0xE8 && opcodeIndex + 5 <= length)
+            {
+                std::int32_t rel = 0;
+                std::memcpy(&rel, p + opcodeIndex + 1, sizeof(rel));
+                ins.directCall = true;
+                ins.kind = "direct_call";
+                ins.targetRva = static_cast<std::uint32_t>(
+                    static_cast<std::int64_t>(ins.rva) +
+                    static_cast<std::int64_t>(length) + rel);
+            }
+            else if (opcodeIndex < length && p[opcodeIndex] == 0xFF && hasModrm)
+            {
+                const unsigned char reg = (modrm >> 3) & 7;
+                if (reg == 2)
+                {
+                    ins.indirectCall = true;
+                    ins.kind = "indirect_call";
+                    const unsigned char mod = (modrm >> 6) & 3;
+                    const unsigned char rm = modrm & 7;
+                    if (mod == 0 && rm == 5) ins.ripIndirect = true;
+                    if (dispSize == 1 && dispOffset < length)
+                    {
+                        const int disp = static_cast<signed char>(p[dispOffset]);
+                        if (disp >= 0 && (disp % 8) == 0) ins.virtualSlot = disp / 8;
+                    }
+                    else if (dispSize == 4 && dispOffset + 4 <= length)
+                    {
+                        std::int32_t disp = 0;
+                        std::memcpy(&disp, p + dispOffset, sizeof(disp));
+                        if (disp >= 0 && (disp % 8) == 0 && disp <= 0x800)
+                            ins.virtualSlot = disp / 8;
+                    }
+                }
+            }
+
+            if (dispSize == 4 && dispOffset + 4 <= length)
+            {
+                std::uint32_t disp = 0;
+                std::memcpy(&disp, p + dispOffset, sizeof(disp));
+                ins.field1d0 = disp == 0x1D0;
+                ins.field48 = disp == 0x48;
+                ins.gridHint = disp == 0x320 || disp == 0x328;
+            }
+            else if (dispSize == 1 && dispOffset < length)
+            {
+                const unsigned char disp = p[dispOffset];
+                ins.field48 = disp == 0x48;
+            }
+
+            std::ostringstream text;
+            text << HexValue(ins.rva) << " len=" << length << " bytes=";
+            for (std::size_t j = 0; j < length; ++j)
+            {
+                if (j) text << ' ';
+                text << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                     << static_cast<unsigned int>(p[j]);
+            }
+            if (ins.directCall) text << " CALL target_rva=" << HexValue(ins.targetRva);
+            if (ins.indirectCall)
+            {
+                text << " INDIRECT_CALL";
+                if (ins.ripIndirect) text << " rip_relative=yes";
+                if (ins.virtualSlot >= 0) text << " possible_vslot=" << ins.virtualSlot;
+            }
+            if (ins.field1d0) text << " field_disp=0x1D0";
+            if (ins.field48) text << " field_disp=0x48";
+            if (ins.gridHint) text << " grid_disp_hint=yes";
+            ins.text = text.str();
+            result.push_back(ins);
+            const std::size_t nextOffset = offset + length;
+            if (nextOffset <= offset)
+            {
+                target.decodeAborted = true;
+                target.decodeStopReason = "offset_overflow_or_no_progress";
+                progress.Error(std::string("page=") + target.page + " status=aborted_safely reason=offset_overflow_or_no_progress");
+                break;
+            }
+            offset = nextOffset;
+
+            if ((result.size() % kProgressInstructionInterval) == 0 || now - lastHeartbeat >= kHeartbeatMilliseconds)
+            {
+                const unsigned int percent = target.bytes.empty() ? 100u :
+                    static_cast<unsigned int>((offset * 100u) / target.bytes.size());
+                std::ostringstream heartbeat;
+                heartbeat << "heartbeat page=" << target.page
+                          << " percent=" << percent
+                          << " offset=" << offset << '/' << target.bytes.size()
+                          << " instructions=" << result.size()
+                          << " elapsed_ms=" << (now - started);
+                progress.Progress(heartbeat.str());
+                progress.Diagnostic(heartbeat.str());
+                lastHeartbeat = now;
+            }
+        }
+
+        std::ostringstream completed;
+        completed << "decode_finished page=" << target.page
+                  << " decoded_bytes=" << offset << '/' << target.bytes.size()
+                  << " instructions=" << result.size()
+                  << " elapsed_ms=" << (GetTickCount64() - started)
+                  << " status=" << (target.decodeAborted ? "aborted_safely" : "completed");
+        if (target.decodeAborted) completed << " reason=" << target.decodeStopReason;
+        progress.Progress(completed.str());
+        progress.Diagnostic(completed.str());
+        return result;
+    }
+
+    bool WriteSlot17DeepAnalysisReport(
+        const Snapshot& snapshot,
+        std::wstring& reportPath,
+        std::wstring& csvPath,
+        std::string& summaryJson)
+    {
+        const struct { const char* page; std::uint32_t rva; } definitions[] = {
+            { "accounts", 0x78A00u },
+            { "open_positions", 0xADFD0u },
+            { "logs", 0xCFAB0u }
+        };
+
+        EnsureOutputDirectory();
+        Slot17ProgressContext progress;
+        progress.progressPath = ReportPath(L"MC_V147_Progress", snapshot.processId);
+        progress.diagnosticsPath = ReportPath(L"MC_V147_Diagnostics", snapshot.processId);
+        progress.errorsPath = ReportPath(L"MC_V147_Errors", snapshot.processId);
+        progress.cancelPath = std::wstring(kOutputDirectory) + L"\\MC_V147_CANCEL";
+        progress.analysisStarted = GetTickCount64();
+        progress.lastHeartbeat = progress.analysisStarted;
+        (void)WriteUtf8File(progress.progressPath,
+            "MC V147 progress log\r\nstatus=running\r\nphase=initializing\r\n");
+        (void)WriteUtf8File(progress.diagnosticsPath,
+            "MC V147 detailed diagnostics\r\nstatic_only=true\r\n");
+        (void)WriteUtf8File(progress.errorsPath,
+            "MC V147 errors and safety stops\r\n");
+        progress.Progress("phase=1/7 snapshot_ready");
+        progress.Diagnostic("analysis_start process_id=" + std::to_string(snapshot.processId));
+
+        RuntimeFunctionTableAnalysis runtimeTable;
+        progress.Progress("phase=2/7 loading_runtime_function_table");
+        (void)LoadRuntimeFunctionTable(snapshot, runtimeTable);
+        progress.Diagnostic("runtime_table " + runtimeTable.diagnostic);
+
+        std::vector<Slot17Target> targets;
+        std::size_t pageIndex = 0;
+        for (const auto& def : definitions)
+        {
+            ++pageIndex;
+            if (progress.CancelRequested())
+            {
+                progress.Error("status=cancelled_by_user before_page=" + std::string(def.page));
+                break;
+            }
+            if (GetTickCount64() - progress.analysisStarted >= 300000)
+            {
+                progress.Error("status=aborted_safely reason=total_timeout before_page=" + std::string(def.page));
+                break;
+            }
+            std::ostringstream phase;
+            phase << "phase=" << (pageIndex + 2) << "/7 page=" << def.page << " status=started";
+            progress.Progress(phase.str());
+            progress.Diagnostic(phase.str());
+
+            Slot17Target target;
+            target.page = def.page;
+            target.methodRva = def.rva;
+            RuntimeFunctionBoundaryAnalysis boundary =
+                AnalyzeRuntimeFunctionBoundary(snapshot, snapshot.atonpTrackerBase + def.rva);
+            target.boundaryFound = boundary.enclosingFound;
+            if (target.boundaryFound)
+            {
+                target.boundary = boundary.entry;
+                std::ostringstream boundaryLine;
+                boundaryLine << "page=" << def.page
+                             << " boundary_begin=" << HexValue(target.boundary.beginAddress)
+                             << " boundary_end=" << HexValue(target.boundary.endAddress);
+                progress.Diagnostic(boundaryLine.str());
+                if (ReadBoundaryBytes(snapshot, target.boundary, target.bytes))
+                    target.instructions = DecodeSlot17Instructions(target, progress);
+                else
+                {
+                    target.decodeAborted = true;
+                    target.decodeStopReason = "read_boundary_bytes_failed";
+                    progress.Error("page=" + std::string(def.page) + " status=aborted_safely reason=read_boundary_bytes_failed");
+                }
+            }
+            else
+            {
+                target.decodeAborted = true;
+                target.decodeStopReason = "boundary_not_found";
+                progress.Error("page=" + std::string(def.page) + " status=aborted_safely reason=boundary_not_found");
+            }
+            targets.push_back(target);
+        }
+
+        progress.Progress("phase=6/7 building_unique_callee_cache");
+        std::map<std::uint32_t, unsigned int> callMasks;
+        for (std::size_t i = 0; i < targets.size(); ++i)
+            for (const Slot17Instruction& ins : targets[i].instructions)
+                if (ins.directCall) callMasks[ins.targetRva] |= (1u << static_cast<unsigned int>(i));
+
+        struct CalleeBoundaryCacheEntry
+        {
+            bool found = false;
+            std::uint32_t size = 0;
+        };
+        std::map<std::uint32_t, CalleeBoundaryCacheEntry> calleeCache;
+        std::size_t calleeIndex = 0;
+        for (const auto& callEntry : callMasks)
+        {
+            ++calleeIndex;
+            if (progress.CancelRequested())
+            {
+                progress.Error("status=cancelled_by_user phase=callee_cache");
+                break;
+            }
+            if (GetTickCount64() - progress.analysisStarted >= 300000)
+            {
+                progress.Error("status=aborted_safely reason=total_timeout phase=callee_cache");
+                break;
+            }
+            RuntimeFunctionBoundaryAnalysis calleeBoundary =
+                AnalyzeRuntimeFunctionBoundary(snapshot, snapshot.atonpTrackerBase + callEntry.first);
+            CalleeBoundaryCacheEntry cacheEntry;
+            cacheEntry.found = calleeBoundary.enclosingFound;
+            if (cacheEntry.found)
+                cacheEntry.size = calleeBoundary.entry.endAddress - calleeBoundary.entry.beginAddress;
+            calleeCache[callEntry.first] = cacheEntry;
+            if ((calleeIndex % 25) == 0 || calleeIndex == callMasks.size())
+            {
+                std::ostringstream line;
+                line << "callee_cache_progress=" << calleeIndex << '/' << callMasks.size()
+                     << " elapsed_ms=" << (GetTickCount64() - progress.analysisStarted);
+                progress.Progress(line.str());
+                progress.Diagnostic(line.str());
+            }
+        }
+
+        reportPath = ReportPath(L"MC_V147_Slot17_Deep_Analysis", snapshot.processId);
+        csvPath = ReportPath(L"MC_V147_Slot17_Candidates", snapshot.processId);
+        const std::size_t dot = csvPath.find_last_of(L'.');
+        if (dot != std::wstring::npos) csvPath.replace(dot, std::wstring::npos, L".csv");
+        EnsureOutputDirectory();
+
+        std::ostringstream out;
+        out << "MC V147 Slot 17 Deep Analysis\r\n"
+            << "================================\r\n"
+            << "STATIC ANALYSIS ONLY. NO PAGE, VTABLE, GRID OR EXTRACTOR METHOD IS CALLED.\r\n"
+            << "internal_function_calls_enabled=false\r\n"
+            << "state_changing_messages_enabled=false\r\n"
+            << "live_attempted=false\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n"
+            << "runtime_table=" << runtimeTable.diagnostic << "\r\n\r\n";
+
+        std::ostringstream csv;
+        csv << "page,caller_rva,call_site_rva,callee_rva,call_type,shared_mask,function_size,score,reasons\r\n";
+
+        for (const Slot17Target& target : targets)
+        {
+            std::size_t directCalls = 0, indirectCalls = 0, field1d0 = 0, field48 = 0, gridHints = 0;
+            for (const Slot17Instruction& ins : target.instructions)
+            {
+                directCalls += ins.directCall ? 1 : 0;
+                indirectCalls += ins.indirectCall ? 1 : 0;
+                field1d0 += ins.field1d0 ? 1 : 0;
+                field48 += ins.field48 ? 1 : 0;
+                gridHints += ins.gridHint ? 1 : 0;
+            }
+            out << "TARGET page=" << target.page
+                << " method_rva=" << HexValue(target.methodRva)
+                << " boundary_found=" << (target.boundaryFound ? "true" : "false");
+            if (target.boundaryFound)
+                out << " function_rva=" << HexValue(target.boundary.beginAddress)
+                    << "-" << HexValue(target.boundary.endAddress)
+                    << " function_size=" << (target.boundary.endAddress - target.boundary.beginAddress);
+            out << "\r\n"
+                << "decoded_instruction_count=" << target.instructions.size()
+                << " direct_calls=" << directCalls
+                << " indirect_calls=" << indirectCalls
+                << " disp_1d0=" << field1d0
+                << " disp_48=" << field48
+                << " grid_hints=" << gridHints
+                << " decode_status=" << (target.decodeAborted ? "aborted_safely" : "completed");
+            if (target.decodeAborted) out << " decode_reason=" << target.decodeStopReason;
+            out << "\r\n\r\n";
+
+            out << "FIELD ACCESS ANALYSIS\r\n";
+            bool anyField = false;
+            for (const Slot17Instruction& ins : target.instructions)
+            {
+                if (ins.field1d0 || ins.field48 || ins.gridHint)
+                {
+                    anyField = true;
+                    out << "  " << ins.text << "\r\n";
+                }
+            }
+            if (!anyField) out << "  none\r\n";
+            out << "\r\nDIRECT AND INDIRECT CALLS\r\n";
+            for (const Slot17Instruction& ins : target.instructions)
+            {
+                if (!ins.directCall && !ins.indirectCall) continue;
+                out << "  " << ins.text;
+                if (ins.directCall)
+                {
+                    const unsigned int mask = callMasks[ins.targetRva];
+                    out << " shared_mask=" << mask;
+                    int score = 10;
+                    std::string reasons = "direct_call";
+                    if (mask == 1 || mask == 2 || mask == 4) { score += 20; reasons += "|page_specific"; }
+                    else if (mask == 7) { score -= 8; reasons += "|shared_all_three"; }
+                    std::uint32_t calleeSize = 0;
+                    const auto cacheIt = calleeCache.find(ins.targetRva);
+                    if (cacheIt != calleeCache.end() && cacheIt->second.found)
+                    {
+                        calleeSize = cacheIt->second.size;
+                        if (calleeSize >= 80 && calleeSize <= 2400)
+                        {
+                            score += 5;
+                            reasons += "|moderate_size";
+                        }
+                    }
+                    csv << target.page << ','
+                        << HexValue(target.methodRva) << ','
+                        << HexValue(ins.rva) << ','
+                        << HexValue(ins.targetRva) << ','
+                        << "direct," << mask << ',' << calleeSize << ','
+                        << score << ',' << reasons << "\r\n";
+                }
+                out << "\r\n";
+            }
+
+            out << "\r\nDISASSEMBLY (CONSERVATIVE INSTRUCTION WALK)\r\n";
+            for (const Slot17Instruction& ins : target.instructions)
+                out << "  " << ins.text << "\r\n";
+            out << "\r\n";
+        }
+
+        out << "SHARED CALL COMPARISON\r\n----------------------\r\n";
+        for (const auto& entry : callMasks)
+        {
+            out << "callee_rva=" << HexValue(entry.first)
+                << " shared_mask=" << entry.second
+                << " pages="
+                << ((entry.second & 1) ? "accounts " : "")
+                << ((entry.second & 2) ? "open_positions " : "")
+                << ((entry.second & 4) ? "logs " : "") << "\r\n";
+        }
+        out << "\r\nSAFETY CONCLUSION\r\n-----------------\r\n"
+            << "- The decoder is conservative and may stop short of full semantic reconstruction.\r\n"
+            << "- Direct CALL targets are resolved only from instruction boundaries found by the walker.\r\n"
+            << "- Possible virtual slots are reported only for simple FF /2 memory forms.\r\n"
+            << "- No listed candidate is approved for execution.\r\n";
+
+        progress.Progress("phase=7/7 writing_final_reports");
+        const bool reportWritten = WriteUtf8File(reportPath, out.str());
+        const bool csvWritten = WriteUtf8File(csvPath, csv.str());
+        const bool cancelled = progress.CancelRequested();
+        std::ostringstream finalLine;
+        finalLine << "status=" << (cancelled ? "cancelled_by_user" :
+            ((reportWritten && csvWritten) ? "completed" : "completed_with_write_error"))
+                  << " total_elapsed_ms=" << (GetTickCount64() - progress.analysisStarted)
+                  << " report_written=" << (reportWritten ? "true" : "false")
+                  << " csv_written=" << (csvWritten ? "true" : "false");
+        progress.Progress(finalLine.str());
+        progress.Diagnostic(finalLine.str());
+        std::ostringstream json;
+        json << "{\"analysis\":\"slot17_deep\",\"static_only\":true,"
+             << "\"targets\":" << targets.size()
+             << ",\"unique_direct_callees\":" << callMasks.size()
+             << ",\"report_written\":" << (reportWritten ? "true" : "false")
+             << ",\"csv_written\":" << (csvWritten ? "true" : "false")
+             << ",\"report_path\":" << JsonString(reportPath)
+             << ",\"csv_path\":" << JsonString(csvPath)
+             << ",\"progress_path\":" << JsonString(progress.progressPath)
+             << ",\"diagnostics_path\":" << JsonString(progress.diagnosticsPath)
+             << ",\"errors_path\":" << JsonString(progress.errorsPath) << "}";
+        summaryJson = json.str();
+        return reportWritten && csvWritten;
+    }
+
+
+    std::string ProtectionName(DWORD protection)
+    {
+        const DWORD basic = protection & 0xFFu;
+        switch (basic)
+        {
+        case PAGE_NOACCESS: return "NOACCESS";
+        case PAGE_READONLY: return "READONLY";
+        case PAGE_READWRITE: return "READWRITE";
+        case PAGE_WRITECOPY: return "WRITECOPY";
+        case PAGE_EXECUTE: return "EXECUTE";
+        case PAGE_EXECUTE_READ: return "EXECUTE_READ";
+        case PAGE_EXECUTE_READWRITE: return "EXECUTE_READWRITE";
+        case PAGE_EXECUTE_WRITECOPY: return "EXECUTE_WRITECOPY";
+        default: return "UNKNOWN";
+        }
+    }
+
+    bool WriteLoadedModuleMemoryImage(
+        const Snapshot& snapshot,
+        std::wstring& imagePath,
+        std::wstring& regionPath,
+        std::wstring& manifestPath,
+        std::string& diagnostic)
+    {
+        diagnostic.clear();
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize == 0)
+        {
+            diagnostic = "ATOnPTracker module is not loaded";
+            return false;
+        }
+
+        imagePath = ReportPath(L"MC_V147_ATOnPTracker_Loaded_Image", snapshot.processId);
+        const std::wstring suffix = L".txt";
+        if (imagePath.size() >= suffix.size() && imagePath.substr(imagePath.size() - suffix.size()) == suffix)
+            imagePath.replace(imagePath.size() - suffix.size(), suffix.size(), L".bin");
+        regionPath = ReportPath(L"MC_V147_ATOnPTracker_Memory_Regions", snapshot.processId);
+        manifestPath = ReportPath(L"MC_V147_Research_Manifest", snapshot.processId);
+
+        std::ofstream image(imagePath, std::ios::binary | std::ios::trunc);
+        std::ofstream regions(regionPath, std::ios::binary | std::ios::trunc);
+        if (!image || !regions)
+        {
+            diagnostic = "could not create module image or region map";
+            return false;
+        }
+
+        regions << "region_index,va_begin,va_end,rva_begin,size,state,type,protection,readable,dumped_bytes,zero_filled_bytes\r\n";
+        const std::uintptr_t moduleBegin = snapshot.atonpTrackerBase;
+        const std::uintptr_t moduleEnd = moduleBegin + snapshot.atonpTrackerSize;
+        std::uintptr_t cursor = moduleBegin;
+        std::uint64_t dumped = 0;
+        std::uint64_t zeroFilled = 0;
+        std::size_t regionIndex = 0;
+        std::vector<unsigned char> buffer(64u * 1024u, 0);
+
+        while (cursor < moduleEnd)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+            {
+                diagnostic = "VirtualQuery failed inside module range";
+                return false;
+            }
+            const std::uintptr_t regionBegin = std::max(cursor, reinterpret_cast<std::uintptr_t>(mbi.BaseAddress));
+            const std::uintptr_t rawRegionEnd = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            const std::uintptr_t regionEnd = std::min(moduleEnd, rawRegionEnd);
+            if (regionEnd <= regionBegin)
+            {
+                diagnostic = "non-advancing memory region";
+                return false;
+            }
+
+            const bool readable = mbi.State == MEM_COMMIT &&
+                !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS));
+            std::uint64_t regionDumped = 0;
+            std::uint64_t regionZero = 0;
+            std::uintptr_t part = regionBegin;
+            while (part < regionEnd)
+            {
+                const std::size_t count = static_cast<std::size_t>(
+                    std::min<std::uintptr_t>(buffer.size(), regionEnd - part));
+                std::fill(buffer.begin(), buffer.begin() + count, static_cast<unsigned char>(0));
+                bool copied = false;
+                if (readable)
+                    copied = SafeReadBytes(reinterpret_cast<void*>(part), buffer.data(), count);
+                image.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(count));
+                if (!image)
+                {
+                    diagnostic = "module image write failed";
+                    return false;
+                }
+                if (copied) { dumped += count; regionDumped += count; }
+                else { zeroFilled += count; regionZero += count; }
+                part += count;
+            }
+
+            regions << regionIndex++ << ','
+                    << HexValue(regionBegin) << ',' << HexValue(regionEnd) << ','
+                    << HexValue(regionBegin - moduleBegin) << ','
+                    << (regionEnd - regionBegin) << ','
+                    << HexValue(mbi.State) << ',' << HexValue(mbi.Type) << ','
+                    << ProtectionName(mbi.Protect) << ','
+                    << (readable ? "yes" : "no") << ','
+                    << regionDumped << ',' << regionZero << "\r\n";
+            regions.flush();
+            image.flush();
+            cursor = regionEnd;
+        }
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 143,\r\n"
+                 << "  \"architecture\": \"x64\",\r\n"
+                 << "  \"pointer_size\": 8,\r\n"
+                 << "  \"process_id\": " << snapshot.processId << ",\r\n"
+                 << "  \"tracker_thread_id\": " << snapshot.trackerThreadId << ",\r\n"
+                 << "  \"module_base\": " << JsonString(HexValue(snapshot.atonpTrackerBase)) << ",\r\n"
+                 << "  \"module_size\": " << snapshot.atonpTrackerSize << ",\r\n"
+                 << "  \"loaded_image_file\": " << JsonString(imagePath) << ",\r\n"
+                 << "  \"region_map_file\": " << JsonString(regionPath) << ",\r\n"
+                 << "  \"bytes_copied\": " << dumped << ",\r\n"
+                 << "  \"bytes_zero_filled\": " << zeroFilled << ",\r\n"
+                 << "  \"known_rvas\": {\r\n"
+                 << "    \"accounts_slot17\": \"0x78A00\",\r\n"
+                 << "    \"open_positions_slot17\": \"0xADFD0\",\r\n"
+                 << "    \"logs_slot17\": \"0xCFAB0\"\r\n"
+                 << "  }\r\n"
+                 << "}\r\n";
+        const bool manifestWritten = WriteUtf8File(manifestPath, manifest.str());
+        diagnostic = manifestWritten ? "completed" : "manifest write failed";
+        return manifestWritten;
+    }
+
+
+    struct LiveGraphNode
+    {
+        std::size_t id = 0;
+        std::uintptr_t address = 0;
+        std::size_t depth = 0;
+        int priority = 0;
+        std::string label;
+        std::string sourceRoot;
+        std::size_t parentId = static_cast<std::size_t>(-1);
+        std::size_t parentOffset = 0;
+    };
+
+    bool QueryReadableSpan(std::uintptr_t address, std::uintptr_t& regionEnd, MEMORY_BASIC_INFORMATION& mbi)
+    {
+        regionEnd = 0;
+        std::memset(&mbi, 0, sizeof(mbi));
+        if (address < 0x10000 || VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
+            return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+            return false;
+        const DWORD basic = mbi.Protect & 0xFFu;
+        const bool readable = basic == PAGE_READONLY || basic == PAGE_READWRITE || basic == PAGE_WRITECOPY ||
+            basic == PAGE_EXECUTE_READ || basic == PAGE_EXECUTE_READWRITE || basic == PAGE_EXECUTE_WRITECOPY;
+        if (!readable)
+            return false;
+        const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+        regionEnd = begin + mbi.RegionSize;
+        return address >= begin && address < regionEnd;
+    }
+
+    bool WriteLiveObjectGraphCapture(const Snapshot& snapshot, std::string& summaryJson, const char* requestedPage)
+    {
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V147_" + pageWide + L"_Live_Object_Graph_";
+        const std::wstring nodesPath = ReportPath((prefix + L"Nodes").c_str(), snapshot.processId);
+        const std::wstring edgesPath = ReportPath((prefix + L"Edges").c_str(), snapshot.processId);
+        const std::wstring vtablesPath = ReportPath((prefix + L"Vtables").c_str(), snapshot.processId);
+        const std::wstring stringsPath = ReportPath((prefix + L"Strings").c_str(), snapshot.processId);
+        const std::wstring containersPath = ReportPath((prefix + L"Containers").c_str(), snapshot.processId);
+        const std::wstring progressPath = ReportPath((prefix + L"Progress").c_str(), snapshot.processId);
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::wstring binaryPath = ReportPath((prefix + L"Memory").c_str(), snapshot.processId);
+        const std::wstring suffix = L".txt";
+        if (binaryPath.size() >= suffix.size() && binaryPath.substr(binaryPath.size() - suffix.size()) == suffix)
+            binaryPath.replace(binaryPath.size() - suffix.size(), suffix.size(), L".bin");
+
+        std::ofstream nodes(nodesPath, std::ios::binary | std::ios::trunc);
+        std::ofstream edges(edgesPath, std::ios::binary | std::ios::trunc);
+        std::ofstream vtables(vtablesPath, std::ios::binary | std::ios::trunc);
+        std::ofstream strings(stringsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream containers(containersPath, std::ios::binary | std::ios::trunc);
+        std::ofstream progress(progressPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream binary(binaryPath, std::ios::binary | std::ios::trunc);
+        if (!nodes || !edges || !vtables || !strings || !containers || !progress || !diagnostics || !binary)
+        {
+            summaryJson = "{\"capture\":\"live_object_graph\",\"version\":145,\"error\":\"could_not_create_output_files\"}";
+            return false;
+        }
+
+        nodes << "node_id,address,depth,priority,source_root,label,parent_id,parent_offset,region_base,region_size,protection,type,object_candidate,vtable,dump_offset,dump_size,pointer_slots_scanned\r\n";
+        edges << "from_node,from_address,field_offset,to_address,to_node,classification,source_root\r\n";
+        vtables << "object_node,object_address,vtable_address,slot,target,executable,target_module_rva\r\n";
+        strings << "node_id,address,offset,encoding,length,text_preview\r\n";
+        containers << "node_id,address,offset,kind,begin_ptr,end_ptr,capacity_ptr,element_count,confidence\r\n";
+        progress << "MC V147 Prioritized Live Object Graph Capture\r\npage=" << page << "\r\nstatus=started\r\n" << std::flush;
+        diagnostics << "MC V147 diagnostics\r\nread_only=yes\r\nunknown_functions_called=no\r\n" << std::flush;
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+
+        constexpr std::size_t kMaximumNodes = 20000;
+        constexpr std::size_t kMaximumDepth = 5;
+        constexpr std::uint64_t kMaximumTotalBytes = 512ull * 1024ull * 1024ull;
+        constexpr std::size_t kLiveGraphMaximumVtableSlots = 512;
+        constexpr std::size_t kMaximumChildrenPerNode = 256;
+        constexpr std::uint64_t kMaximumRuntimeMilliseconds = 10ull * 60ull * 1000ull;
+
+        std::deque<LiveGraphNode> priorityPending;
+        std::deque<LiveGraphNode> normalPending;
+        std::map<std::uintptr_t, std::size_t> ids;
+        std::vector<LiveGraphNode> allNodes;
+        auto enqueue = [&](std::uintptr_t address, std::size_t depth, int priority, const std::string& sourceRoot,
+                           const std::string& label, std::size_t parentId, std::size_t parentOffset) -> std::size_t
+        {
+            auto found = ids.find(address);
+            if (found != ids.end()) return found->second;
+            if (!address || allNodes.size() >= kMaximumNodes) return static_cast<std::size_t>(-1);
+            std::uintptr_t end = 0; MEMORY_BASIC_INFORMATION mbi{};
+            if (!QueryReadableSpan(address, end, mbi)) return static_cast<std::size_t>(-1);
+            LiveGraphNode node;
+            node.id = allNodes.size(); node.address = address; node.depth = depth; node.priority = priority;
+            node.sourceRoot = sourceRoot; node.label = label; node.parentId = parentId; node.parentOffset = parentOffset;
+            ids[address] = node.id; allNodes.push_back(node);
+            if (priority >= 2) priorityPending.push_back(node); else normalPending.push_back(node);
+            return node.id;
+        };
+
+        const std::size_t noParent = static_cast<std::size_t>(-1);
+        const std::size_t tabRoot = enqueue(accounts.tabView, 0, 3, "CATPTTabView", "CATPTTabView_primary", noParent, 0);
+        if (accounts.tabView) enqueue(accounts.tabView + 0x48, 0, 3, "CATPTTabView", "CATPTTabView_secondary_subobject", noParent, 0x48);
+        enqueue(accounts.tradeInfo, 0, 3, "ITC_TradeInfo", "ITC_TradeInfo_accounts", noParent, 0);
+        enqueue(positions.tradeInfo, 0, 3, "ITC_TradeInfo", "ITC_TradeInfo_open_positions", noParent, 0);
+
+        const std::size_t specialOffsets[] = { 0x48, 0x1D0, 0x320, 0x328 };
+        if (accounts.tabView)
+        {
+            for (std::size_t off : specialOffsets)
+            {
+                std::uintptr_t value = 0;
+                if (SafeReadValue(reinterpret_cast<void*>(accounts.tabView + off), value))
+                    enqueue(value, 1, 3, "CATPTTabView", std::string("CATPTTabView_field_") + HexValue(off), tabRoot, off);
+            }
+        }
+
+        auto startTime = std::chrono::steady_clock::now();
+        std::uint64_t totalBytes = 0;
+        std::size_t processed = 0;
+        std::string stopReason = "completed";
+        while ((!priorityPending.empty() || !normalPending.empty()) && processed < kMaximumNodes && totalBytes < kMaximumTotalBytes)
+        {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
+            if (elapsed >= static_cast<long long>(kMaximumRuntimeMilliseconds)) { stopReason = "runtime_limit"; break; }
+            LiveGraphNode node;
+            if (!priorityPending.empty()) { node = priorityPending.front(); priorityPending.pop_front(); }
+            else { node = normalPending.front(); normalPending.pop_front(); }
+
+            std::uintptr_t regionEnd = 0; MEMORY_BASIC_INFORMATION mbi{};
+            if (!QueryReadableSpan(node.address, regionEnd, mbi)) continue;
+            const std::size_t available = static_cast<std::size_t>(regionEnd - node.address);
+            std::size_t requestedBytes = 1024;
+            if (node.depth == 0 || node.priority >= 3) requestedBytes = 16u * 1024u;
+            else if (node.priority == 2) requestedBytes = 8u * 1024u;
+            else if (PointerLooksLikeObject(node.address)) requestedBytes = 4u * 1024u;
+            const std::size_t dumpSize = std::min<std::size_t>(requestedBytes, available);
+            if (dumpSize == 0 || totalBytes + dumpSize > kMaximumTotalBytes) { stopReason = "byte_limit"; break; }
+            std::vector<unsigned char> bytes(dumpSize, 0);
+            if (!SafeReadBytes(reinterpret_cast<void*>(node.address), bytes.data(), dumpSize)) continue;
+            const std::uint64_t dumpOffset = totalBytes;
+            binary.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            binary.flush(); totalBytes += dumpSize;
+
+            std::uintptr_t vtable = 0;
+            const bool objectCandidate = VtableStartsWithExecutableCode(node.address, vtable);
+            const std::size_t pointerSlots = dumpSize / sizeof(std::uintptr_t);
+            nodes << node.id << ',' << HexValue(node.address) << ',' << node.depth << ',' << node.priority << ','
+                  << '"' << node.sourceRoot << '"' << ',' << '"' << node.label << '"' << ',';
+            if (node.parentId == noParent) nodes << -1; else nodes << node.parentId;
+            nodes << ',' << HexValue(node.parentOffset) << ',' << HexValue(reinterpret_cast<std::uintptr_t>(mbi.BaseAddress))
+                  << ',' << mbi.RegionSize << ',' << ProtectionName(mbi.Protect) << ',' << HexValue(mbi.Type) << ','
+                  << (objectCandidate ? "yes" : "no") << ',' << HexValue(vtable) << ',' << dumpOffset << ','
+                  << dumpSize << ',' << pointerSlots << "\r\n" << std::flush;
+
+            if (objectCandidate)
+            {
+                for (std::size_t slot = 0; slot < kLiveGraphMaximumVtableSlots; ++slot)
+                {
+                    std::uintptr_t target = 0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(vtable + slot * sizeof(void*)), target)) break;
+                    const bool executable = MemoryRangeHasProtection(reinterpret_cast<void*>(target), 1, true);
+                    vtables << node.id << ',' << HexValue(node.address) << ',' << HexValue(vtable) << ',' << slot << ','
+                            << HexValue(target) << ',' << (executable ? "yes" : "no") << ',';
+                    if (target >= snapshot.atonpTrackerBase && target < snapshot.atonpTrackerBase + snapshot.atonpTrackerSize)
+                        vtables << HexValue(target - snapshot.atonpTrackerBase);
+                    vtables << "\r\n";
+                    if (!executable && slot > 8) break;
+                }
+                vtables.flush();
+            }
+
+            // Conservative ASCII and UTF-16 string previews.
+            for (std::size_t i = 0; i + 5 < dumpSize; ++i)
+            {
+                if (bytes[i] >= 32 && bytes[i] <= 126)
+                {
+                    std::size_t j = i;
+                    while (j < dumpSize && bytes[j] >= 32 && bytes[j] <= 126 && j - i < 160) ++j;
+                    if (j - i >= 5)
+                    {
+                        std::string text(reinterpret_cast<const char*>(bytes.data() + i), j - i);
+                        for (char& c : text) if (c == '"') c = '\'';
+                        strings << node.id << ',' << HexValue(node.address) << ',' << HexValue(i) << ",ascii," << (j-i) << ",\"" << text << "\"\r\n";
+                        i = j;
+                    }
+                }
+            }
+            for (std::size_t i = 0; i + 10 < dumpSize; i += 2)
+            {
+                std::size_t j = i; std::string text;
+                while (j + 1 < dumpSize && bytes[j] >= 32 && bytes[j] <= 126 && bytes[j+1] == 0 && text.size() < 160)
+                { text.push_back(static_cast<char>(bytes[j])); j += 2; }
+                if (text.size() >= 5)
+                {
+                    for (char& c : text) if (c == '"') c = '\'';
+                    strings << node.id << ',' << HexValue(node.address) << ',' << HexValue(i) << ",utf16le," << text.size() << ",\"" << text << "\"\r\n";
+                    i = j;
+                }
+            }
+            strings.flush();
+
+            // Conservative MSVC std::vector-like triple detection: begin <= end <= capacity.
+            for (std::size_t offset = 0; offset + 3 * sizeof(std::uintptr_t) <= dumpSize; offset += sizeof(std::uintptr_t))
+            {
+                std::uintptr_t beginPtr=0,endPtr=0,capPtr=0;
+                std::memcpy(&beginPtr, bytes.data()+offset, sizeof(beginPtr));
+                std::memcpy(&endPtr, bytes.data()+offset+sizeof(beginPtr), sizeof(endPtr));
+                std::memcpy(&capPtr, bytes.data()+offset+2*sizeof(beginPtr), sizeof(capPtr));
+                if (beginPtr && beginPtr <= endPtr && endPtr <= capPtr && capPtr-beginPtr <= 64ull*1024ull*1024ull)
+                {
+                    std::uintptr_t spanEnd=0; MEMORY_BASIC_INFORMATION vectorMbi{};
+                    if (QueryReadableSpan(beginPtr, spanEnd, vectorMbi) && capPtr <= spanEnd)
+                    {
+                        containers << node.id << ',' << HexValue(node.address) << ',' << HexValue(offset)
+                                   << ",vector_like," << HexValue(beginPtr) << ',' << HexValue(endPtr) << ',' << HexValue(capPtr)
+                                   << ',' << (endPtr-beginPtr) << ",medium\r\n";
+                    }
+                }
+            }
+            containers.flush();
+
+            if (node.depth < kMaximumDepth)
+            {
+                std::size_t acceptedChildren = 0;
+                for (std::size_t offset = 0; offset + sizeof(std::uintptr_t) <= dumpSize && acceptedChildren < kMaximumChildrenPerNode; offset += sizeof(std::uintptr_t))
+                {
+                    std::uintptr_t value = 0;
+                    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+                    std::uintptr_t targetEnd = 0; MEMORY_BASIC_INFORMATION targetMbi{};
+                    if (!QueryReadableSpan(value, targetEnd, targetMbi)) continue;
+                    const bool targetObject = PointerLooksLikeObject(value);
+                    const bool allocationStart = value == reinterpret_cast<std::uintptr_t>(targetMbi.BaseAddress);
+                    const bool moderateBlock = targetMbi.RegionSize <= (16u * 1024u * 1024u);
+                    const bool fromPriorityRoot = node.priority >= 2 || node.depth == 0;
+                    if (!fromPriorityRoot && !targetObject && !allocationStart && !moderateBlock) continue;
+                    const int childPriority = targetObject ? 2 : (fromPriorityRoot ? 1 : 0);
+                    std::string classification = targetObject ? "object_pointer" : (allocationStart ? "allocation_base_pointer" : "readable_pointer");
+                    const std::size_t child = enqueue(value, node.depth + 1, childPriority, node.sourceRoot, classification, node.id, offset);
+                    edges << node.id << ',' << HexValue(node.address) << ',' << HexValue(offset) << ',' << HexValue(value) << ',';
+                    if (child == static_cast<std::size_t>(-1)) edges << -1; else { edges << child; ++acceptedChildren; }
+                    edges << ',' << classification << ',' << '"' << node.sourceRoot << '"' << "\r\n";
+                }
+                edges.flush();
+            }
+
+            ++processed;
+            if ((processed % 64) == 0 || (priorityPending.empty() && normalPending.empty()))
+            {
+                progress << "processed_nodes=" << processed << " discovered_nodes=" << allNodes.size()
+                         << " priority_pending=" << priorityPending.size() << " normal_pending=" << normalPending.size()
+                         << " bytes=" << totalBytes << " elapsed_ms=" << elapsed << "\r\n" << std::flush;
+            }
+        }
+        if (processed >= kMaximumNodes) stopReason = "node_limit";
+        else if (totalBytes >= kMaximumTotalBytes) stopReason = "byte_limit";
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 146,\r\n"
+                 << "  \"capture_type\": \"prioritized_live_object_graph\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"read_only\": true,\r\n"
+                 << "  \"unknown_functions_called\": false,\r\n"
+                 << "  \"process_id\": " << snapshot.processId << ",\r\n"
+                 << "  \"module_base\": " << JsonString(HexValue(snapshot.atonpTrackerBase)) << ",\r\n"
+                 << "  \"CATPTTabView\": " << JsonString(HexValue(accounts.tabView)) << ",\r\n"
+                 << "  \"ITC_TradeInfo\": " << JsonString(HexValue(accounts.tradeInfo)) << ",\r\n"
+                 << "  \"nodes_discovered\": " << allNodes.size() << ",\r\n"
+                 << "  \"nodes_processed\": " << processed << ",\r\n"
+                 << "  \"memory_bytes\": " << totalBytes << ",\r\n"
+                 << "  \"stop_reason\": " << JsonString(stopReason) << ",\r\n"
+                 << "  \"limits\": {\"max_nodes\":20000,\"max_depth\":5,\"max_total_bytes\":536870912,\"max_vtable_slots\":512,\"max_children_per_node\":256,\"max_runtime_ms\":600000},\r\n"
+                 << "  \"files\": {\r\n"
+                 << "    \"nodes\": " << JsonString(nodesPath) << ",\r\n"
+                 << "    \"edges\": " << JsonString(edgesPath) << ",\r\n"
+                 << "    \"vtables\": " << JsonString(vtablesPath) << ",\r\n"
+                 << "    \"strings\": " << JsonString(stringsPath) << ",\r\n"
+                 << "    \"containers\": " << JsonString(containersPath) << ",\r\n"
+                 << "    \"memory\": " << JsonString(binaryPath) << ",\r\n"
+                 << "    \"progress\": " << JsonString(progressPath) << ",\r\n"
+                 << "    \"diagnostics\": " << JsonString(diagnosticsPath) << "\r\n"
+                 << "  }\r\n"
+                 << "}\r\n";
+        const bool manifestOk = WriteUtf8File(manifestPath, manifest.str());
+        progress << "status=" << (manifestOk ? "completed" : "manifest_failed") << "\r\n"
+                 << "stop_reason=" << stopReason << "\r\nprocessed_nodes=" << processed << "\r\nbytes=" << totalBytes << "\r\n" << std::flush;
+        diagnostics << "stop_reason=" << stopReason << "\r\nnodes_discovered=" << allNodes.size() << "\r\nnodes_processed=" << processed << "\r\n" << std::flush;
+
+        std::ostringstream summary;
+        summary << "{\"capture\":\"prioritized_live_object_graph\",\"version\":145,\"page\":" << JsonString(page) << ','
+                << "\"read_only\":true,\"nodes_discovered\":" << allNodes.size() << ",\"nodes_processed\":" << processed << ','
+                << "\"memory_bytes\":" << totalBytes << ",\"stop_reason\":" << JsonString(stopReason) << ','
+                << "\"manifest_written\":" << (manifestOk ? "true" : "false") << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson = summary.str();
+        return manifestOk && processed > 0;
+    }
+
+
+    struct TargetedProbeTarget
+    {
+        std::string name;
+        std::string chain;
+        std::uintptr_t address = 0;
+        std::size_t requestedBytes = 0;
+    };
+
+    bool AddResolvedPointerTarget(
+        std::vector<TargetedProbeTarget>& targets,
+        const std::string& name,
+        const std::string& chain,
+        std::uintptr_t pointerAddress,
+        std::size_t requestedBytes)
+    {
+        std::uintptr_t value = 0;
+        if (!pointerAddress || !SafeReadValue(reinterpret_cast<void*>(pointerAddress), value))
+            return false;
+        std::uintptr_t regionEnd = 0; MEMORY_BASIC_INFORMATION mbi{};
+        if (!QueryReadableSpan(value, regionEnd, mbi))
+            return false;
+        targets.push_back({name, chain, value, requestedBytes});
+        return true;
+    }
+
+    bool WriteTargetedStructureProbe(
+        const Snapshot& snapshot,
+        std::string& summaryJson,
+        const char* requestedPage)
+    {
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V147_" + pageWide + L"_Targeted_Structure_Probe_";
+        const std::wstring targetsPath = ReportPath((prefix + L"Targets").c_str(), snapshot.processId);
+        const std::wstring stringsPath = ReportPath((prefix + L"Strings").c_str(), snapshot.processId);
+        const std::wstring scalarsPath = ReportPath((prefix + L"Scalars").c_str(), snapshot.processId);
+        const std::wstring pointersPath = ReportPath((prefix + L"Pointers").c_str(), snapshot.processId);
+        const std::wstring diffsPath = ReportPath((prefix + L"Diffs").c_str(), snapshot.processId);
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::wstring memoryPath = ReportPath((prefix + L"Memory").c_str(), snapshot.processId);
+        if (memoryPath.size() >= 4 && memoryPath.substr(memoryPath.size()-4) == L".txt")
+            memoryPath.replace(memoryPath.size()-4, 4, L".bin");
+
+        std::ofstream targetsFile(targetsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream stringsFile(stringsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream scalarsFile(scalarsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream pointersFile(pointersPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diffsFile(diffsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream memory(memoryPath, std::ios::binary | std::ios::trunc);
+        if (!targetsFile || !stringsFile || !scalarsFile || !pointersFile || !diffsFile || !diagnostics || !memory)
+        {
+            summaryJson = "{\"capture\":\"targeted_structure_probe\",\"version\":146,\"error\":\"could_not_create_output_files\"}";
+            return false;
+        }
+
+        targetsFile << "sample,target_id,name,chain,address,region_base,region_size,protection,dump_offset,dump_size,read_ok\r\n";
+        stringsFile << "sample,target_id,target_name,address,offset,encoding,length,text_preview\r\n";
+        scalarsFile << "sample,target_id,target_name,address,offset,kind,value\r\n";
+        pointersFile << "sample,target_id,target_name,address,offset,value,readable,object_candidate,region_base,region_size,protection\r\n";
+        diffsFile << "target_id,target_name,sample_a,sample_b,bytes_compared,changed_bytes,changed_qwords,first_changed_offset,last_changed_offset\r\n";
+        diagnostics << "MC V147 targeted structure probe\r\nread_only=yes\r\nunknown_functions_called=no\r\npage=" << page << "\r\n";
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accounts.tabView ? accounts.tabView : positions.tabView;
+        const std::uintptr_t tradeInfo = accounts.tradeInfo ? accounts.tradeInfo : positions.tradeInfo;
+
+        std::vector<TargetedProbeTarget> targets;
+        auto addDirect = [&](const std::string& name, const std::string& chain, std::uintptr_t address, std::size_t bytes)
+        {
+            std::uintptr_t end=0; MEMORY_BASIC_INFORMATION mbi{};
+            if (address && QueryReadableSpan(address, end, mbi)) targets.push_back({name,chain,address,bytes});
+        };
+
+        addDirect("CATPTTabView", "CATPTTabView", tabView, 0x4000);
+        addDirect("ITC_TradeInfo", "ITC_TradeInfo", tradeInfo, 0x4000);
+
+        if (page == "accounts" || page == "all")
+        {
+            AddResolvedPointerTarget(targets, "accounts_presenter", "CATPTTabView+0x1A70 -> ptr", tabView + 0x1A70, 1024 * 1024);
+            AddResolvedPointerTarget(targets, "tradeinfo_b18", "ITC_TradeInfo+0xB18 -> ptr", tradeInfo + 0xB18, 512 * 1024);
+        }
+        if (page == "open_positions" || page == "all")
+        {
+            std::uintptr_t root98=0, root88=0;
+            if (SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x98), root98))
+            {
+                addDirect("positions_root_98", "ITC_TradeInfo+0x98 -> ptr", root98, 1024 * 1024);
+                AddResolvedPointerTarget(targets, "positions_symbols_950", "ITC_TradeInfo+0x98 -> ptr; +0x950 -> ptr", root98 + 0x950, 1024 * 1024);
+                AddResolvedPointerTarget(targets, "positions_records_10E0", "ITC_TradeInfo+0x98 -> ptr; +0x10E0 -> ptr", root98 + 0x10E0, 1024 * 1024);
+            }
+            if (SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x88), root88))
+            {
+                addDirect("positions_root_88", "ITC_TradeInfo+0x88 -> ptr", root88, 512 * 1024);
+                AddResolvedPointerTarget(targets, "positions_numeric_1070", "ITC_TradeInfo+0x88 -> ptr; +0x1070 -> ptr", root88 + 0x1070, 1024 * 1024);
+            }
+        }
+        if (page == "logs" || page == "all")
+        {
+            std::uintptr_t a=0,b=0;
+            if (SafeReadValue(reinterpret_cast<void*>(tabView + 0xC40), a))
+            {
+                addDirect("logs_root_c40", "CATPTTabView+0xC40 -> ptr", a, 512 * 1024);
+                if (SafeReadValue(reinterpret_cast<void*>(a + 0xA40), b))
+                {
+                    addDirect("logs_second_a40", "CATPTTabView+0xC40 -> ptr; +0xA40 -> ptr", b, 512 * 1024);
+                    AddResolvedPointerTarget(targets, "logs_candidate_e80", "CATPTTabView+0xC40 -> ptr; +0xA40 -> ptr; +0xE80 -> ptr", b + 0xE80, 1024 * 1024);
+                }
+            }
+        }
+
+        constexpr int kSamples = 3;
+        constexpr DWORD kSampleDelayMs = 2000;
+        constexpr std::size_t kHardTargetLimit = 1024 * 1024;
+        std::vector<std::vector<std::vector<unsigned char>>> captures(kSamples);
+        captures.assign(kSamples, std::vector<std::vector<unsigned char>>(targets.size()));
+        std::uint64_t binaryOffset = 0;
+        std::size_t successfulReads = 0;
+
+        for (int sample=0; sample<kSamples; ++sample)
+        {
+            if (sample) Sleep(kSampleDelayMs);
+            for (std::size_t tid=0; tid<targets.size(); ++tid)
+            {
+                const auto& target = targets[tid];
+                std::uintptr_t regionEnd=0; MEMORY_BASIC_INFORMATION mbi{};
+                bool queryOk = QueryReadableSpan(target.address, regionEnd, mbi);
+                std::size_t dumpSize = 0;
+                if (queryOk)
+                    dumpSize = std::min<std::size_t>(std::min<std::size_t>(target.requestedBytes, kHardTargetLimit), static_cast<std::size_t>(regionEnd-target.address));
+                auto& bytes = captures[sample][tid];
+                bytes.assign(dumpSize, 0);
+                const bool readOk = dumpSize && SafeReadBytes(reinterpret_cast<void*>(target.address), bytes.data(), dumpSize);
+                if (readOk) ++successfulReads;
+                const std::uintptr_t regionBase = queryOk ? reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) : 0;
+                targetsFile << sample << ',' << tid << ",\"" << target.name << "\",\"" << target.chain << "\"," << HexValue(target.address) << ','
+                            << HexValue(regionBase) << ',' << (queryOk ? mbi.RegionSize : 0) << ',' << (queryOk ? ProtectionName(mbi.Protect) : "unknown") << ','
+                            << binaryOffset << ',' << dumpSize << ',' << (readOk ? "yes" : "no") << "\r\n";
+                if (!readOk) continue;
+                memory.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                binaryOffset += bytes.size();
+
+                // Strings: preserve exact offsets and capture longer previews than V147.
+                for (std::size_t i=0; i+5<bytes.size(); ++i)
+                {
+                    if (bytes[i] >= 32 && bytes[i] <= 126)
+                    {
+                        std::size_t j=i;
+                        while (j<bytes.size() && bytes[j]>=32 && bytes[j]<=126 && j-i<512) ++j;
+                        if (j-i>=5)
+                        {
+                            std::string text(reinterpret_cast<const char*>(bytes.data()+i), j-i);
+                            for (char& c:text) if (c=='\"') c='\'';
+                            stringsFile << sample << ',' << tid << ",\"" << target.name << "\"," << HexValue(target.address) << ',' << HexValue(i)
+                                        << ",ascii," << (j-i) << ",\"" << text << "\"\r\n";
+                            i=j;
+                        }
+                    }
+                }
+                for (std::size_t i=0; i+10<bytes.size(); i+=2)
+                {
+                    std::size_t j=i; std::string text;
+                    while (j+1<bytes.size() && bytes[j]>=32 && bytes[j]<=126 && bytes[j+1]==0 && text.size()<512)
+                    { text.push_back(static_cast<char>(bytes[j])); j+=2; }
+                    if (text.size()>=5)
+                    {
+                        for (char& c:text) if (c=='\"') c='\'';
+                        stringsFile << sample << ',' << tid << ",\"" << target.name << "\"," << HexValue(target.address) << ',' << HexValue(i)
+                                    << ",utf16le," << text.size() << ",\"" << text << "\"\r\n";
+                        i=j;
+                    }
+                }
+
+                // Qword pointers and candidate object links.
+                for (std::size_t off=0; off+8<=bytes.size(); off+=8)
+                {
+                    std::uintptr_t value=0; std::memcpy(&value, bytes.data()+off, 8);
+                    std::uintptr_t pEnd=0; MEMORY_BASIC_INFORMATION pMbi{};
+                    const bool readable = QueryReadableSpan(value, pEnd, pMbi);
+                    if (readable)
+                        pointersFile << sample << ',' << tid << ",\"" << target.name << "\"," << HexValue(target.address) << ',' << HexValue(off) << ',' << HexValue(value)
+                                     << ",yes," << (PointerLooksLikeObject(value)?"yes":"no") << ',' << HexValue(reinterpret_cast<std::uintptr_t>(pMbi.BaseAddress)) << ','
+                                     << pMbi.RegionSize << ',' << ProtectionName(pMbi.Protect) << "\r\n";
+                }
+
+                // Numeric candidates: aligned integers, float and double. Keep useful finite trading-scale values.
+                for (std::size_t off=0; off+8<=bytes.size(); off+=4)
+                {
+                    std::int32_t i32=0; float f=0.0f; double d=0.0;
+                    std::memcpy(&i32, bytes.data()+off, 4);
+                    std::memcpy(&f, bytes.data()+off, 4);
+                    if (i32 != 0 && i32 > -1000000000 && i32 < 1000000000)
+                        scalarsFile << sample << ',' << tid << ",\"" << target.name << "\"," << HexValue(target.address) << ',' << HexValue(off) << ",int32," << i32 << "\r\n";
+                    if (std::isfinite(f) && std::fabs(f)>=0.0001f && std::fabs(f)<=1.0e9f)
+                        scalarsFile << sample << ',' << tid << ",\"" << target.name << "\"," << HexValue(target.address) << ',' << HexValue(off) << ",float," << std::setprecision(9) << f << "\r\n";
+                    if ((off%8)==0)
+                    {
+                        std::memcpy(&d, bytes.data()+off, 8);
+                        if (std::isfinite(d) && std::fabs(d)>=0.000001 && std::fabs(d)<=1.0e15)
+                            scalarsFile << sample << ',' << tid << ",\"" << target.name << "\"," << HexValue(target.address) << ',' << HexValue(off) << ",double," << std::setprecision(17) << d << "\r\n";
+                    }
+                }
+            }
+            targetsFile.flush(); stringsFile.flush(); scalarsFile.flush(); pointersFile.flush(); memory.flush();
+        }
+
+        for (std::size_t tid=0; tid<targets.size(); ++tid)
+        {
+            for (int b=1; b<kSamples; ++b)
+            {
+                const auto& aBytes=captures[0][tid]; const auto& bBytes=captures[b][tid];
+                const std::size_t n=std::min(aBytes.size(), bBytes.size());
+                std::size_t changedBytes=0, changedQwords=0, first=n, last=0;
+                for (std::size_t i=0;i<n;++i) if (aBytes[i]!=bBytes[i]) { ++changedBytes; if (first==n) first=i; last=i; }
+                for (std::size_t i=0;i+8<=n;i+=8) if (std::memcmp(aBytes.data()+i,bBytes.data()+i,8)!=0) ++changedQwords;
+                diffsFile << tid << ",\"" << targets[tid].name << "\",0," << b << ',' << n << ',' << changedBytes << ',' << changedQwords << ',';
+                if (first==n) diffsFile << "none,none\r\n"; else diffsFile << HexValue(first) << ',' << HexValue(last) << "\r\n";
+            }
+        }
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 146,\r\n"
+                 << "  \"capture_type\": \"targeted_structure_probe\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"read_only\": true,\r\n"
+                 << "  \"unknown_functions_called\": false,\r\n"
+                 << "  \"process_id\": " << snapshot.processId << ",\r\n"
+                 << "  \"CATPTTabView\": " << JsonString(HexValue(tabView)) << ",\r\n"
+                 << "  \"ITC_TradeInfo\": " << JsonString(HexValue(tradeInfo)) << ",\r\n"
+                 << "  \"target_count\": " << targets.size() << ",\r\n"
+                 << "  \"samples\": 3,\r\n"
+                 << "  \"sample_delay_ms\": 2000,\r\n"
+                 << "  \"successful_reads\": " << successfulReads << ",\r\n"
+                 << "  \"memory_bytes\": " << binaryOffset << ",\r\n"
+                 << "  \"files\": {\"targets\":" << JsonString(targetsPath) << ",\"strings\":" << JsonString(stringsPath)
+                 << ",\"scalars\":" << JsonString(scalarsPath) << ",\"pointers\":" << JsonString(pointersPath)
+                 << ",\"diffs\":" << JsonString(diffsPath) << ",\"memory\":" << JsonString(memoryPath)
+                 << ",\"diagnostics\":" << JsonString(diagnosticsPath) << "}\r\n"
+                 << "}\r\n";
+        const bool manifestOk=WriteUtf8File(manifestPath, manifest.str());
+        diagnostics << "target_count=" << targets.size() << "\r\nsuccessful_reads=" << successfulReads << "\r\nmemory_bytes=" << binaryOffset << "\r\n";
+        std::ostringstream summary;
+        summary << "{\"capture\":\"targeted_structure_probe\",\"version\":146,\"page\":" << JsonString(page)
+                << ",\"target_count\":" << targets.size() << ",\"samples\":3,\"successful_reads\":" << successfulReads
+                << ",\"memory_bytes\":" << binaryOffset << ",\"manifest_written\":" << (manifestOk?"true":"false")
+                << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson=summary.str();
+        return manifestOk && successfulReads>0;
+    }
+
+    bool WriteResearchCaptureBundle(
+        const Snapshot& snapshot,
+        std::string& summaryJson)
+    {
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        std::vector<std::wstring> snapshotPaths;
+        const bool snapshotOk = WriteSnapshotReports(snapshot, snapshotPaths);
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+
+        std::wstring contractPath;
+        const bool contractOk = WriteContractAnalysisReport(snapshot, accounts, positions, contractPath);
+
+        CallerXrefAnalysis callerAnalysis = BuildCallerXrefAnalysis(snapshot, accounts, positions);
+        std::wstring callerPath;
+        const bool callerOk = WriteCallerXrefAnalysisReport(
+            snapshot, accounts, positions, callerAnalysis, callerPath);
+
+        std::wstring anchorsPath;
+        std::string anchorsSummary;
+        const bool anchorsOk = WriteThreeTabAnchorReport(snapshot, anchorsPath, anchorsSummary);
+
+        std::wstring pageMethodsPath;
+        std::string pageMethodsSummary;
+        const bool pageMethodsOk = WritePageVirtualMethodExplorerReport(
+            snapshot, pageMethodsPath, pageMethodsSummary);
+
+        std::wstring slot17Path;
+        std::wstring slot17CsvPath;
+        std::string slot17Summary;
+        const bool slot17Ok = WriteSlot17DeepAnalysisReport(
+            snapshot, slot17Path, slot17CsvPath, slot17Summary);
+
+        std::wstring imagePath, regionPath, manifestPath;
+        std::string imageDiagnostic;
+        const bool imageOk = WriteLoadedModuleMemoryImage(
+            snapshot, imagePath, regionPath, manifestPath, imageDiagnostic);
+
+        const bool allOk = snapshotOk && contractOk && callerOk && anchorsOk &&
+            pageMethodsOk && slot17Ok && imageOk;
+        std::ostringstream json;
+        json << "{\"capture\":\"research_bundle\",\"version\":143,"
+             << "\"read_only\":true,\"live_function_calls\":false,"
+             << "\"snapshot_ok\":" << (snapshotOk ? "true" : "false") << ','
+             << "\"contract_ok\":" << (contractOk ? "true" : "false") << ','
+             << "\"callers_ok\":" << (callerOk ? "true" : "false") << ','
+             << "\"anchors_ok\":" << (anchorsOk ? "true" : "false") << ','
+             << "\"page_methods_ok\":" << (pageMethodsOk ? "true" : "false") << ','
+             << "\"slot17_ok\":" << (slot17Ok ? "true" : "false") << ','
+             << "\"loaded_image_ok\":" << (imageOk ? "true" : "false") << ','
+             << "\"image_diagnostic\":" << JsonString(imageDiagnostic) << ','
+             << "\"manifest_path\":" << JsonString(manifestPath) << ','
+             << "\"loaded_image_path\":" << JsonString(imagePath) << ','
+             << "\"region_map_path\":" << JsonString(regionPath) << ','
+             << "\"contract_path\":" << JsonString(contractPath) << ','
+             << "\"caller_path\":" << JsonString(callerPath) << ','
+             << "\"anchors_path\":" << JsonString(anchorsPath) << ','
+             << "\"page_methods_path\":" << JsonString(pageMethodsPath) << ','
+             << "\"slot17_path\":" << JsonString(slot17Path) << ','
+             << "\"slot17_csv_path\":" << JsonString(slot17CsvPath) << "}";
+        summaryJson = json.str();
+        return allOk;
+    }
+
+
+    struct PageProbeMember
+    {
+        std::size_t memberOffset = 0;
+        std::uintptr_t address = 0;
+        std::uintptr_t vtable = 0;
+        std::size_t readableBytes = 0;
+        bool objectCandidate = false;
+        std::string moduleName;
+        std::uintptr_t vtableRva = 0;
+    };
+
+    std::string ModuleForAddress(const Snapshot& snapshot, std::uintptr_t address, std::uintptr_t& rva)
+    {
+        rva = 0;
+        for (const auto& module : snapshot.modules)
+        {
+            if (address >= module.base && address < module.base + module.size)
+            {
+                rva = address - module.base;
+                return WideToUtf8(module.name);
+            }
+        }
+        return {};
+    }
+
+
+    std::string CsvEscapeWide(const std::wstring& value)
+    {
+        std::string utf8 = WideToUtf8(value);
+        bool quote = utf8.find_first_of(",\r\n") != std::string::npos;
+        std::string escaped;
+        escaped.reserve(utf8.size() + 8);
+        for (char ch : utf8)
+        {
+            if (ch == '"') escaped += "\"\"";
+            else escaped += ch;
+        }
+        return quote ? ("\"" + escaped + "\"") : escaped;
+    }
+
+    bool WriteFlexGridTextReader(
+        const Snapshot& snapshot,
+        std::string& summaryJson,
+        const char* requestedPage)
+    {
+        constexpr std::uintptr_t kFlexGridVtableRva = 0x1FD778;
+        constexpr std::uintptr_t kGetTextRva = 0x135E40;
+        constexpr std::size_t kGetTextSlot = 60;
+        constexpr std::size_t kGridMemberOffset = 0x118;
+        constexpr std::size_t kRowsOffset1 = 0xD20;
+        constexpr std::size_t kRowsOffset2 = 0xD24;
+        constexpr unsigned int kMaximumRows = 100;
+        constexpr unsigned int kMaximumColumns = 32;
+        constexpr unsigned int kCellBufferCharacters = 2048;
+
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V150_" + pageWide + L"_FlexGrid_Text_Reader_";
+        const std::wstring cellsPath = ReportPath((prefix + L"Cells").c_str(), snapshot.processId);
+        const std::wstring matrixPath = ReportPath((prefix + L"Matrix").c_str(), snapshot.processId);
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::ofstream cells(cellsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream matrix(matrixPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        if (!cells || !matrix || !diagnostics)
+        {
+            summaryJson = "{\"capture\":\"flexgrid_text_reader\",\"version\":150,\"error\":\"could_not_create_output_files\"}";
+            return false;
+        }
+
+        diagnostics << "MC V150 FlexGrid Text Reader\r\n"
+                    << "page=" << page << "\r\n"
+                    << "controlled_internal_call=yes\r\n"
+                    << "function=CFlexGridImpl::GetText\r\n"
+                    << "grid_member_offset=0x118\r\n"
+                    << "expected_vtable_rva=0x1FD778\r\n"
+                    << "expected_GetText_rva=0x135E40\r\n"
+                    << "GetText_slot=60\r\n";
+        cells << "page,row,column,call_ok,seh_code,text\r\n";
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accounts.tabView ? accounts.tabView : positions.tabView;
+        if (!tabView || !snapshot.atonpTrackerModule)
+        {
+            summaryJson = "{\"capture\":\"flexgrid_text_reader\",\"version\":150,\"error\":\"required_anchor_not_found\"}";
+            return false;
+        }
+        const std::uintptr_t moduleBase = reinterpret_cast<std::uintptr_t>(snapshot.atonpTrackerModule);
+        const std::uintptr_t expectedVtable = moduleBase + kFlexGridVtableRva;
+        const std::uintptr_t expectedGetText = moduleBase + kGetTextRva;
+
+        struct PageRoot { const char* name; std::size_t offset; };
+        std::vector<PageRoot> roots;
+        if (page == "accounts" || page == "all") roots.push_back({"accounts", 0x58});
+        if (page == "open_positions" || page == "all") roots.push_back({"open_positions", 0x68});
+        if (page == "logs" || page == "all") roots.push_back({"logs", 0x80});
+        if (roots.empty())
+        {
+            summaryJson = "{\"capture\":\"flexgrid_text_reader\",\"version\":150,\"error\":\"invalid_page\"}";
+            return false;
+        }
+
+        std::size_t pagesSucceeded = 0, callsAttempted = 0, callsSucceeded = 0, nonEmptyCells = 0, sehFailures = 0;
+        for (const auto& root : roots)
+        {
+            std::uintptr_t pageObject = 0, gridObject = 0, actualVtable = 0, actualGetText = 0;
+            std::uint32_t rows1 = 0, rows2 = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(tabView + root.offset), pageObject) || !pageObject ||
+                !SafeReadValue(reinterpret_cast<void*>(pageObject + kGridMemberOffset), gridObject) || !gridObject ||
+                !SafeReadValue(reinterpret_cast<void*>(gridObject), actualVtable) ||
+                !SafeReadValue(reinterpret_cast<void*>(actualVtable + kGetTextSlot * sizeof(std::uintptr_t)), actualGetText) ||
+                !SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset1), rows1) ||
+                !SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset2), rows2))
+            {
+                diagnostics << "page=" << root.name << " anchor_read_failed\r\n";
+                continue;
+            }
+
+            diagnostics << "page=" << root.name
+                        << " page_object=" << HexValue(pageObject)
+                        << " grid_object=" << HexValue(gridObject)
+                        << " actual_vtable=" << HexValue(actualVtable)
+                        << " expected_vtable=" << HexValue(expectedVtable)
+                        << " slot60=" << HexValue(actualGetText)
+                        << " expected_GetText=" << HexValue(expectedGetText)
+                        << " rows1=" << rows1 << " rows2=" << rows2 << "\r\n";
+
+            const bool identityOk = actualVtable == expectedVtable && actualGetText == expectedGetText;
+            const bool rowsOk = rows1 == rows2 && rows1 <= 100000;
+            if (!identityOk || !rowsOk)
+            {
+                diagnostics << "page=" << root.name << " validation_failed identity_ok=" << (identityOk?"yes":"no")
+                            << " rows_ok=" << (rowsOk?"yes":"no") << "\r\n";
+                continue;
+            }
+
+            const unsigned int rowsToRead = std::min<unsigned int>(rows1, kMaximumRows);
+            matrix << "PAGE," << root.name << ",reported_rows," << rows1 << "\r\n";
+            matrix << "row";
+            for (unsigned int column=0; column<kMaximumColumns; ++column) matrix << ",col_" << column;
+            matrix << "\r\n";
+
+            for (unsigned int row=0; row<rowsToRead; ++row)
+            {
+                matrix << row;
+                for (unsigned int column=0; column<kMaximumColumns; ++column)
+                {
+                    wchar_t buffer[kCellBufferCharacters]{};
+                    DWORD sehCode = 0;
+                    ++callsAttempted;
+                    const int callOk = MCBridge_CallFlexGridGetTextWithSeh(
+                        reinterpret_cast<void*>(gridObject), reinterpret_cast<void*>(actualGetText),
+                        row, column, buffer, kCellBufferCharacters, &sehCode);
+                    if (callOk) ++callsSucceeded; else { ++sehFailures; }
+                    std::wstring text(buffer);
+                    if (!text.empty()) ++nonEmptyCells;
+                    cells << root.name << ',' << row << ',' << column << ',' << (callOk?"yes":"no")
+                          << ",0x" << std::hex << std::uppercase << sehCode << std::dec << ',' << CsvEscapeWide(text) << "\r\n";
+                    matrix << ',' << CsvEscapeWide(text);
+                    if (!callOk)
+                    {
+                        diagnostics << "page=" << root.name << " row=" << row << " column=" << column
+                                    << " GetText_SEH=0x" << std::hex << std::uppercase << sehCode << std::dec << "\r\n";
+                    }
+                }
+                matrix << "\r\n";
+            }
+            matrix << "\r\n";
+            ++pagesSucceeded;
+        }
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 150,\r\n"
+                 << "  \"capture_type\": \"flexgrid_text_reader\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"controlled_internal_call\": true,\r\n"
+                 << "  \"GetText_rva\": \"0x135E40\",\r\n"
+                 << "  \"GetText_slot\": 60,\r\n"
+                 << "  \"pages_succeeded\": " << pagesSucceeded << ",\r\n"
+                 << "  \"calls_attempted\": " << callsAttempted << ",\r\n"
+                 << "  \"calls_succeeded\": " << callsSucceeded << ",\r\n"
+                 << "  \"non_empty_cells\": " << nonEmptyCells << ",\r\n"
+                 << "  \"seh_failures\": " << sehFailures << ",\r\n"
+                 << "  \"files\": {\"cells\":" << JsonString(cellsPath)
+                 << ",\"matrix\":" << JsonString(matrixPath)
+                 << ",\"diagnostics\":" << JsonString(diagnosticsPath) << "}\r\n"
+                 << "}\r\n";
+        const bool manifestOk = WriteUtf8File(manifestPath, manifest.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"flexgrid_text_reader\",\"version\":150,\"page\":" << JsonString(page)
+                << ",\"pages_succeeded\":" << pagesSucceeded << ",\"calls_attempted\":" << callsAttempted
+                << ",\"calls_succeeded\":" << callsSucceeded << ",\"non_empty_cells\":" << nonEmptyCells
+                << ",\"seh_failures\":" << sehFailures << ",\"manifest_written\":" << (manifestOk?"true":"false")
+                << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson = summary.str();
+        return manifestOk && pagesSucceeded > 0 && callsSucceeded > 0;
+    }
+
+    bool WriteV151SingleCellProbe(
+        const Snapshot& snapshot,
+        std::string& summaryJson,
+        const char* requestedPage)
+    {
+        constexpr std::uintptr_t kFlexGridVtableRva = 0x1FD778;
+        constexpr std::uintptr_t kGetTextRva = 0x135E40;
+        constexpr std::size_t kGetTextSlot = 60;
+        constexpr std::size_t kGridMemberOffset = 0x118;
+        constexpr std::size_t kRowsOffset1 = 0xD20;
+        constexpr std::size_t kRowsOffset2 = 0xD24;
+        constexpr unsigned int kBufferCharacters = 2048;
+
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V151_" + pageWide + L"_Single_Cell_GetText_";
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        if (!diagnostics)
+        {
+            summaryJson = "{\"capture\":\"v151_single_cell_gettext\",\"version\":151,\"error\":\"could_not_create_diagnostics\"}";
+            return false;
+        }
+
+        diagnostics << "MC V151 Single Cell GetText Probe\r\n"
+                    << "page=" << page << "\r\n"
+                    << "scope=exactly one GetText call per requested page\r\n"
+                    << "cell=row_0,column_0\r\n"
+                    << "grid_member_offset=0x118\r\n"
+                    << "expected_vtable_rva=0x1FD778\r\n"
+                    << "expected_GetText_rva=0x135E40\r\n"
+                    << "GetText_slot=60\r\n";
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accounts.tabView ? accounts.tabView : positions.tabView;
+        if (!tabView || !snapshot.atonpTrackerModule)
+        {
+            diagnostics << "result=required_anchor_not_found\r\n";
+            summaryJson = "{\"capture\":\"v151_single_cell_gettext\",\"version\":151,\"error\":\"required_anchor_not_found\"}";
+            return false;
+        }
+
+        const std::uintptr_t moduleBase = reinterpret_cast<std::uintptr_t>(snapshot.atonpTrackerModule);
+        const std::uintptr_t expectedVtable = moduleBase + kFlexGridVtableRva;
+        const std::uintptr_t expectedGetText = moduleBase + kGetTextRva;
+        struct PageRoot { const char* name; std::size_t offset; };
+        std::vector<PageRoot> roots;
+        if (page == "accounts" || page == "all") roots.push_back({"accounts", 0x58});
+        if (page == "open_positions" || page == "all") roots.push_back({"open_positions", 0x68});
+        if (page == "logs" || page == "all") roots.push_back({"logs", 0x80});
+        if (roots.empty())
+        {
+            diagnostics << "result=invalid_page\r\n";
+            summaryJson = "{\"capture\":\"v151_single_cell_gettext\",\"version\":151,\"error\":\"invalid_page\"}";
+            return false;
+        }
+
+        std::size_t pagesValidated = 0, callsAttempted = 0, callsSucceeded = 0, nonEmpty = 0, sehFailures = 0;
+        for (const auto& root : roots)
+        {
+            std::uintptr_t pageObject = 0, gridObject = 0, actualVtable = 0, actualGetText = 0;
+            std::uint32_t rows1 = 0, rows2 = 0;
+            const bool anchorsOk =
+                SafeReadValue(reinterpret_cast<void*>(tabView + root.offset), pageObject) && pageObject &&
+                SafeReadValue(reinterpret_cast<void*>(pageObject + kGridMemberOffset), gridObject) && gridObject &&
+                SafeReadValue(reinterpret_cast<void*>(gridObject), actualVtable) &&
+                SafeReadValue(reinterpret_cast<void*>(actualVtable + kGetTextSlot * sizeof(std::uintptr_t)), actualGetText) &&
+                SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset1), rows1) &&
+                SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset2), rows2);
+
+            diagnostics << "page=" << root.name << "\r\n"
+                        << "page_object=" << HexValue(pageObject) << "\r\n"
+                        << "grid_object=" << HexValue(gridObject) << "\r\n"
+                        << "actual_vtable=" << HexValue(actualVtable) << "\r\n"
+                        << "expected_vtable=" << HexValue(expectedVtable) << "\r\n"
+                        << "actual_slot60=" << HexValue(actualGetText) << "\r\n"
+                        << "expected_GetText=" << HexValue(expectedGetText) << "\r\n"
+                        << "rows1=" << rows1 << "\r\n"
+                        << "rows2=" << rows2 << "\r\n";
+
+            if (!anchorsOk)
+            {
+                diagnostics << "validation=anchor_read_failed\r\n\r\n";
+                continue;
+            }
+            const bool identityOk = actualVtable == expectedVtable && actualGetText == expectedGetText;
+            const bool rowsOk = rows1 == rows2 && rows1 > 0 && rows1 <= 100000;
+            diagnostics << "identity_ok=" << (identityOk ? "yes" : "no") << "\r\n"
+                        << "rows_ok=" << (rowsOk ? "yes" : "no") << "\r\n";
+            if (!identityOk || !rowsOk)
+            {
+                diagnostics << "call_attempted=no\r\n\r\n";
+                continue;
+            }
+
+            ++pagesValidated;
+            wchar_t buffer[kBufferCharacters]{};
+            DWORD sehCode = 0;
+            ++callsAttempted;
+            const int callOk = MCBridge_CallFlexGridGetTextWithSeh(
+                reinterpret_cast<void*>(gridObject), reinterpret_cast<void*>(actualGetText),
+                0, 0, buffer, kBufferCharacters, &sehCode);
+            if (callOk) ++callsSucceeded; else { ++sehFailures; }
+            const std::wstring text(buffer);
+            if (!text.empty()) ++nonEmpty;
+            diagnostics << "call_attempted=yes\r\n"
+                        << "call_ok=" << (callOk ? "yes" : "no") << "\r\n"
+                        << "seh_code=0x" << std::hex << std::uppercase << sehCode << std::dec << "\r\n"
+                        << "text_utf8=" << WideToUtf8(text) << "\r\n\r\n";
+        }
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 151,\r\n"
+                 << "  \"capture_type\": \"single_cell_gettext\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"row\": 0,\r\n"
+                 << "  \"column\": 0,\r\n"
+                 << "  \"pages_validated\": " << pagesValidated << ",\r\n"
+                 << "  \"calls_attempted\": " << callsAttempted << ",\r\n"
+                 << "  \"calls_succeeded\": " << callsSucceeded << ",\r\n"
+                 << "  \"non_empty_results\": " << nonEmpty << ",\r\n"
+                 << "  \"seh_failures\": " << sehFailures << ",\r\n"
+                 << "  \"diagnostics\": " << JsonString(diagnosticsPath) << "\r\n"
+                 << "}\r\n";
+        const bool manifestOk = WriteUtf8File(manifestPath, manifest.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"v151_single_cell_gettext\",\"version\":151,\"page\":" << JsonString(page)
+                << ",\"pages_validated\":" << pagesValidated << ",\"calls_attempted\":" << callsAttempted
+                << ",\"calls_succeeded\":" << callsSucceeded << ",\"non_empty_results\":" << nonEmpty
+                << ",\"seh_failures\":" << sehFailures << ",\"manifest_written\":" << (manifestOk ? "true" : "false")
+                << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson = summary.str();
+        return manifestOk && pagesValidated > 0 && callsSucceeded > 0;
+    }
+
+    bool WriteV152CoordinateMap(
+        const Snapshot& snapshot,
+        std::string& summaryJson,
+        const char* requestedPage)
+    {
+        constexpr std::uintptr_t kFlexGridVtableRva = 0x1FD778;
+        constexpr std::uintptr_t kGetTextRva = 0x135E40;
+        constexpr std::size_t kGetTextSlot = 60;
+        constexpr std::size_t kGridMemberOffset = 0x118;
+        constexpr std::size_t kRowsOffset1 = 0xD20;
+        constexpr std::size_t kRowsOffset2 = 0xD24;
+        constexpr unsigned int kRowsToProbe = 10;
+        constexpr unsigned int kColumnsToProbe = 16;
+        constexpr unsigned int kBufferCharacters = 2048;
+
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V152_" + pageWide + L"_Coordinate_Map_";
+        const std::wstring cellsPath = ReportPath((prefix + L"Cells").c_str(), snapshot.processId);
+        const std::wstring matrixPath = ReportPath((prefix + L"Matrix").c_str(), snapshot.processId);
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::ofstream cells(cellsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream matrix(matrixPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        if (!cells || !matrix || !diagnostics)
+        {
+            summaryJson = "{\"capture\":\"v152_coordinate_map\",\"version\":152,\"error\":\"could_not_create_output_files\"}";
+            return false;
+        }
+
+        diagnostics << "MC V152 Guarded FlexGrid Coordinate Map\r\n"
+                    << "page=" << page << "\r\n"
+                    << "rows_probed=0..9\r\ncolumns_probed=0..15\r\n"
+                    << "grid_member_offset=0x118\r\n"
+                    << "expected_vtable_rva=0x1FD778\r\n"
+                    << "expected_GetText_rva=0x135E40\r\n"
+                    << "GetText_slot=60\r\n";
+        cells << "page,row,column,call_ok,seh_code,text_length,text\r\n";
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accounts.tabView ? accounts.tabView : positions.tabView;
+        if (!tabView || !snapshot.atonpTrackerModule)
+        {
+            summaryJson = "{\"capture\":\"v152_coordinate_map\",\"version\":152,\"error\":\"required_anchor_not_found\"}";
+            return false;
+        }
+
+        const std::uintptr_t moduleBase = reinterpret_cast<std::uintptr_t>(snapshot.atonpTrackerModule);
+        const std::uintptr_t expectedVtable = moduleBase + kFlexGridVtableRva;
+        const std::uintptr_t expectedGetText = moduleBase + kGetTextRva;
+        struct PageRoot { const char* name; std::size_t offset; };
+        std::vector<PageRoot> roots;
+        if (page == "accounts" || page == "all") roots.push_back({"accounts", 0x58});
+        if (page == "open_positions" || page == "all") roots.push_back({"open_positions", 0x68});
+        if (page == "logs" || page == "all") roots.push_back({"logs", 0x80});
+        if (roots.empty())
+        {
+            summaryJson = "{\"capture\":\"v152_coordinate_map\",\"version\":152,\"error\":\"invalid_page\"}";
+            return false;
+        }
+
+        std::size_t pagesValidated = 0, callsAttempted = 0, callsSucceeded = 0;
+        std::size_t nonEmpty = 0, sehFailures = 0;
+        for (const auto& root : roots)
+        {
+            std::uintptr_t pageObject = 0, gridObject = 0, actualVtable = 0, actualGetText = 0;
+            std::uint32_t rows1 = 0, rows2 = 0;
+            const bool anchorsOk =
+                SafeReadValue(reinterpret_cast<void*>(tabView + root.offset), pageObject) && pageObject &&
+                SafeReadValue(reinterpret_cast<void*>(pageObject + kGridMemberOffset), gridObject) && gridObject &&
+                SafeReadValue(reinterpret_cast<void*>(gridObject), actualVtable) &&
+                SafeReadValue(reinterpret_cast<void*>(actualVtable + kGetTextSlot * sizeof(std::uintptr_t)), actualGetText) &&
+                SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset1), rows1) &&
+                SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset2), rows2);
+
+            diagnostics << "page=" << root.name << "\r\n"
+                        << "page_object=" << HexValue(pageObject) << "\r\n"
+                        << "grid_object=" << HexValue(gridObject) << "\r\n"
+                        << "actual_vtable=" << HexValue(actualVtable) << "\r\n"
+                        << "expected_vtable=" << HexValue(expectedVtable) << "\r\n"
+                        << "actual_slot60=" << HexValue(actualGetText) << "\r\n"
+                        << "expected_GetText=" << HexValue(expectedGetText) << "\r\n"
+                        << "reported_rows_1=" << rows1 << "\r\n"
+                        << "reported_rows_2=" << rows2 << "\r\n";
+
+            const bool identityOk = anchorsOk && actualVtable == expectedVtable && actualGetText == expectedGetText;
+            const bool rowsOk = anchorsOk && rows1 == rows2 && rows1 > 0 && rows1 <= 100000;
+            diagnostics << "anchors_ok=" << (anchorsOk ? "yes" : "no") << "\r\n"
+                        << "identity_ok=" << (identityOk ? "yes" : "no") << "\r\n"
+                        << "rows_ok=" << (rowsOk ? "yes" : "no") << "\r\n";
+            if (!identityOk || !rowsOk)
+            {
+                diagnostics << "probe_started=no\r\n\r\n";
+                continue;
+            }
+
+            ++pagesValidated;
+            matrix << "PAGE," << root.name << ",reported_rows," << rows1 << "\r\n";
+            matrix << "row";
+            for (unsigned int column = 0; column < kColumnsToProbe; ++column)
+                matrix << ",col_" << column;
+            matrix << "\r\n";
+
+            std::size_t pageNonEmpty = 0, pageSeh = 0;
+            for (unsigned int row = 0; row < kRowsToProbe; ++row)
+            {
+                matrix << row;
+                for (unsigned int column = 0; column < kColumnsToProbe; ++column)
+                {
+                    wchar_t buffer[kBufferCharacters]{};
+                    DWORD sehCode = 0;
+                    ++callsAttempted;
+                    const int callOk = MCBridge_CallFlexGridGetTextWithSeh(
+                        reinterpret_cast<void*>(gridObject), reinterpret_cast<void*>(actualGetText),
+                        row, column, buffer, kBufferCharacters, &sehCode);
+                    if (callOk) ++callsSucceeded;
+                    else { ++sehFailures; ++pageSeh; }
+                    const std::wstring text(buffer);
+                    if (!text.empty()) { ++nonEmpty; ++pageNonEmpty; }
+                    cells << root.name << ',' << row << ',' << column << ',' << (callOk ? "yes" : "no")
+                          << ",0x" << std::hex << std::uppercase << sehCode << std::dec
+                          << ',' << text.size() << ',' << CsvEscapeWide(text) << "\r\n";
+                    matrix << ',' << CsvEscapeWide(text);
+                    if (!callOk)
+                        diagnostics << "GetText_SEH row=" << row << " column=" << column
+                                    << " code=0x" << std::hex << std::uppercase << sehCode << std::dec << "\r\n";
+                }
+                matrix << "\r\n";
+            }
+            matrix << "\r\n";
+            diagnostics << "probe_started=yes\r\n"
+                        << "calls_for_page=" << (kRowsToProbe * kColumnsToProbe) << "\r\n"
+                        << "non_empty_for_page=" << pageNonEmpty << "\r\n"
+                        << "seh_failures_for_page=" << pageSeh << "\r\n\r\n";
+        }
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 152,\r\n"
+                 << "  \"capture_type\": \"guarded_coordinate_map\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"row_range\": \"0..9\",\r\n"
+                 << "  \"column_range\": \"0..15\",\r\n"
+                 << "  \"pages_validated\": " << pagesValidated << ",\r\n"
+                 << "  \"calls_attempted\": " << callsAttempted << ",\r\n"
+                 << "  \"calls_succeeded\": " << callsSucceeded << ",\r\n"
+                 << "  \"non_empty_results\": " << nonEmpty << ",\r\n"
+                 << "  \"seh_failures\": " << sehFailures << ",\r\n"
+                 << "  \"files\": {\"cells\":" << JsonString(cellsPath)
+                 << ",\"matrix\":" << JsonString(matrixPath)
+                 << ",\"diagnostics\":" << JsonString(diagnosticsPath) << "}\r\n"
+                 << "}\r\n";
+        const bool manifestOk = WriteUtf8File(manifestPath, manifest.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"v152_coordinate_map\",\"version\":152,\"page\":" << JsonString(page)
+                << ",\"pages_validated\":" << pagesValidated << ",\"calls_attempted\":" << callsAttempted
+                << ",\"calls_succeeded\":" << callsSucceeded << ",\"non_empty_results\":" << nonEmpty
+                << ",\"seh_failures\":" << sehFailures << ",\"manifest_written\":" << (manifestOk ? "true" : "false")
+                << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson = summary.str();
+        return manifestOk && pagesValidated > 0 && callsSucceeded > 0;
+    }
+
+    bool WriteGridInterfaceLocator(
+        const Snapshot& snapshot,
+        std::string& summaryJson,
+        const char* requestedPage)
+    {
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V149_" + pageWide + L"_Grid_Interface_Locator_";
+        const std::wstring objectsPath = ReportPath((prefix + L"Objects").c_str(), snapshot.processId);
+        const std::wstring vtablesPath = ReportPath((prefix + L"Vtables").c_str(), snapshot.processId);
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::ofstream objects(objectsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream vtables(vtablesPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        if (!objects || !vtables || !diagnostics)
+        {
+            summaryJson = "{\"capture\":\"grid_interface_locator\",\"version\":149,\"error\":\"could_not_create_output_files\"}";
+            return false;
+        }
+        diagnostics << "MC V149 Grid Interface Locator\r\n"
+                    << "goal=locate the live grid object used by Accounts, Open Positions and Logs\r\n"
+                    << "read_only=yes\r\nunknown_functions_called=no\r\nGetText_called=no\r\npage=" << page << "\r\n";
+        objects << "page,depth,parent_offset,object,vtable,vtable_module,vtable_rva,allocation_base,region_size,protect,executable_slots,score\r\n";
+        vtables << "page,object,vtable,slot,method,method_module,method_rva,executable\r\n";
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accounts.tabView ? accounts.tabView : positions.tabView;
+        if (!tabView)
+        {
+            summaryJson = "{\"capture\":\"grid_interface_locator\",\"version\":149,\"error\":\"CATPTTabView_not_found\"}";
+            return false;
+        }
+        struct PageRoot { const char* name; std::size_t offset; };
+        std::vector<PageRoot> roots;
+        if (page == "accounts" || page == "all") roots.push_back({"accounts", 0x58});
+        if (page == "open_positions" || page == "all") roots.push_back({"open_positions", 0x68});
+        if (page == "logs" || page == "all") roots.push_back({"logs", 0x80});
+        if (roots.empty())
+        {
+            summaryJson = "{\"capture\":\"grid_interface_locator\",\"version\":149,\"error\":\"invalid_page\"}";
+            return false;
+        }
+
+        std::size_t objectCount = 0, vtableSlotCount = 0, highScoreCount = 0;
+        std::set<std::uintptr_t> globalSeen;
+        for (const auto& root : roots)
+        {
+            std::uintptr_t pageObject = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(tabView + root.offset), pageObject) || !pageObject)
+            {
+                diagnostics << "page=" << root.name << " page_pointer_read_failed\r\n";
+                continue;
+            }
+            struct Work { std::uintptr_t object; int depth; std::size_t parentOffset; };
+            std::vector<Work> queue{{pageObject,0,root.offset}};
+            for (std::size_t qi=0; qi<queue.size() && qi<512; ++qi)
+            {
+                const Work work=queue[qi];
+                if (!globalSeen.insert(work.object).second) continue;
+                std::uintptr_t vtable=0;
+                if (!SafeReadValue(reinterpret_cast<void*>(work.object), vtable)) continue;
+                std::uintptr_t vtRva=0;
+                const std::string vtModule=ModuleForAddress(snapshot,vtable,vtRva);
+                if (vtModule.empty()) continue;
+                MEMORY_BASIC_INFORMATION mbi{};
+                if (!VirtualQuery(reinterpret_cast<void*>(work.object), &mbi, sizeof(mbi))) continue;
+                std::size_t executableSlots=0;
+                for (std::size_t slot=0; slot<64; ++slot)
+                {
+                    std::uintptr_t method=0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(vtable+slot*sizeof(void*)),method) || !method) break;
+                    std::uintptr_t methodRva=0;
+                    const std::string methodModule=ModuleForAddress(snapshot,method,methodRva);
+                    const bool executable=MemoryRangeHasProtection(reinterpret_cast<void*>(method),1,true);
+                    if (executable) ++executableSlots;
+                    vtables << root.name << ',' << HexValue(work.object) << ',' << HexValue(vtable) << ',' << slot << ','
+                            << HexValue(method) << ",\"" << methodModule << "\"," << HexValue(methodRva) << ',' << (executable?"yes":"no") << "\r\n";
+                    ++vtableSlotCount;
+                    if (!executable && slot>2) break;
+                }
+                int score=0;
+                if (vtModule.find("ATOnPTracker")!=std::string::npos) score+=50;
+                if (executableSlots>=8) score+=20;
+                if (executableSlots>=20) score+=15;
+                if (work.depth==1) score+=10;
+                if (work.depth==2) score+=5;
+                if (score>=70) ++highScoreCount;
+                objects << root.name << ',' << work.depth << ',' << HexValue(work.parentOffset) << ',' << HexValue(work.object) << ','
+                        << HexValue(vtable) << ",\"" << vtModule << "\"," << HexValue(vtRva) << ','
+                        << HexValue(reinterpret_cast<std::uintptr_t>(mbi.AllocationBase)) << ',' << mbi.RegionSize << ',' << HexValue(mbi.Protect)
+                        << ',' << executableSlots << ',' << score << "\r\n";
+                ++objectCount;
+
+                if (work.depth < 2)
+                {
+                    constexpr std::size_t kScanBytes=0x1000;
+                    for (std::size_t off=sizeof(void*); off+sizeof(void*)<=kScanBytes; off+=sizeof(void*))
+                    {
+                        std::uintptr_t child=0, childVtable=0;
+                        if (!SafeReadValue(reinterpret_cast<void*>(work.object+off),child) || !child || child==work.object) continue;
+                        if (!SafeReadValue(reinterpret_cast<void*>(child),childVtable)) continue;
+                        std::uintptr_t dummy=0;
+                        const std::string childModule=ModuleForAddress(snapshot,childVtable,dummy);
+                        if (childModule.find("ATOnPTracker")!=std::string::npos)
+                            queue.push_back({child,work.depth+1,off});
+                    }
+                }
+            }
+        }
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 149,\r\n"
+                 << "  \"capture_type\": \"grid_interface_locator\",\r\n"
+                 << "  \"final_goal\": \"read Accounts, Open Positions and Logs for Watchdog status and situation reports\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"read_only\": true,\r\n"
+                 << "  \"unknown_functions_called\": false,\r\n"
+                 << "  \"GetText_called\": false,\r\n"
+                 << "  \"objects\": " << objectCount << ",\r\n"
+                 << "  \"vtable_slots\": " << vtableSlotCount << ",\r\n"
+                 << "  \"high_score_objects\": " << highScoreCount << ",\r\n"
+                 << "  \"files\": {\"objects\":" << JsonString(objectsPath) << ",\"vtables\":" << JsonString(vtablesPath)
+                 << ",\"diagnostics\":" << JsonString(diagnosticsPath) << "}\r\n"
+                 << "}\r\n";
+        const bool manifestOk=WriteUtf8File(manifestPath,manifest.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"grid_interface_locator\",\"version\":149,\"page\":" << JsonString(page)
+                << ",\"read_only\":true,\"GetText_called\":false,\"objects\":" << objectCount
+                << ",\"vtable_slots\":" << vtableSlotCount << ",\"high_score_objects\":" << highScoreCount
+                << ",\"manifest_written\":" << (manifestOk?"true":"false") << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson=summary.str();
+        return manifestOk && objectCount>0;
+    }
+
+    bool WritePageObjectStructureProbe(
+        const Snapshot& snapshot,
+        std::string& summaryJson,
+        const char* requestedPage)
+    {
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::string page = (requestedPage && *requestedPage) ? requestedPage : "unspecified";
+        std::wstring pageWide(page.begin(), page.end());
+        const std::wstring prefix = L"MC_V148_" + pageWide + L"_FlexGrid_Row_Layout_Probe_";
+        const std::wstring rootsPath = ReportPath((prefix + L"Page_Roots").c_str(), snapshot.processId);
+        const std::wstring regionsPath = ReportPath((prefix + L"Ranked_Regions").c_str(), snapshot.processId);
+        const std::wstring stringsPath = ReportPath((prefix + L"Strings").c_str(), snapshot.processId);
+        const std::wstring vectorsPath = ReportPath((prefix + L"Vector_Candidates").c_str(), snapshot.processId);
+        const std::wstring stridesPath = ReportPath((prefix + L"Stride_Candidates").c_str(), snapshot.processId);
+        const std::wstring diffsPath = ReportPath((prefix + L"Diffs").c_str(), snapshot.processId);
+        const std::wstring diagnosticsPath = ReportPath((prefix + L"Diagnostics").c_str(), snapshot.processId);
+        const std::wstring manifestPath = ReportPath((prefix + L"Manifest").c_str(), snapshot.processId);
+        std::wstring memoryPath = ReportPath((prefix + L"Memory").c_str(), snapshot.processId);
+        if (memoryPath.size() >= 4 && memoryPath.substr(memoryPath.size() - 4) == L".txt")
+            memoryPath.replace(memoryPath.size() - 4, 4, L".bin");
+
+        std::ofstream rootsOut(rootsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream regionsOut(regionsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream stringsOut(stringsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream vectorsOut(vectorsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream stridesOut(stridesPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diffsOut(diffsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream diagnostics(diagnosticsPath, std::ios::binary | std::ios::trunc);
+        std::ofstream memory(memoryPath, std::ios::binary | std::ios::trunc);
+        if (!rootsOut || !regionsOut || !stringsOut || !vectorsOut || !stridesOut ||
+            !diffsOut || !diagnostics || !memory)
+        {
+            summaryJson = "{\"capture\":\"flexgrid_row_layout_probe\",\"version\":148,\"error\":\"could_not_create_output_files\"}";
+            return false;
+        }
+
+        rootsOut << "sample,page,page_member_offset,page_object,vtable,vtable_module,vtable_rva,read_ok\r\n";
+        regionsOut << "sample,page,member_offset,address,region_base,region_size,protection,captured_bytes,header_hits,string_count,pointer_density_per_mille,changed_bytes,score,memory_offset\r\n";
+        stringsOut << "sample,page,member_offset,address,offset,encoding,length,known_header,text_preview\r\n";
+        vectorsOut << "sample,page,owner,owner_member_offset,triplet_offset,begin,end,capacity,used_bytes,capacity_bytes,element_size,element_count,readable,score\r\n";
+        stridesOut << "sample,page,member_offset,address,stride,records_checked,records_with_text,records_with_pointer,text_ratio_per_mille,pointer_ratio_per_mille,score\r\n";
+        diffsOut << "page,member_offset,sample_a,sample_b,bytes_compared,changed_bytes,first_changed_offset,last_changed_offset\r\n";
+        diagnostics << "MC V148 FlexGrid Row Layout Probe\r\n"
+                    << "goal=identify Accounts/Open Positions/Logs model, row and cell storage for Watchdog reports\r\n"
+                    << "read_only=yes\r\nunknown_functions_called=no\r\npage=" << page << "\r\n";
+
+        ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positions = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accounts.tabView ? accounts.tabView : positions.tabView;
+        if (!tabView)
+        {
+            summaryJson = "{\"capture\":\"flexgrid_row_layout_probe\",\"version\":148,\"error\":\"CATPTTabView_not_found\"}";
+            return false;
+        }
+
+        struct PageRoot { const char* name; std::size_t offset; std::uintptr_t expectedVtableRva; };
+        std::vector<PageRoot> roots;
+        if (page == "accounts" || page == "all") roots.push_back({"accounts", 0x58, 0x1DB7E8});
+        if (page == "open_positions" || page == "all") roots.push_back({"open_positions", 0x68, 0x1E15C8});
+        if (page == "logs" || page == "all") roots.push_back({"logs", 0x80, 0x1F0450});
+        if (roots.empty())
+        {
+            summaryJson = "{\"capture\":\"flexgrid_row_layout_probe\",\"version\":148,\"error\":\"invalid_page\"}";
+            return false;
+        }
+
+        constexpr int kSamples = 3;
+        constexpr DWORD kSampleDelayMs = 2000;
+        constexpr std::size_t kPageObjectBytes = 0x1000;
+        constexpr std::size_t kRegionCaptureBytes = 0x40000; // 256 KiB: broad enough for rows, bounded for safety.
+        constexpr std::size_t kMaximumMembersPerPage = 192;
+        const std::size_t candidateStrides[] = { 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 112, 128, 160, 192, 224, 256 };
+        const std::size_t candidateElementSizes[] = { 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 112, 128, 160, 192, 224, 256 };
+
+        struct Capture
+        {
+            std::string page;
+            std::size_t memberOffset = 0;
+            std::uintptr_t address = 0;
+            std::vector<unsigned char> bytes;
+        };
+        std::map<std::string, std::vector<Capture>> captures;
+        std::uint64_t binaryOffset = 0;
+        std::size_t successfulPages = 0;
+        std::size_t successfulRegions = 0;
+        std::size_t vectorCandidates = 0;
+        std::size_t strideCandidates = 0;
+
+        auto isPrintableAscii = [](unsigned char c) { return c >= 32 && c <= 126; };
+        auto isKnownHeader = [&](const std::string& text, const std::string& pageName)
+        {
+            static const char* common[] = { "Account", "Profile", "Strategy", "Instrument", "Symbol", "Quantity", "Price", "Date/Time", "Category", "Message", "Status", "Currency", "P/L", "Open P/L", "Market Value" };
+            for (const char* item : common) if (text.find(item) != std::string::npos) return true;
+            if (pageName == "accounts" && (text.find("Cash") != std::string::npos || text.find("Equity") != std::string::npos || text.find("Buying Power") != std::string::npos)) return true;
+            if (pageName == "open_positions" && (text.find("Average Price") != std::string::npos || text.find("Position") != std::string::npos)) return true;
+            if (pageName == "logs" && (text.find("Event") != std::string::npos || text.find("Error") != std::string::npos)) return true;
+            return false;
+        };
+        auto containsTextNear = [&](const std::vector<unsigned char>& bytes, std::size_t offset, std::size_t length)
+        {
+            const std::size_t end = std::min(bytes.size(), offset + length);
+            std::size_t run = 0;
+            for (std::size_t i = offset; i < end; ++i)
+            {
+                if (isPrintableAscii(bytes[i])) { if (++run >= 4) return true; }
+                else run = 0;
+            }
+            run = 0;
+            for (std::size_t i = offset; i + 1 < end; i += 2)
+            {
+                if (isPrintableAscii(bytes[i]) && bytes[i + 1] == 0) { if (++run >= 4) return true; }
+                else run = 0;
+            }
+            return false;
+        };
+        auto pointerDensity = [&](const std::vector<unsigned char>& bytes)
+        {
+            if (bytes.size() < sizeof(std::uintptr_t)) return std::size_t(0);
+            std::size_t pointers = 0, slots = 0;
+            const std::size_t scanBytes = std::min<std::size_t>(bytes.size(), 0x8000);
+            for (std::size_t off = 0; off + sizeof(std::uintptr_t) <= scanBytes; off += sizeof(std::uintptr_t))
+            {
+                std::uintptr_t value = 0; std::memcpy(&value, bytes.data() + off, sizeof(value));
+                ++slots;
+                std::uintptr_t end = 0; MEMORY_BASIC_INFORMATION mbi{};
+                if (QueryReadableSpan(value, end, mbi)) ++pointers;
+            }
+            return slots ? (pointers * 1000 / slots) : 0;
+        };
+
+        auto emitStrings = [&](int sample, const std::string& pageName, std::size_t memberOffset,
+                               std::uintptr_t address, const std::vector<unsigned char>& bytes,
+                               std::size_t& stringCount, std::size_t& headerHits)
+        {
+            for (std::size_t i = 0; i + 5 < bytes.size(); ++i)
+            {
+                if (!isPrintableAscii(bytes[i])) continue;
+                std::size_t j = i;
+                while (j < bytes.size() && isPrintableAscii(bytes[j]) && j - i < 512) ++j;
+                if (j - i >= 5)
+                {
+                    std::string text(reinterpret_cast<const char*>(bytes.data() + i), j - i);
+                    for (char& c : text) if (c == '"') c = '\'';
+                    const bool header = isKnownHeader(text, pageName);
+                    ++stringCount; if (header) ++headerHits;
+                    stringsOut << sample << ",\"" << pageName << "\"," << HexValue(memberOffset) << ',' << HexValue(address)
+                               << ',' << HexValue(i) << ",ascii," << (j - i) << ',' << (header ? "yes" : "no") << ",\"" << text << "\"\r\n";
+                    i = j;
+                }
+            }
+            for (std::size_t i = 0; i + 10 < bytes.size(); i += 2)
+            {
+                std::size_t j = i; std::string text;
+                while (j + 1 < bytes.size() && isPrintableAscii(bytes[j]) && bytes[j + 1] == 0 && text.size() < 512)
+                { text.push_back(static_cast<char>(bytes[j])); j += 2; }
+                if (text.size() >= 5)
+                {
+                    for (char& c : text) if (c == '"') c = '\'';
+                    const bool header = isKnownHeader(text, pageName);
+                    ++stringCount; if (header) ++headerHits;
+                    stringsOut << sample << ",\"" << pageName << "\"," << HexValue(memberOffset) << ',' << HexValue(address)
+                               << ',' << HexValue(i) << ",utf16le," << text.size() << ',' << (header ? "yes" : "no") << ",\"" << text << "\"\r\n";
+                    i = j;
+                }
+            }
+        };
+
+        auto scanVectorTriplets = [&](int sample, const std::string& pageName, const char* owner,
+                                      std::size_t ownerMemberOffset, const std::vector<unsigned char>& bytes)
+        {
+            const std::size_t vectorScanBytes = std::min<std::size_t>(bytes.size(), 0x10000);
+            for (std::size_t off = 0; off + 3 * sizeof(std::uintptr_t) <= vectorScanBytes; off += sizeof(std::uintptr_t))
+            {
+                std::uintptr_t begin = 0, end = 0, capacity = 0;
+                std::memcpy(&begin, bytes.data() + off, sizeof(begin));
+                std::memcpy(&end, bytes.data() + off + sizeof(begin), sizeof(end));
+                std::memcpy(&capacity, bytes.data() + off + 2 * sizeof(begin), sizeof(capacity));
+                if (!begin || begin > end || end > capacity || capacity - begin > 0x4000000ull) continue;
+                std::uintptr_t readableEnd = 0; MEMORY_BASIC_INFORMATION mbi{};
+                const bool readable = QueryReadableSpan(begin, readableEnd, mbi) && end <= readableEnd;
+                if (!readable) continue;
+                const std::size_t used = static_cast<std::size_t>(end - begin);
+                if (used == 0 || used > 0x1000000) continue;
+                for (std::size_t elementSize : candidateElementSizes)
+                {
+                    if (used % elementSize != 0) continue;
+                    const std::size_t count = used / elementSize;
+                    if (count == 0 || count > 100000) continue;
+                    int score = 20;
+                    if (count >= 2) score += 10;
+                    if (count <= 5000) score += 5;
+                    if (elementSize >= 24) score += 5;
+                    vectorsOut << sample << ",\"" << pageName << "\",\"" << owner << "\"," << HexValue(ownerMemberOffset)
+                               << ',' << HexValue(off) << ',' << HexValue(begin) << ',' << HexValue(end) << ',' << HexValue(capacity)
+                               << ',' << used << ',' << (capacity - begin) << ',' << elementSize << ',' << count << ",yes," << score << "\r\n";
+                    ++vectorCandidates;
+                }
+            }
+        };
+
+        for (int sample = 0; sample < kSamples; ++sample)
+        {
+            if (sample) Sleep(kSampleDelayMs);
+            for (const auto& root : roots)
+            {
+                std::uintptr_t pageObject = 0;
+                if (!SafeReadValue(reinterpret_cast<void*>(tabView + root.offset), pageObject))
+                {
+                    diagnostics << "sample=" << sample << " page=" << root.name << " failed_to_read_page_pointer\r\n";
+                    continue;
+                }
+                std::uintptr_t pageEnd = 0; MEMORY_BASIC_INFORMATION pageMbi{};
+                if (!QueryReadableSpan(pageObject, pageEnd, pageMbi)) continue;
+                const std::size_t objectSize = std::min<std::size_t>(kPageObjectBytes, static_cast<std::size_t>(pageEnd - pageObject));
+                std::vector<unsigned char> objectBytes(objectSize, 0);
+                if (!objectSize || !SafeReadBytes(reinterpret_cast<void*>(pageObject), objectBytes.data(), objectSize)) continue;
+                ++successfulPages;
+                std::uintptr_t vtable = 0; std::memcpy(&vtable, objectBytes.data(), sizeof(vtable));
+                std::uintptr_t vtableRva = 0; const std::string vtableModule = ModuleForAddress(snapshot, vtable, vtableRva);
+                rootsOut << sample << ",\"" << root.name << "\"," << HexValue(root.offset) << ',' << HexValue(pageObject) << ','
+                         << HexValue(vtable) << ",\"" << vtableModule << "\"," << HexValue(vtableRva) << ",yes\r\n";
+                scanVectorTriplets(sample, root.name, "page_object", 0, objectBytes);
+
+                std::set<std::uintptr_t> seenAddresses;
+                std::size_t memberCount = 0;
+                for (std::size_t off = 0; off + sizeof(std::uintptr_t) <= objectBytes.size() && memberCount < kMaximumMembersPerPage; off += sizeof(std::uintptr_t))
+                {
+                    std::uintptr_t value = 0; std::memcpy(&value, objectBytes.data() + off, sizeof(value));
+                    std::uintptr_t regionEnd = 0; MEMORY_BASIC_INFORMATION mbi{};
+                    if (!QueryReadableSpan(value, regionEnd, mbi) || !seenAddresses.insert(value).second) continue;
+                    ++memberCount;
+                    const std::size_t captureSize = std::min<std::size_t>(kRegionCaptureBytes, static_cast<std::size_t>(regionEnd - value));
+                    if (captureSize < 32) continue;
+                    std::vector<unsigned char> bytes(captureSize, 0);
+                    if (!SafeReadBytes(reinterpret_cast<void*>(value), bytes.data(), captureSize)) continue;
+                    ++successfulRegions;
+
+                    const std::string key = std::string(root.name) + ":" + std::to_string(off);
+                    std::size_t changedBytes = 0;
+                    const auto previous = captures.find(key);
+                    if (previous != captures.end() && !previous->second.empty())
+                    {
+                        const auto& first = previous->second.front().bytes;
+                        const std::size_t n = std::min(first.size(), bytes.size());
+                        for (std::size_t i = 0; i < n; ++i) if (first[i] != bytes[i]) ++changedBytes;
+                    }
+                    std::size_t stringCount = 0, headerHits = 0;
+                    emitStrings(sample, root.name, off, value, bytes, stringCount, headerHits);
+                    const std::size_t density = pointerDensity(bytes);
+                    int score = static_cast<int>(headerHits * 30 + std::min<std::size_t>(stringCount, 40) * 2);
+                    if (density >= 50 && density <= 800) score += 15;
+                    if (changedBytes > 0) score += 20;
+                    if (changedBytes > 0 && changedBytes < bytes.size() / 4) score += 15;
+
+                    regionsOut << sample << ",\"" << root.name << "\"," << HexValue(off) << ',' << HexValue(value) << ','
+                               << HexValue(reinterpret_cast<std::uintptr_t>(mbi.BaseAddress)) << ',' << mbi.RegionSize << ',' << ProtectionName(mbi.Protect)
+                               << ',' << captureSize << ',' << headerHits << ',' << stringCount << ',' << density << ',' << changedBytes << ',' << score << ',' << binaryOffset << "\r\n";
+                    memory.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                    binaryOffset += bytes.size();
+                    captures[key].push_back({ root.name, off, value, bytes });
+                    scanVectorTriplets(sample, root.name, "direct_member_region", off, bytes);
+
+                    for (std::size_t stride : candidateStrides)
+                    {
+                        const std::size_t records = std::min<std::size_t>(bytes.size() / stride, 64);
+                        if (records < 3) continue;
+                        std::size_t textRecords = 0, pointerRecords = 0;
+                        for (std::size_t record = 0; record < records; ++record)
+                        {
+                            const std::size_t base = record * stride;
+                            if (containsTextNear(bytes, base, stride)) ++textRecords;
+                            bool hasPointer = false;
+                            const std::size_t pointerWindowEnd = std::min<std::size_t>(std::min(bytes.size(), base + stride), base + 4 * sizeof(std::uintptr_t));
+                            for (std::size_t p = base; p + sizeof(std::uintptr_t) <= pointerWindowEnd; p += sizeof(std::uintptr_t))
+                            {
+                                std::uintptr_t candidate = 0; std::memcpy(&candidate, bytes.data() + p, sizeof(candidate));
+                                std::uintptr_t candidateEnd = 0; MEMORY_BASIC_INFORMATION candidateMbi{};
+                                if (QueryReadableSpan(candidate, candidateEnd, candidateMbi)) { hasPointer = true; break; }
+                            }
+                            if (hasPointer) ++pointerRecords;
+                        }
+                        const std::size_t textRatio = textRecords * 1000 / records;
+                        const std::size_t pointerRatio = pointerRecords * 1000 / records;
+                        int strideScore = static_cast<int>(textRatio / 20 + pointerRatio / 25);
+                        if (textRecords >= 2 && textRecords < records) strideScore += 15;
+                        if (pointerRecords >= 2 && pointerRecords < records) strideScore += 10;
+                        if (strideScore >= 25)
+                        {
+                            stridesOut << sample << ",\"" << root.name << "\"," << HexValue(off) << ',' << HexValue(value) << ',' << stride << ','
+                                       << records << ',' << textRecords << ',' << pointerRecords << ',' << textRatio << ',' << pointerRatio << ',' << strideScore << "\r\n";
+                            ++strideCandidates;
+                        }
+                    }
+                }
+                diagnostics << "sample=" << sample << " page=" << root.name << " page_object=" << HexValue(pageObject)
+                            << " vtable_rva=" << HexValue(vtableRva) << " expected=" << HexValue(root.expectedVtableRva)
+                            << " unique_readable_members=" << memberCount << "\r\n";
+            }
+            rootsOut.flush(); regionsOut.flush(); stringsOut.flush(); vectorsOut.flush(); stridesOut.flush(); memory.flush(); diagnostics.flush();
+        }
+
+        for (const auto& item : captures)
+        {
+            if (item.second.size() < 2) continue;
+            const Capture& firstCapture = item.second.front();
+            for (std::size_t sampleIndex = 1; sampleIndex < item.second.size(); ++sampleIndex)
+            {
+                const Capture& other = item.second[sampleIndex];
+                const std::size_t n = std::min(firstCapture.bytes.size(), other.bytes.size());
+                std::size_t changed = 0, first = n, last = 0;
+                for (std::size_t i = 0; i < n; ++i)
+                    if (firstCapture.bytes[i] != other.bytes[i]) { ++changed; if (first == n) first = i; last = i; }
+                diffsOut << '"' << firstCapture.page << "\"," << HexValue(firstCapture.memberOffset) << ",0," << sampleIndex << ',' << n << ',' << changed << ',';
+                if (first == n) diffsOut << "none,none\r\n"; else diffsOut << HexValue(first) << ',' << HexValue(last) << "\r\n";
+            }
+        }
+
+        std::ostringstream manifest;
+        manifest << "{\r\n"
+                 << "  \"capture_version\": 148,\r\n"
+                 << "  \"capture_type\": \"flexgrid_row_layout_probe\",\r\n"
+                 << "  \"final_goal\": \"read Accounts, Open Positions and Logs for Watchdog status and situation reports\",\r\n"
+                 << "  \"page\": " << JsonString(page) << ",\r\n"
+                 << "  \"read_only\": true,\r\n"
+                 << "  \"unknown_functions_called\": false,\r\n"
+                 << "  \"process_id\": " << snapshot.processId << ",\r\n"
+                 << "  \"CATPTTabView\": " << JsonString(HexValue(tabView)) << ",\r\n"
+                 << "  \"page_object_offsets\": {\"accounts\":\"0x58\",\"open_positions\":\"0x68\",\"logs\":\"0x80\"},\r\n"
+                 << "  \"samples\": 3,\r\n"
+                 << "  \"successful_page_reads\": " << successfulPages << ",\r\n"
+                 << "  \"successful_region_reads\": " << successfulRegions << ",\r\n"
+                 << "  \"vector_candidates\": " << vectorCandidates << ",\r\n"
+                 << "  \"stride_candidates\": " << strideCandidates << ",\r\n"
+                 << "  \"memory_bytes\": " << binaryOffset << ",\r\n"
+                 << "  \"files\": {\"page_roots\":" << JsonString(rootsPath) << ",\"ranked_regions\":" << JsonString(regionsPath)
+                 << ",\"strings\":" << JsonString(stringsPath) << ",\"vectors\":" << JsonString(vectorsPath)
+                 << ",\"strides\":" << JsonString(stridesPath) << ",\"diffs\":" << JsonString(diffsPath)
+                 << ",\"memory\":" << JsonString(memoryPath) << ",\"diagnostics\":" << JsonString(diagnosticsPath) << "}\r\n"
+                 << "}\r\n";
+        const bool manifestOk = WriteUtf8File(manifestPath, manifest.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"flexgrid_row_layout_probe\",\"version\":148,\"page\":" << JsonString(page)
+                << ",\"read_only\":true,\"successful_page_reads\":" << successfulPages
+                << ",\"successful_region_reads\":" << successfulRegions
+                << ",\"vector_candidates\":" << vectorCandidates
+                << ",\"stride_candidates\":" << strideCandidates
+                << ",\"memory_bytes\":" << binaryOffset
+                << ",\"manifest_written\":" << (manifestOk ? "true" : "false")
+                << ",\"manifest_path\":" << JsonString(manifestPath) << '}';
+        summaryJson = summary.str();
+        return manifestOk && successfulPages > 0 && successfulRegions > 0;
+    }
+
+
+    struct V153GridSectionResult
+    {
+        std::string name;
+        bool ok = false;
+        std::wstring diagnostic;
+        std::uint32_t reportedRows = 0;
+        std::size_t callsAttempted = 0;
+        std::size_t callsSucceeded = 0;
+        std::size_t sehFailures = 0;
+        std::vector<std::vector<std::wstring>> rows;
+    };
+
+    class V153GridReadLockGuard
+    {
+    public:
+        V153GridReadLockGuard() { AcquireSRWLockExclusive(&g_gridReadLock); }
+        ~V153GridReadLockGuard() { ReleaseSRWLockExclusive(&g_gridReadLock); }
+        V153GridReadLockGuard(const V153GridReadLockGuard&) = delete;
+        V153GridReadLockGuard& operator=(const V153GridReadLockGuard&) = delete;
+    };
+
+    std::string V153EscapeFieldUtf8(const std::string& value)
+    {
+        std::string result;
+        result.reserve(value.size() + 16);
+        for (unsigned char ch : value)
+        {
+            switch (ch)
+            {
+            case '\\': result += "\\\\"; break;
+            case '\t': result += "\\t"; break;
+            case '\r': result += "\\r"; break;
+            case '\n': result += "\\n"; break;
+            default: result.push_back(static_cast<char>(ch)); break;
+            }
+        }
+        return result;
+    }
+
+    std::string V153EscapeField(const std::wstring& value)
+    {
+        return V153EscapeFieldUtf8(WideToUtf8(value));
+    }
+
+    std::string V153UtcText(const SYSTEMTIME& time)
+    {
+        std::ostringstream out;
+        out << std::setfill('0')
+            << std::setw(4) << time.wYear << '-'
+            << std::setw(2) << time.wMonth << '-'
+            << std::setw(2) << time.wDay << 'T'
+            << std::setw(2) << time.wHour << ':'
+            << std::setw(2) << time.wMinute << ':'
+            << std::setw(2) << time.wSecond << '.'
+            << std::setw(3) << time.wMilliseconds << 'Z';
+        return out.str();
+    }
+
+    bool V153RowIsEmpty(const std::vector<std::wstring>& row)
+    {
+        for (const auto& value : row)
+        {
+            if (!value.empty())
+                return false;
+        }
+        return true;
+    }
+
+    V153GridSectionResult ReadV153GridSection(
+        const Snapshot& snapshot,
+        const std::vector<RttiVtableRecord>& flexGridRttiVtables,
+        std::uintptr_t tabView,
+        const char* name,
+        std::size_t pageOffset,
+        unsigned int firstColumn,
+        unsigned int columnCount,
+        unsigned int maxRowsToScan,
+        unsigned int maxRowsToReturn,
+        unsigned int emptyRowsToStop)
+    {
+        struct FlexGridIdentity
+        {
+            std::uintptr_t vtableRva;
+            std::uintptr_t getTextRva;
+            const wchar_t* buildLabel;
+        };
+        constexpr FlexGridIdentity kSupportedFlexGridIdentities[] =
+        {
+            { 0x1FD778, 0x135E40, L"legacy validated build" },
+            { 0x1FD6F8, 0x136230, L"MultiCharts build 2026-08-01" }
+        };
+        constexpr std::size_t kGetTextSlot = 60;
+        constexpr std::size_t kGridMemberOffset = 0x118;
+        constexpr std::size_t kRowsOffset1 = 0xD20;
+        constexpr std::size_t kRowsOffset2 = 0xD24;
+        constexpr unsigned int kBufferCharacters = 2048;
+
+        V153GridSectionResult result;
+        result.name = name ? name : "unknown";
+
+        if (!snapshot.atonpTrackerModule || !tabView)
+        {
+            result.diagnostic = L"required CATPTTabView or ATOnPTracker module anchor was not found";
+            return result;
+        }
+
+        const std::uintptr_t moduleBase = reinterpret_cast<std::uintptr_t>(snapshot.atonpTrackerModule);
+        const FlexGridIdentity* matchedIdentity = nullptr;
+        bool adaptiveIdentity = false;
+        std::wstring identityLabel;
+
+        std::uintptr_t pageObject = 0;
+        std::uintptr_t gridObject = 0;
+        std::uintptr_t actualVtable = 0;
+        std::uintptr_t actualGetText = 0;
+        std::uint32_t rows1 = 0;
+        std::uint32_t rows2 = 0;
+
+        const bool anchorsOk =
+            SafeReadValue(reinterpret_cast<void*>(tabView + pageOffset), pageObject) && pageObject &&
+            SafeReadValue(reinterpret_cast<void*>(pageObject + kGridMemberOffset), gridObject) && gridObject &&
+            SafeReadValue(reinterpret_cast<void*>(gridObject), actualVtable) &&
+            SafeReadValue(reinterpret_cast<void*>(actualVtable + kGetTextSlot * sizeof(std::uintptr_t)), actualGetText) &&
+            SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset1), rows1) &&
+            SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset2), rows2);
+
+        if (!anchorsOk)
+        {
+            result.diagnostic = L"one or more page/grid anchors could not be read";
+            return result;
+        }
+        for (const auto& identity : kSupportedFlexGridIdentities)
+        {
+            if (actualVtable == moduleBase + identity.vtableRva &&
+                actualGetText == moduleBase + identity.getTextRva)
+            {
+                matchedIdentity = &identity;
+                break;
+            }
+        }
+        if (matchedIdentity)
+        {
+            identityLabel = std::wstring(L"known:") + matchedIdentity->buildLabel;
+        }
+        else
+        {
+            // Version-adaptive path: accept a moved vtable/function only when the
+            // object has the exact MSVC RTTI identity for CFlexGridImpl, slot 60
+            // points to executable code inside ATOnPTracker.dll, and the vtable
+            // has a substantial executable-method population. This avoids binding
+            // normal operation to fixed RVAs while still failing closed on layout
+            // or class-identity changes.
+            const bool rttiMatched = std::any_of(
+                flexGridRttiVtables.begin(), flexGridRttiVtables.end(),
+                [actualVtable](const RttiVtableRecord& item) { return item.vtable == actualVtable; });
+            const bool vtableInsideModule = ModuleContains(snapshot, actualVtable, sizeof(std::uintptr_t));
+            const bool getTextInsideModule = ModuleContains(snapshot, actualGetText, 1);
+            const bool getTextExecutable =
+                getTextInsideModule && MemoryRangeHasProtection(reinterpret_cast<void*>(actualGetText), 1, true);
+
+            std::size_t executableSlots = 0;
+            constexpr std::size_t kVtableSlotsToValidate = 64;
+            for (std::size_t slot = 0; slot < kVtableSlotsToValidate; ++slot)
+            {
+                std::uintptr_t method = 0;
+                if (!SafeReadValue(reinterpret_cast<void*>(actualVtable + slot * sizeof(std::uintptr_t)), method))
+                    continue;
+                if (ModuleContains(snapshot, method, 1) &&
+                    MemoryRangeHasProtection(reinterpret_cast<void*>(method), 1, true))
+                {
+                    ++executableSlots;
+                }
+            }
+
+            constexpr std::size_t kMinimumExecutableSlots = 32;
+            if (rttiMatched && vtableInsideModule && getTextExecutable &&
+                executableSlots >= kMinimumExecutableSlots)
+            {
+                adaptiveIdentity = true;
+                identityLabel = L"adaptive:RTTI CFlexGridImpl + executable vtable slot 60";
+            }
+            else
+            {
+                std::wostringstream diag;
+                diag << L"Unsupported CFlexGridImpl identity: actual_vtable_rva=0x"
+                     << std::hex << std::uppercase << (actualVtable - moduleBase)
+                     << L" actual_gettext_rva=0x" << (actualGetText - moduleBase)
+                     << L" rtti_match=" << (rttiMatched ? L"yes" : L"no")
+                     << L" vtable_in_module=" << (vtableInsideModule ? L"yes" : L"no")
+                     << L" gettext_executable=" << (getTextExecutable ? L"yes" : L"no")
+                     << L" executable_slots=" << std::dec << executableSlots
+                     << L"/" << kVtableSlotsToValidate
+                     << L". Known pairs: ";
+                for (std::size_t i = 0; i < _countof(kSupportedFlexGridIdentities); ++i)
+                {
+                    if (i) diag << L", ";
+                    diag << L"(0x" << std::hex << std::uppercase
+                         << kSupportedFlexGridIdentities[i].vtableRva
+                         << L",0x" << kSupportedFlexGridIdentities[i].getTextRva << L")";
+                }
+                result.diagnostic = diag.str();
+                return result;
+            }
+        }
+        if (rows1 != rows2 || rows1 == 0 || rows1 > 100000)
+        {
+            result.diagnostic = L"FlexGrid mirrored row-capacity fields were inconsistent";
+            return result;
+        }
+
+        result.reportedRows = rows1;
+        const unsigned int scanLimit =
+            (std::min)(maxRowsToScan, static_cast<unsigned int>(rows1));
+        unsigned int consecutiveEmptyRows = 0;
+        bool sawNonEmptyRow = false;
+
+        for (unsigned int rowIndex = 0; rowIndex < scanLimit; ++rowIndex)
+        {
+            std::vector<std::wstring> row;
+            row.reserve(columnCount);
+            bool rowCallFailed = false;
+
+            for (unsigned int columnOffset = 0; columnOffset < columnCount; ++columnOffset)
+            {
+                wchar_t buffer[kBufferCharacters]{};
+                DWORD sehCode = 0;
+                ++result.callsAttempted;
+                const int callOk = MCBridge_CallFlexGridGetTextWithSeh(
+                    reinterpret_cast<void*>(gridObject),
+                    reinterpret_cast<void*>(actualGetText),
+                    rowIndex,
+                    firstColumn + columnOffset,
+                    buffer,
+                    kBufferCharacters,
+                    &sehCode);
+
+                if (!callOk)
+                {
+                    ++result.sehFailures;
+                    std::wostringstream diag;
+                    diag << L"GetText failed at row=" << rowIndex
+                         << L" column=" << (firstColumn + columnOffset)
+                         << L" seh=0x" << std::hex << std::uppercase << sehCode;
+                    result.diagnostic = diag.str();
+                    rowCallFailed = true;
+                    break;
+                }
+
+                ++result.callsSucceeded;
+                row.emplace_back(buffer);
+            }
+
+            if (rowCallFailed)
+                return result;
+
+            if (V153RowIsEmpty(row))
+            {
+                ++consecutiveEmptyRows;
+                if (consecutiveEmptyRows >= emptyRowsToStop)
+                    break;
+                continue;
+            }
+
+            sawNonEmptyRow = true;
+            consecutiveEmptyRows = 0;
+            result.rows.push_back(std::move(row));
+            if (maxRowsToReturn > 0 && result.rows.size() >= maxRowsToReturn)
+                break;
+        }
+
+        result.ok = result.sehFailures == 0;
+        if (result.ok)
+        {
+            std::wostringstream diag;
+            diag << L"grid validated; identity=" << identityLabel
+                 << L"; rows_returned=" << result.rows.size()
+                 << L" calls=" << result.callsSucceeded
+                 << L" reported_capacity=" << result.reportedRows;
+            if (!sawNonEmptyRow)
+                diag << L"; no non-empty rows";
+            result.diagnostic = diag.str();
+        }
+        return result;
+    }
+
+    void AppendV153Section(std::ostringstream& out, const V153GridSectionResult& section, unsigned int columnCount)
+    {
+        out << "SECTION\t" << section.name
+            << '\t' << (section.ok ? "OK" : "FAIL")
+            << '\t' << columnCount
+            << '\t' << section.rows.size()
+            << '\t' << section.reportedRows
+            << '\t' << section.callsAttempted
+            << '\t' << section.callsSucceeded
+            << '\t' << section.sehFailures
+            << '\t' << V153EscapeField(section.diagnostic)
+            << "\n";
+
+        for (const auto& row : section.rows)
+        {
+            out << "ROW\t" << section.name;
+            for (const auto& value : row)
+                out << '\t' << V153EscapeField(value);
+            out << "\n";
+        }
+        out << "ENDSECTION\t" << section.name << "\n";
+    }
+
+    bool BuildV153StatusReportSnapshot(const Snapshot& snapshot, std::string& payload)
+    {
+        V153GridReadLockGuard lock;
+
+        ExtractorAttempt accountsAnchor = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
+        ExtractorAttempt positionsAnchor = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
+        const std::uintptr_t tabView = accountsAnchor.tabView ? accountsAnchor.tabView : positionsAnchor.tabView;
+
+        std::string flexGridRttiDiagnostic;
+        const std::vector<RttiVtableRecord> flexGridRttiVtables = ResolveRttiVtables(
+            snapshot, ".?AVCFlexGridImpl@implementation@UILayer@@", flexGridRttiDiagnostic);
+
+        V153GridSectionResult accounts = ReadV153GridSection(
+            snapshot, flexGridRttiVtables, tabView, "accounts", 0x58, 1, 12, 100, 100, 3);
+        V153GridSectionResult positions = ReadV153GridSection(
+            snapshot, flexGridRttiVtables, tabView, "open_positions", 0x68, 1, 8, 1000, 1000, 3);
+        V153GridSectionResult logs = ReadV153GridSection(
+            snapshot, flexGridRttiVtables, tabView, "recent_logs", 0x80, 1, 6, 200, 10, 3);
+
+        const std::size_t pagesOk =
+            static_cast<std::size_t>(accounts.ok) +
+            static_cast<std::size_t>(positions.ok) +
+            static_cast<std::size_t>(logs.ok);
+        const std::size_t totalSeh = accounts.sehFailures + positions.sehFailures + logs.sehFailures;
+
+        std::ostringstream out;
+        out << "MC_TRACKER_STATUS_V1\n";
+        out << "META\tbridge_version\t" << kBridgeVersion << "\n";
+        out << "META\tprotocol_version\t" << mcbridge::kProtocolVersion << "\n";
+        out << "META\tprocess_id\t" << snapshot.processId << "\n";
+        out << "META\tcaptured_utc\t" << V153UtcText(snapshot.capturedUtc) << "\n";
+        out << "META\ttracker_found\t" << (snapshot.trackerFound ? "true" : "false") << "\n";
+        out << "META\ttracker_same_process\t" << (snapshot.trackerInSameProcess ? "true" : "false") << "\n";
+        out << "META\tflexgrid_identity_mode\tknown_or_adaptive_rtti\n";
+        out << "META\tflexgrid_rtti_diagnostic\t" << V153EscapeFieldUtf8(flexGridRttiDiagnostic) << "\n";
+        AppendV153Section(out, accounts, 12);
+        AppendV153Section(out, positions, 8);
+        AppendV153Section(out, logs, 6);
+        out << "SUMMARY\tpages_ok\t" << pagesOk
+            << "\tpages_failed\t" << (3 - pagesOk)
+            << "\tseh_failures\t" << totalSeh << "\n";
+        out << "END\n";
+        payload = out.str();
+        return pagesOk > 0 && totalSeh == 0;
+    }
+
+    mcbridge::Status ProcessRequest(
+        const mcbridge::MessageHeader& request,
+        const std::string& requestPayload,
+        std::string& responsePayload)
+    {
+        (void)requestPayload;
+        const auto command = static_cast<mcbridge::Command>(request.command);
+        Snapshot snapshot = CaptureSnapshot();
+
+        switch (command)
+        {
+        case mcbridge::Command::Ping:
+            responsePayload = StatusJson(snapshot);
+            return mcbridge::Status::Ok;
+
+        case mcbridge::Command::GetStatus:
+            responsePayload = StatusJson(snapshot);
+            return mcbridge::Status::Ok;
+
+        case mcbridge::Command::GetTrackerMap:
+            responsePayload = TrackerMapJson(snapshot);
+            return snapshot.trackerFound ? mcbridge::Status::Ok : mcbridge::Status::TrackerNotFound;
+
+        case mcbridge::Command::TakeLocalSnapshot:
+        {
+            std::vector<std::wstring> paths;
+            const bool written = WriteSnapshotReports(snapshot, paths);
+            std::ostringstream out;
+            out << '{';
+            AppendStatusJson(out, snapshot);
+            out << ",\"reports_written\":" << (written ? "true" : "false") << ",\"report_paths\":[";
+            for (std::size_t index = 0; index < paths.size(); ++index)
+            {
+                if (index) out << ',';
+                out << JsonString(paths[index]);
+            }
+            out << "]}";
+            responsePayload = out.str();
+            if (!snapshot.trackerFound)
+                return mcbridge::Status::TrackerNotFound;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::ProbeAccountsExtractor:
+        {
+            ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "extract_accounts", kExtractAccountsRva);
+            AcquireSRWLockExclusive(&g_extractorLock);
+            g_accountsAttempt = accounts;
+            ReleaseSRWLockExclusive(&g_extractorLock);
+            responsePayload = ExtractorAttemptJson(accounts);
+            return accounts.functionValid && accounts.tabViewValid && accounts.tradeInfoValid
+                ? mcbridge::Status::Ok : mcbridge::Status::ExtractorContractNotResolved;
+        }
+
+        case mcbridge::Command::ProbeOpenPositionsExtractor:
+        {
+            ExtractorAttempt positions = BuildExtractorProbe(snapshot, "extract_open_positions", kExtractOpenPositionsRva);
+            AcquireSRWLockExclusive(&g_extractorLock);
+            g_openPositionsAttempt = positions;
+            ReleaseSRWLockExclusive(&g_extractorLock);
+            responsePayload = ExtractorAttemptJson(positions);
+            return positions.functionValid && positions.tabViewValid && positions.tradeInfoValid
+                ? mcbridge::Status::Ok : mcbridge::Status::ExtractorContractNotResolved;
+        }
+
+        case mcbridge::Command::RunBothExtractorCalls:
+        {
+            ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "extract_accounts", kExtractAccountsRva);
+            ExtractorAttempt positions = BuildExtractorProbe(snapshot, "extract_open_positions", kExtractOpenPositionsRva);
+            accounts.diagnostic += "; V148 refused live execution to protect MultiCharts";
+            positions.diagnostic += "; V148 refused live execution to protect MultiCharts";
+            StoreExtractorAttempts(accounts, positions);
+            responsePayload = "{\"error\":\"live_extractor_calls_disabled_in_v148\",\"accounts\":" +
+                ExtractorAttemptJson(accounts) + ",\"open_positions\":" + ExtractorAttemptJson(positions) + "}";
+            return mcbridge::Status::ExperimentalCallsDisabled;
+        }
+
+        case mcbridge::Command::AnalyzeExtractorContracts:
+        {
+            ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "extract_accounts", kExtractAccountsRva);
+            ExtractorAttempt positions = BuildExtractorProbe(snapshot, "extract_open_positions", kExtractOpenPositionsRva);
+            StoreExtractorAttempts(accounts, positions);
+            std::wstring reportPath;
+            const bool written = WriteContractAnalysisReport(snapshot, accounts, positions, reportPath);
+            responsePayload = "{\"accounts\":" + ExtractorContractAnalysisJson(snapshot, accounts) +
+                ",\"open_positions\":" + ExtractorContractAnalysisJson(snapshot, positions) +
+                ",\"report_written\":" + (written ? std::string("true") : std::string("false")) +
+                ",\"report_path\":" + JsonString(reportPath) + "}";
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::AnalyzeExtractorCallers:
+        {
+            ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "extract_accounts", kExtractAccountsRva);
+            ExtractorAttempt positions = BuildExtractorProbe(snapshot, "extract_open_positions", kExtractOpenPositionsRva);
+            accounts.diagnostic += "; V148 caller/xref analysis only; candidate is never called";
+            positions.diagnostic += "; V148 caller/xref analysis only; candidate is never called";
+            StoreExtractorAttempts(accounts, positions);
+            const CallerXrefAnalysis analysis = BuildCallerXrefAnalysis(snapshot, accounts, positions);
+            std::wstring reportPath;
+            const bool written = WriteCallerXrefAnalysisReport(
+                snapshot, accounts, positions, analysis, reportPath);
+            responsePayload = CallerXrefSummaryJson(snapshot, analysis, reportPath, written);
+            if (!accounts.tabViewValid || !analysis.runtimeTable.valid ||
+                !analysis.accountsBoundary.enclosingFound ||
+                !analysis.positionsBoundary.enclosingFound)
+            {
+                return mcbridge::Status::ExtractorContractNotResolved;
+            }
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+
+        case mcbridge::Command::AnalyzeThreeTabAnchors:
+        {
+            std::wstring reportPath;
+            std::string summary;
+            const bool written = WriteThreeTabAnchorReport(snapshot, reportPath, summary);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::AnalyzePageVirtualMethods:
+        {
+            std::wstring reportPath;
+            std::string summary;
+            const bool written = WritePageVirtualMethodExplorerReport(snapshot, reportPath, summary);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::AnalyzeSlot17Deep:
+        {
+            std::wstring reportPath;
+            std::wstring csvPath;
+            std::string summary;
+            const bool written = WriteSlot17DeepAnalysisReport(
+                snapshot, reportPath, csvPath, summary);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::CaptureResearchBundle:
+        {
+            std::string summary;
+            const bool written = WriteResearchCaptureBundle(snapshot, summary);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::CaptureLiveObjectGraph:
+        {
+            std::string summary;
+            const bool written = WriteLiveObjectGraphCapture(snapshot, summary, "unspecified");
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::CaptureLiveObjectGraphAccounts:
+        case mcbridge::Command::CaptureLiveObjectGraphOpenPositions:
+        case mcbridge::Command::CaptureLiveObjectGraphLogs:
+        {
+            const char* pageName = command == mcbridge::Command::CaptureLiveObjectGraphAccounts ? "accounts" :
+                (command == mcbridge::Command::CaptureLiveObjectGraphOpenPositions ? "open_positions" : "logs");
+            std::string summary;
+            const bool written = WriteLiveObjectGraphCapture(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::CaptureTargetedProbeAccounts:
+        case mcbridge::Command::CaptureTargetedProbeOpenPositions:
+        case mcbridge::Command::CaptureTargetedProbeLogs:
+        case mcbridge::Command::CaptureTargetedProbeAll:
+        {
+            const char* pageName = command == mcbridge::Command::CaptureTargetedProbeAccounts ? "accounts" :
+                (command == mcbridge::Command::CaptureTargetedProbeOpenPositions ? "open_positions" :
+                (command == mcbridge::Command::CaptureTargetedProbeLogs ? "logs" : "all"));
+            std::string summary;
+            const bool written = WriteTargetedStructureProbe(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::CaptureFlexGridTextReaderAccounts:
+        case mcbridge::Command::CaptureFlexGridTextReaderOpenPositions:
+        case mcbridge::Command::CaptureFlexGridTextReaderLogs:
+        case mcbridge::Command::CaptureFlexGridTextReaderAll:
+        {
+            const char* pageName = command == mcbridge::Command::CaptureFlexGridTextReaderAccounts ? "accounts" :
+                (command == mcbridge::Command::CaptureFlexGridTextReaderOpenPositions ? "open_positions" :
+                (command == mcbridge::Command::CaptureFlexGridTextReaderLogs ? "logs" : "all"));
+            std::string summary;
+            const bool written = WriteFlexGridTextReader(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
+        }
+
+        case mcbridge::Command::GetStatusReportSnapshot:
+        {
+            const bool built = BuildV153StatusReportSnapshot(snapshot, responsePayload);
+            return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
+        }
+
+        case mcbridge::Command::CaptureV152CoordinateMapAccounts:
+        case mcbridge::Command::CaptureV152CoordinateMapOpenPositions:
+        case mcbridge::Command::CaptureV152CoordinateMapLogs:
+        case mcbridge::Command::CaptureV152CoordinateMapAll:
+        {
+            const char* pageName = command == mcbridge::Command::CaptureV152CoordinateMapAccounts ? "accounts" :
+                (command == mcbridge::Command::CaptureV152CoordinateMapOpenPositions ? "open_positions" :
+                (command == mcbridge::Command::CaptureV152CoordinateMapLogs ? "logs" : "all"));
+            std::string summary;
+            const bool written = WriteV152CoordinateMap(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
+        }
+
+        case mcbridge::Command::CaptureV151SingleCellAccounts:
+        case mcbridge::Command::CaptureV151SingleCellOpenPositions:
+        case mcbridge::Command::CaptureV151SingleCellLogs:
+        case mcbridge::Command::CaptureV151SingleCellAll:
+        {
+            const char* pageName = command == mcbridge::Command::CaptureV151SingleCellAccounts ? "accounts" :
+                (command == mcbridge::Command::CaptureV151SingleCellOpenPositions ? "open_positions" :
+                (command == mcbridge::Command::CaptureV151SingleCellLogs ? "logs" : "all"));
+            std::string summary;
+            const bool written = WriteV151SingleCellProbe(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
+        }
+
+        case mcbridge::Command::CaptureGridInterfaceLocatorAccounts:
+        case mcbridge::Command::CaptureGridInterfaceLocatorOpenPositions:
+        case mcbridge::Command::CaptureGridInterfaceLocatorLogs:
+        case mcbridge::Command::CaptureGridInterfaceLocatorAll:
+        {
+            const char* pageName = command == mcbridge::Command::CaptureGridInterfaceLocatorAccounts ? "accounts" :
+                (command == mcbridge::Command::CaptureGridInterfaceLocatorOpenPositions ? "open_positions" :
+                (command == mcbridge::Command::CaptureGridInterfaceLocatorLogs ? "logs" : "all"));
+            std::string summary;
+            const bool written = WriteGridInterfaceLocator(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::CapturePageObjectProbeAccounts:
+        case mcbridge::Command::CapturePageObjectProbeOpenPositions:
+        case mcbridge::Command::CapturePageObjectProbeLogs:
+        case mcbridge::Command::CapturePageObjectProbeAll:
+        {
+            const char* pageName = command == mcbridge::Command::CapturePageObjectProbeAccounts ? "accounts" :
+                (command == mcbridge::Command::CapturePageObjectProbeOpenPositions ? "open_positions" :
+                (command == mcbridge::Command::CapturePageObjectProbeLogs ? "logs" : "all"));
+            std::string summary;
+            const bool written = WritePageObjectStructureProbe(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::InternalError;
+        }
+
+        case mcbridge::Command::TestUiDispatch:
+        {
+            ExtractorAttempt accounts = BuildExtractorProbe(snapshot, "ui_noop_accounts", kExtractAccountsRva);
+            ExtractorAttempt positions = BuildExtractorProbe(snapshot, "ui_noop_positions", kExtractOpenPositionsRva);
+            UiDispatchDiagnostics diagnostics;
+            const bool completed = DispatchBothExtractorsOnTrackerThread(snapshot, accounts, positions, diagnostics);
+            StoreExtractorAttempts(accounts, positions);
+            responsePayload = "{\"no_op_only\":true,\"ui_dispatch\":" +
+                UiDispatchDiagnosticsJson(diagnostics) + "}";
+            return completed ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
+        }
+
+        case mcbridge::Command::GetExtractorStatus:
+            responsePayload = CurrentExtractorStatusJson();
+            return mcbridge::Status::Ok;
+
+        default:
+            responsePayload = "{\"error\":\"unsupported_command\"}";
+            return mcbridge::Status::UnsupportedCommand;
+        }
+    }
+
+    void HandleClient(HANDLE pipe)
+    {
+        for (;;)
+        {
+            if (WaitForSingleObject(g_stopEvent, 0) == WAIT_OBJECT_0)
+                break;
+
+            mcbridge::MessageHeader request{};
+            if (!ReadExact(pipe, &request, sizeof(request)))
+                break;
+
+            if (request.magic != mcbridge::kMagic)
+            {
+                SendResponse(pipe, request, mcbridge::Status::InvalidHeader,
+                    "{\"error\":\"invalid_magic\"}");
+                break;
+            }
+            if (request.protocolVersion != mcbridge::kProtocolVersion)
+            {
+                SendResponse(pipe, request, mcbridge::Status::UnsupportedProtocol,
+                    "{\"error\":\"unsupported_protocol\"}");
+                break;
+            }
+            if (request.payloadBytes > mcbridge::kMaximumPayloadBytes)
+            {
+                SendResponse(pipe, request, mcbridge::Status::PayloadTooLarge,
+                    "{\"error\":\"payload_too_large\"}");
+                break;
+            }
+
+            std::string requestPayload(request.payloadBytes, '\0');
+            if (request.payloadBytes > 0 && !ReadExact(pipe, requestPayload.data(), request.payloadBytes))
+                break;
+
+            std::string responsePayload;
+            mcbridge::Status status = mcbridge::Status::InternalError;
+            try
+            {
+                status = ProcessRequest(request, requestPayload, responsePayload);
+            }
+            catch (...)
+            {
+                responsePayload = "{\"error\":\"unhandled_bridge_exception\"}";
+                status = mcbridge::Status::InternalError;
+            }
+
+            const bool responseWritten = SendResponse(pipe, request, status, responsePayload);
+            if (static_cast<mcbridge::Command>(request.command) == mcbridge::Command::RunBothExtractorCalls)
+            {
+                AcquireSRWLockExclusive(&g_uiDispatchLock);
+                g_uiDispatchDiagnostics.pipeResponseWritten = responseWritten;
+                ReleaseSRWLockExclusive(&g_uiDispatchLock);
+            }
+            if (!responseWritten)
+                break;
+        }
+    }
+
+    DWORD WINAPI BridgeClientThread(void* parameter)
+    {
+        HANDLE pipe = static_cast<HANDLE>(parameter);
+        AppendExecutionTrace("pipe_client_thread_start");
+        try
+        {
+            HandleClient(pipe);
+        }
+        catch (...)
+        {
+            AppendExecutionTrace("pipe_client_thread_cpp_exception");
+        }
+        FlushFileBuffers(pipe);
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+        AppendExecutionTrace("pipe_client_thread_exit");
+        return 0;
+    }
+
+    DWORD WINAPI BridgeWorker(void*)
+    {
+        g_workerThreadId = GetCurrentThreadId();
+        const HRESULT comInitializeHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        const bool comInitialized = SUCCEEDED(comInitializeHr);
+        g_state.store(RuntimeState::Running);
+        AppendExecutionTrace("pipe_listener_started");
+
+        try
+        {
+            Snapshot startup = CaptureSnapshot();
+            std::vector<std::wstring> ignored;
+            WriteSnapshotReports(startup, ignored);
+        }
+        catch (...) {}
+
+        while (WaitForSingleObject(g_stopEvent, 0) != WAIT_OBJECT_0)
+        {
+            HANDLE pipe = CreateNamedPipeW(
+                kPipeName,
+                PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                kPipeBufferBytes,
+                kPipeBufferBytes,
+                5000,
+                nullptr);
+
+            if (pipe == INVALID_HANDLE_VALUE)
+            {
+                const DWORD error = GetLastError();
+                g_lastError.store(error);
+                std::ostringstream trace; trace << "error=" << error;
+                AppendExecutionTrace("pipe_create_failed", trace.str());
+                Sleep(100);
+                continue;
+            }
+
+            BOOL connected = ConnectNamedPipe(pipe, nullptr);
+            if (!connected && GetLastError() == ERROR_PIPE_CONNECTED)
+                connected = TRUE;
+
+            if (!connected || WaitForSingleObject(g_stopEvent, 0) == WAIT_OBJECT_0)
+            {
+                CloseHandle(pipe);
+                continue;
+            }
+
+            HANDLE clientThread = CreateThread(nullptr, 0, BridgeClientThread, pipe, 0, nullptr);
+            if (clientThread)
+            {
+                CloseHandle(clientThread);
+                // The listener immediately creates the next pipe instance. This keeps
+                // the service name available while the current client remains connected.
+                continue;
+            }
+
+            const DWORD error = GetLastError();
+            std::ostringstream trace; trace << "error=" << error;
+            AppendExecutionTrace("pipe_client_thread_create_failed", trace.str());
+            BridgeClientThread(pipe);
+        }
+
+        AppendExecutionTrace("pipe_listener_stopped");
+        if (g_state.load() != RuntimeState::Failed)
+            g_state.store(RuntimeState::Stopped);
+        if (comInitialized)
+            CoUninitialize();
+        return 0;
+    }
+
+    void WakePipeServer()
+    {
+        HANDLE pipe = CreateFileW(
+            kPipeName,
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+        if (pipe != INVALID_HANDLE_VALUE)
+            CloseHandle(pipe);
+    }
+
+    void CloseBridgeHandles()
+    {
+        if (g_workerThread)
+        {
+            CloseHandle(g_workerThread);
+            g_workerThread = nullptr;
+        }
+        if (g_stopEvent)
+        {
+            CloseHandle(g_stopEvent);
+            g_stopEvent = nullptr;
+        }
+        if (g_singletonMutex)
+        {
+            CloseHandle(g_singletonMutex);
+            g_singletonMutex = nullptr;
+        }
+        if (g_uiDispatchEvent)
+        {
+            CloseHandle(g_uiDispatchEvent);
+            g_uiDispatchEvent = nullptr;
+        }
+    }
+}
+
+BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        g_module = module;
+        DisableThreadLibraryCalls(module);
+    }
+    else if (reason == DLL_PROCESS_DETACH && reserved == nullptr)
+    {
+        // Do not wait while holding the loader lock. A normal explicit shutdown uses
+        // MCBridge_Shutdown; FreeLibrary fallback only signals the worker.
+        if (g_stopEvent)
+            SetEvent(g_stopEvent);
+    }
+    return TRUE;
+}
+
+int __stdcall MCBridge_Initialize()
+{
+    RuntimeState expected = RuntimeState::Stopped;
+    if (!g_state.compare_exchange_strong(expected, RuntimeState::Starting))
+    {
+        if (expected == RuntimeState::Running || expected == RuntimeState::Starting)
+            return MC_BRIDGE_ALREADY_INITIALIZED;
+        return MC_BRIDGE_ERROR;
+    }
+
+    g_initializeThreadId = GetCurrentThreadId();
+    g_lastHeartbeatTick.store(GetTickCount64());
+
+    const std::wstring processPath = ProcessPath();
+    if (Lower(BaseName(processPath)) != L"multicharts64.exe")
+    {
+        g_state.store(RuntimeState::Failed);
+        return MC_BRIDGE_NOT_MULTICHARTS_PROCESS;
+    }
+
+    g_singletonMutex = CreateMutexW(nullptr, FALSE, kSingletonMutexName);
+    if (!g_singletonMutex)
+    {
+        g_lastError.store(GetLastError());
+        g_state.store(RuntimeState::Failed);
+        return MC_BRIDGE_ERROR;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        CloseHandle(g_singletonMutex);
+        g_singletonMutex = nullptr;
+        g_state.store(RuntimeState::Failed);
+        return MC_BRIDGE_ANOTHER_PROCESS_OWNS_SINGLETON;
+    }
+
+
+    // Keep one explicit module reference for the process lifetime. This prevents
+    // PowerLanguage from unloading the DLL while the bridge worker thread still
+    // executes inside it. The process releases the reference automatically on exit.
+    if (!g_selfReference && g_module)
+    {
+        std::vector<wchar_t> modulePath(32768, L'\0');
+        const DWORD modulePathLength = GetModuleFileNameW(
+            g_module, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+        if (modulePathLength > 0 && modulePathLength < modulePath.size())
+            g_selfReference = LoadLibraryW(modulePath.data());
+    }
+    if (!g_selfReference)
+    {
+        g_lastError.store(GetLastError());
+        CloseBridgeHandles();
+        g_state.store(RuntimeState::Failed);
+        return MC_BRIDGE_SELF_REFERENCE_FAILED;
+    }
+
+    g_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!g_stopEvent)
+    {
+        g_lastError.store(GetLastError());
+        CloseBridgeHandles();
+        g_state.store(RuntimeState::Failed);
+        return MC_BRIDGE_ERROR;
+    }
+
+    g_workerThread = CreateThread(nullptr, 0, BridgeWorker, nullptr, 0, &g_workerThreadId);
+    if (!g_workerThread)
+    {
+        g_lastError.store(GetLastError());
+        CloseBridgeHandles();
+        g_state.store(RuntimeState::Failed);
+        return MC_BRIDGE_THREAD_CREATE_FAILED;
+    }
+
+    // Give the worker a short chance to publish its initial state, without making
+    // PowerLanguage wait for Tracker availability.
+    for (int attempt = 0; attempt < 20; ++attempt)
+    {
+        if (g_state.load() == RuntimeState::Running || g_state.load() == RuntimeState::Failed)
+            break;
+        Sleep(10);
+    }
+
+    return LastSnapshotHasTracker()
+        ? MC_BRIDGE_OK
+        : MC_BRIDGE_STARTED_WAITING_FOR_TRACKER;
+}
+
+int __stdcall MCBridge_Heartbeat()
+{
+    g_lastHeartbeatTick.store(GetTickCount64());
+    const RuntimeState state = g_state.load();
+    if (state == RuntimeState::Running)
+        return LastSnapshotHasTracker()
+            ? MC_BRIDGE_OK
+            : MC_BRIDGE_STARTED_WAITING_FOR_TRACKER;
+    if (state == RuntimeState::Starting)
+        return MC_BRIDGE_STARTED_WAITING_FOR_TRACKER;
+    return MC_BRIDGE_NOT_INITIALIZED;
+}
+
+int __stdcall MCBridge_GetState()
+{
+    return static_cast<int>(g_state.load());
+}
+
+int __stdcall MCBridge_Shutdown()
+{
+    const RuntimeState state = g_state.load();
+    if (state == RuntimeState::Stopped)
+        return MC_BRIDGE_NOT_INITIALIZED;
+
+    g_state.store(RuntimeState::Stopping);
+    if (g_stopEvent)
+        SetEvent(g_stopEvent);
+    if (g_workerThread)
+        CancelSynchronousIo(g_workerThread);
+    WakePipeServer();
+
+    if (g_workerThread)
+    {
+        const DWORD wait = WaitForSingleObject(g_workerThread, 3000);
+        if (wait != WAIT_OBJECT_0)
+            return MC_BRIDGE_SHUTDOWN_TIMEOUT;
+    }
+
+    CloseBridgeHandles();
+    g_state.store(RuntimeState::Stopped);
+    return MC_BRIDGE_OK;
+}
+
+int __stdcall MCBridge_GetVersion()
+{
+    return kBridgeVersion;
+}

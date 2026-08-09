@@ -1,8 +1,0 @@
-MCST-Watchdog 0.576 - AutoTrading Live Candidate Monitor
-
-- Detects all MultiCharts instances using the corrected 0.575 process discovery.
-- Adds a repeatable AT Candidate Monitor button.
-- Reads twelve strongest candidate RVA/offset pairs side-by-side.
-- Shows per-process and aggregate ON/OFF/object counts.
-- Highlights RVA 0xA457B8 / offset 0x142 as the primary candidate.
-- Does not yet activate any new candidate in the production AutoTrading reader.

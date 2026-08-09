@@ -1,9 +1,0 @@
-MCST-Watchdog 0.572 - AutoTrading Candidate Verifier
-
-- Adds a passive candidate verifier for the updated MultiCharts Charting.dll.
-- Uses the known current AutoTrading ON count (default 18) to rank vtable RVA + boolean offset pairs.
-- Aggregates only candidates shared by all detected MultiCharts processes.
-- Requires at least 95% valid boolean values at a candidate offset.
-- Writes C:\Temp\MCST-Watchdog-AutoTrading-Candidate-Verification-0.572.txt.
-- Does not activate any candidate in the production AutoTrading reader.
-- The known count can be changed in [AutoTradingDiagnostics] expected_active_strategies.

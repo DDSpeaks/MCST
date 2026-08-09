@@ -1,9 +1,0 @@
-MCST-Watchdog 0.575 - AutoTrading Dynamic Field Change Detector
-
-- Replaces the fixed eight-candidate toggle verifier with a dynamic memory change detector.
-- Captures all reasonable Charting.dll vtable candidates (2-512 objects) and 0x300 bytes per object.
-- Compares the same PID, vtable RVA and object address after one strategy is switched ON -> OFF.
-- Reports every stable boolean byte transition 1 -> 0 and unexpected 0 -> 1 transition.
-- Highlights stable vtable populations and strategy-sized populations (15-25 objects).
-- Remains fully passive: no clicks, input, or writes to MultiCharts memory.
-- Production AutoTrading reader remains unchanged until a field is verified.

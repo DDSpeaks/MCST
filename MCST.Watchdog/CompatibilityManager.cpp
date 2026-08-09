@@ -79,7 +79,7 @@ namespace
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"image_size", L"18493440", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"strategy_vtable_rva", L"0xA457B8", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"autotrading_offset", L"0x142", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"verification", L"0.577 research session: 8/8 exact toggle responses", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"verification", L"Controlled research session: 8/8 exact toggle responses", path.c_str()) != FALSE;
         WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
         return ok;
     }

@@ -1,0 +1,7 @@
+﻿LIBRARY "MCST-TrackerBridge"
+EXPORTS
+    MCBridge_Initialize
+    MCBridge_Heartbeat
+    MCBridge_GetState
+    MCBridge_Shutdown
+    MCBridge_GetVersion

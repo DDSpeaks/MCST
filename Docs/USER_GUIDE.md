@@ -1,41 +1,142 @@
 # MCST-Watchdog User Guide
 
-## Main objective
+## Purpose
 
-The Dashboard answers one operational question: **Is MultiCharts healthy?**
+The Dashboard is designed to answer one operational question quickly: **Is the monitored MultiCharts environment healthy?**
 
-## Normal operation
+Normal operation should require no Developer Mode tools.
 
-1. Start MultiCharts and the required instances.
-2. Start `C:\MCExtras\MCST-Watchdog.exe`.
-3. Confirm that Bridge, Tracker Snapshot, AutoTrading, Email, Heartbeat, Status Reports, and resource status show the expected state.
-4. Leave the Dashboard visible during trading operation.
+## Starting the system
 
-## Configuration
+1. Start the required MultiCharts64 instances.
+2. Ensure the supplied Tracker Bridge PowerLanguage host is active in each monitored instance.
+3. Start `C:\MCExtras\MCST-Watchdog.exe`.
+4. Confirm that the Dashboard reaches the expected state.
 
-`MCST-Watchdog.ini` is stored beside the executable. Missing known settings are written with safe defaults. User-specific SMTP addresses, usernames, and passwords are never invented.
+## Reading the Dashboard
 
-## Diagnostics
+MCST uses four operational states:
 
-Developer and research functions are intended for troubleshooting and MultiCharts compatibility work. They are not required for ordinary production use.
+- `HEALTHY` — the subsystem is operating as expected.
+- `WARNING` — attention may be required, but the condition is not yet treated as critical.
+- `CRITICAL` — a configured production condition requires attention.
+- `UNKNOWN` — Watchdog does not have enough verified information to claim a valid state.
+
+`UNKNOWN` is intentional fail-safe behavior. MCST prefers an explicit unknown state over guessing.
+
+The System Status area includes Bridge, Tracker Snapshot, AutoTrading, Broker, Recent Logs, Status Reports, Email, and Heartbeat state. Latest Activity and process/resource information provide additional context.
+
+The Dashboard also displays the detected MultiCharts version and compatibility information where available. A readable MultiCharts version does not by itself authorize internal-memory access; build-dependent readers require a verified compatibility profile.
+
+## Normal controls
+
+The normal production control row includes actions such as:
+
+- `Refresh`
+- `Save Report`
+- `Open Folder`
+- `Open Settings`
+- `Reload Settings`
+
+System Status rows with a `...` button provide focused configuration and subsystem-specific actions.
+
+## Developer Mode controls
+
+Developer Mode is disabled by default:
+
+```ini
+[Developer]
+enabled=false
+```
+
+When enabled, research controls appear as a **compact, lower-height toolbar** that is visually distinct from the normal production buttons. The compact layout intentionally leaves room for future MultiCharts compatibility-research tools.
+
+Current AutoTrading research controls include:
+
+- `Start AT Research`
+- `Capture AT Snapshot`
+- `Finish AT Research`
+
+These controls are not required for normal production monitoring.
+
+## Self-documenting configuration
+
+`MCST-Watchdog.ini` is stored beside the executable. MCST intentionally treats it as a **self-documenting configuration file**.
+
+When a known setting is missing, Watchdog writes the setting with its safe built-in default. Invalid Boolean or numeric values are normalized where appropriate. This allows an existing INI file to grow automatically when new supported settings are introduced.
+
+User-specific values and secrets are not invented. For example, email addresses, SMTP user names, and SMTP passwords may remain empty until the user configures them.
+
+Configuration normalization changes are recorded in:
+
+```text
+MCST-Watchdog-ConfigNormalization.log
+```
+
+The `[DetectedMultiCharts]` section is different from normal settings: it is diagnostic information written by Watchdog and should not be maintained manually.
+
+## Email settings
+
+The Email settings panel separates alert and report recipients. Alerts are intended for urgent operational events, while routine Status Reports and Heartbeats can be sent to a different mailbox.
+
+### Password / App Password
+
+The Email settings field is labelled **Password / App Password** because the correct credential depends on the email provider.
+
+Use the SMTP credential required by the provider. When an application-specific password is supported or required, use an **App Password** instead of the normal interactive account password. Gmail normally requires a Google App Password for this type of SMTP authentication. Other providers may use a different mechanism.
+
+Leaving the Password / App Password field empty when editing Email settings preserves the currently stored value.
+
+MCST does not intentionally include the configured credential in status reports, alert messages, or diagnostic logs.
+
+## Status Reports
+
+Status Reports provide a consolidated operational snapshot containing:
+
+- Watchdog and Tracker Bridge versions
+- detected MultiCharts version and executable
+- selected compatibility profile
+- overall and per-subsystem status
+- latest activity
+- system resources
+- Watchdog process resources
+- Accounts
+- Open Positions
+- Recent Logs
+
+HTML reports use the same status semantics as the Dashboard.
+
+Status Report scheduling is configured under `[StatusReport]`, including interval, startup behavior, weekdays, sending window, and recipient.
+
+## Heartbeat
+
+Heartbeat messages confirm that the monitoring system is still operating. They use the report email channel rather than the urgent alert channel.
+
+The Heartbeat row menu can send a manual heartbeat immediately.
+
+## AutoTrading monitor
+
+AutoTrading monitoring reads MultiCharts internal state passively. Production reading is allowed only when the detected `Charting.dll` build matches a verified compatibility profile.
+
+If the build is unknown, AutoTrading remains `UNKNOWN` rather than using an old address.
+
+The configured minimum number of active strategies determines when the AutoTrading state becomes critical.
 
 ## Broker Monitor
 
-The Broker row is driven by recognized events in MultiCharts Recent Logs. A detected
-connection loss starts a recovery grace period. During the grace period the row is
-shown as `Reconnecting` and no email is sent. The default delay is 60 seconds.
+The Broker Monitor consumes recognized events from MultiCharts Recent Logs and also supports configured browser-based authentication detection.
 
-If a recognized recovery event appears before the delay expires, the event is recorded
-but no outage alert is sent. If the delay expires first, the Broker row becomes
-`Disconnected` and one alert email is sent. A recovery email is sent only when an
-alerted outage later recovers.
+A disconnect or reconnect event starts a grace period. If recovery is recognized before the grace period expires, an outage alert is not sent. If the grace period expires, Broker state becomes critical and an alert can be sent. A recovery message is sent only after an alerted outage recovers.
 
-Configure the monitor in `MCST-Watchdog.ini`:
+A configured broker authentication/login page is treated as stronger current evidence than an older successful connection log.
+
+Typical configuration:
 
 ```ini
 [BrokerMonitor]
 enabled=true
 disconnect_grace_seconds=60
+state_cache_max_age_minutes=1440
 alert_email=true
 recovery_email=true
 disconnect_patterns=connection lost|connection disconnected|broker disconnected|connection closed
@@ -43,16 +144,30 @@ reconnecting_patterns=reconnecting|reconnect attempt|trying to connect
 connected_patterns=connection restored|reconnected|connection established|logged on
 ```
 
-Pattern text is case-insensitive. Use the vertical bar (`|`) to separate patterns.
-The defaults are a safe starting point, but production patterns should be verified
-against the actual broker log wording.
+Patterns are case-insensitive and separated with `|`.
 
+## Browser-based broker authentication
 
-## Recent Logs email alerts
+Broker authentication profiles are data-driven. Example:
 
-Version 1.06 adds a dedicated Log Alert Engine. It watches only newly observed rows in the Order and Position Tracker **Logs** tab and can send an HTML email when a configured keyword is found.
+```ini
+[BrokerAuth.Saxo]
+enabled=true
+name=Saxo
+url_contains=developer.saxobank.com/login
+title_contains=MultiCharts (OpenAPI Web App)|Saxo
+text_contains=login|account authentication
+recovery_log_contains=saxo|saxo group
+alert_after_seconds=10
+```
 
-Configuration is stored in `MCST-Watchdog.ini`:
+Prefer a stable `url_contains` value. Title and text terms are useful as additional or fallback evidence. Avoid overly generic match terms when a broker-specific URL is available.
+
+The detector is passive. It does not enter credentials or interact with the page.
+
+## Recent Logs alerts
+
+The Log Alert Engine watches newly observed Tracker Logs rows and can send an alert when configured keywords are found.
 
 ```ini
 [LogAlerts]
@@ -66,84 +181,21 @@ warning_keywords=
 ignore_keywords=simulated trades are not shown on historical data
 ```
 
-Keywords are separated with `|` and matching is case-insensitive. Any one matching keyword is sufficient. The default critical list catches rejected orders such as `Invalid Stop Price`. Existing rows are used only as a startup baseline unless `notify_existing_on_startup=true`.
+Matching is case-insensitive and keywords are separated with `|`. Existing rows normally establish a startup baseline rather than generating historical alerts.
 
-The Log Alert Engine is separate from the Broker State Engine. Changing Fatal, Critical or Warning keywords does not change broker connection recovery detection.
+The Log Alert Engine is separate from the Broker State Engine.
 
+## System resources
 
-## Email channels (1.07)
+Status Reports include system-wide RAM, CPU, and system-drive information. Watchdog-specific private memory, handle count, and uptime are reported separately.
 
-Use separate recipients for alerts and routine reports:
+## Startup troubleshooting
 
-```ini
-[Email]
-alert_to=alerts@example.com
-report_to=reports@example.com
+If Watchdog closes before showing the Dashboard, inspect:
 
-[StatusReport]
-to=reports@example.com
+```text
+C:\MCExtras\MCST-Watchdog-Startup.log
+C:\Temp\MCST-Watchdog-Startup.log
 ```
 
-AutoTrading, Broker and Log Alert messages use `alert_to`. Status Reports and Heartbeats use the Status Report recipient.
-
-The **Status Settings** button edits the Status Report recipient, interval, startup behavior, weekdays and sending window. AutoTrading research buttons are shown only in Developer Mode.
-
-
-## Dashboard row menus (1.09)
-
-The AutoTrading, Status Reports, Email, and Heartbeat rows include a compact `...` button. Use it to open the focused settings panel or run a subsystem-specific action. AutoTrading research commands are shown only when `[Developer] enabled=true`.
-
-## Browser-based Broker Authentication Detection
-
-Broker authentication pages are treated as stronger current evidence than historical Recent Logs.
-The Watchdog passively reads supported browser address bars by the proven Win32 browser window/child-text inspection used by the original production Watchdog. It does not
-interact with the page or credentials.
-
-The default Saxo profile is written automatically when missing:
-
-```ini
-[BrokerAuth.Saxo]
-enabled=true
-name=Saxo
-url_contains=developer.saxobank.com/login
-title_contains=MultiCharts (OpenAPI Web App)|Saxo
-text_contains=login|account authentication
-recovery_log_contains=saxo|saxo group
-alert_after_seconds=10
-```
-
-If the configured login URL remains visible for the configured delay, Broker status becomes
-CRITICAL and the normal broker alert channel is used. A login page therefore overrides an older
-"connection established" log entry. URL query strings and fragments are deliberately removed from
-Watchdog diagnostics and email.
-
-To add another broker, create another section such as `[BrokerAuth.MyBroker]`. Prefer a stable
-`url_contains` value. Multiple alternatives can be separated with `|`. If no stable URL is
-available, `title_contains` and `text_contains` can be used as a fallback.
-
-## Status Report System Resources
-
-The Status Report SYSTEM RESOURCES section reports system-wide RAM, CPU and the Windows system
-Drive. RAM and disk rows include total capacity, free capacity and used percentage. CPU includes
-logical processor capacity and current usage. Watchdog-specific private memory, handle count and
-uptime are shown separately under WATCHDOG PROCESS.
-
-In HTML email, SYSTEM STATUS values include the same green/amber/red/gray visual status-dot
-language used by the Dashboard.
-
-Example for a second broker profile:
-
-```ini
-[BrokerAuth.TradeStation]
-enabled=true
-name=TradeStation
-url_contains=auth.tradestation.com|signin.tradestation.com|login.tradestation.com
-title_contains=TradeStation
-text_contains=login|sign in|authentication
-recovery_log_contains=tradestation
-alert_after_seconds=10
-```
-
-The exact URL terms should be based on the broker's real authentication page observed in the
-production environment. A configured URL match is preferred over generic words such as `login`
-because it avoids false alerts from unrelated browser tabs.
+If Watchdog starts but a subsystem is `UNKNOWN` or `CRITICAL`, use the row description, Recent Activity, Status Report, and the relevant configuration section to determine the cause before changing compatibility data.

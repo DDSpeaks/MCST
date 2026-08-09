@@ -1,4 +1,7 @@
-#pragma once
+﻿#pragma once
+
+inline constexpr wchar_t kTrackerBridgeProductVersion[] = L"1.0";
+inline constexpr int kTrackerBridgeInternalBuildVersion = 155;
 
 #include <cstddef>
 #include <cstdint>

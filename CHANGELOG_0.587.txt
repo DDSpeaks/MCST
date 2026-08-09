@@ -1,9 +1,0 @@
-MCST-Watchdog 0.587
-====================
-
-- Added English-only engineering and documentation standards.
-- Added developer-mode configuration with safe default normalization.
-- Added complete English documentation foundation.
-- Added runtime installation guidance for C:\MCExtras.
-- Added automated release-tree validation script.
-- Kept Bridge Protocol V155 unchanged.

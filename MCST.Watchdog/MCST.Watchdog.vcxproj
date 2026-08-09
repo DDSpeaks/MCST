@@ -1,52 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
-    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
-  </ItemGroup>
-  <PropertyGroup Label="Globals">
-    <VCProjectVersion>17.0</VCProjectVersion>
-    <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{05EC3E4D-8EC5-45D8-84C4-F5F547316B21}</ProjectGuid>
-    <RootNamespace>MCSTWatchdog</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+  <PropertyGroup Label="Globals"><VCProjectVersion>17.0</VCProjectVersion><Keyword>Win32Proj</Keyword><ProjectGuid>{05EC3E4D-8EC5-45D8-84C4-F5F547316B21}</ProjectGuid><RootNamespace>MCSTWatchdog</RootNamespace><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
-    <CharacterSet>Unicode</CharacterSet>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
-    <CharacterSet>Unicode</CharacterSet>
-  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><WholeProgramOptimization>false</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings" />
-  <ImportGroup Label="Shared" />
-  <ImportGroup Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
+  <ImportGroup Label="ExtensionSettings" /><ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets"><Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" /></ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup>
-    <TargetName>MCST-Watchdog</TargetName>
-  </PropertyGroup>
-  <ItemDefinitionGroup>
-    <ClCompile>
-      <WarningLevel>Level4</WarningLevel>
-      <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-    </ClCompile>
-    <Link>
-      <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>Psapi.lib;Shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-    </Link>
+  <PropertyGroup><TargetName>MCST-Watchdog</TargetName><OutDir>$(SolutionDir)bin\Release\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\Release\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile><RuntimeLibrary>MultiThreaded</RuntimeLibrary><WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp17</LanguageStandard><PreprocessorDefinitions>NDEBUG;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><Optimization>MaxSpeed</Optimization><FunctionLevelLinking>false</FunctionLevelLinking><IntrinsicFunctions>false</IntrinsicFunctions></ClCompile>
+    <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><AdditionalDependencies>Psapi.lib;Shell32.lib;Version.lib;Gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
@@ -61,6 +26,7 @@
     <ClCompile Include="BrokerAuthDetector.cpp" />
     <ClCompile Include="LogAlertEngine.cpp" />
     <ClCompile Include="DashboardLayout.cpp" />
+    <ClCompile Include="MultiChartsVersionDetector.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppConfig.h" />
@@ -74,15 +40,12 @@
     <ClInclude Include="BrokerAuthDetector.h" />
     <ClInclude Include="LogAlertEngine.h" />
     <ClInclude Include="DashboardLayout.h" />
+    <ClInclude Include="MultiChartsVersionDetector.h" />
   </ItemGroup>
+  <ItemGroup><ResourceCompile Include="MCST.Watchdog.rc" /></ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../MCST.Shared/MCST.Shared.vcxproj">
-      <Project>{B9BB1A65-8F66-4D4A-8D39-EF5F2D75D1A1}</Project>
-    </ProjectReference>
-    <ProjectReference Include="../MCST.TrackerBridge/MCST.TrackerBridge.vcxproj">
-      <Project>{FE0CE0D0-F3CD-49E7-A57A-844048EB5C40}</Project>
-    </ProjectReference>
+    <ProjectReference Include="../MCST.Shared/MCST.Shared.vcxproj"><Project>{B9BB1A65-8F66-4D4A-8D39-EF5F2D75D1A1}</Project></ProjectReference>
+    <ProjectReference Include="../MCST.TrackerBridge/MCST.TrackerBridge.vcxproj"><Project>{FE0CE0D0-F3CD-49E7-A57A-844048EB5C40}</Project></ProjectReference>
   </ItemGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" /><ImportGroup Label="ExtensionTargets" />
 </Project>

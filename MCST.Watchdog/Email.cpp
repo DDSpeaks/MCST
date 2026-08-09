@@ -26,7 +26,7 @@ bool EmailSender::IsConfigured(std::wstring* reason, const std::wstring& recipie
     if(config_.emailEnabledSettingPresent && !config_.emailEnabled){ if(reason)*reason=L"Email is explicitly disabled in INI ([Email] enabled=false)."; return false; }
     const std::wstring recipient = recipientOverride.empty() ? config_.emailTo : recipientOverride;
     if(config_.smtpServer.empty()||config_.smtpUser.empty()||config_.smtpPassword.empty()||config_.emailFrom.empty()||recipient.empty()){
-        if(reason)*reason=L"SMTP server, user, password, from and to must be configured."; return false;
+        if(reason)*reason=L"SMTP server, user, password / App Password, from and to must be configured."; return false;
     }
     return true;
 }

@@ -137,7 +137,12 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
 {
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
-        << L"===========================\n\n"
+        << L"===========================\n"
+        << L"Watchdog version       1.110\n"
+        << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
+        << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
+        << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
+        << L"Compatibility profile  " << (status.multiChartsCompatibilityProfile.empty() ? L"Unknown" : status.multiChartsCompatibilityProfile) << L"\n\n"
         << L"OVERALL STATUS\n"
         << L"--------------\n"
         << StateCell(status.overall) << L"\n\n"
@@ -386,6 +391,53 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     closeSystemTable();
     closePre();
     html += L"</body></html>\r\n";
+    return html;
+}
+
+std::wstring BuildAlertWithStatusReportHtml(
+    const std::wstring& alertIntroduction,
+    const std::wstring& statusReportPlainText)
+{
+    // Always let BuildStatusReportHtml render the report itself. Alert messages only
+    // prepend their own introduction to that finished HTML. Therefore scheduled reports,
+    // AutoTrading alerts, Broker alerts, Log alerts and Heartbeats cannot accidentally
+    // maintain different copies of the Status Report layout.
+    std::wstring html = BuildStatusReportHtml(statusReportPlainText);
+
+    auto escapeHtml = [](const std::wstring& value)
+    {
+        std::wstring escaped;
+        escaped.reserve(value.size() + 64);
+        for (const wchar_t ch : value)
+        {
+            switch (ch)
+            {
+            case L'&': escaped += L"&amp;"; break;
+            case L'<': escaped += L"&lt;"; break;
+            case L'>': escaped += L"&gt;"; break;
+            case L'\"': escaped += L"&quot;"; break;
+            default: escaped.push_back(ch); break;
+            }
+        }
+        return escaped;
+    };
+
+    if (alertIntroduction.empty())
+        return html;
+
+    const std::size_t bodyStart = html.find(L"<body");
+    if (bodyStart == std::wstring::npos)
+        return html;
+    const std::size_t bodyTagEnd = html.find(L'>', bodyStart);
+    if (bodyTagEnd == std::wstring::npos)
+        return html;
+
+    std::wstring intro;
+    intro += L"\r\n<div style=\"margin:0 0 18px 0;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.32;\">";
+    intro += L"<div style=\"white-space:pre-wrap;overflow-wrap:break-word;\">";
+    intro += escapeHtml(alertIntroduction);
+    intro += L"</div></div>\r\n";
+    html.insert(bodyTagEnd + 1, intro);
     return html;
 }
 

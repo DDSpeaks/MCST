@@ -1,9 +1,0 @@
-MCST-Watchdog 1.093 - Text Clipping Before Overflow Menus
-=========================================================
-
-- Reserved a dedicated right-side area for the row overflow menu buttons.
-- Status descriptions on AutoTrading, Status Reports, Email, and Heartbeat rows now end before the "..." buttons.
-- Long text is clipped with a standard end ellipsis instead of drawing underneath the buttons.
-- Added a clear visual gap between the final text glyph and the menu control.
-- Preserved all Windows 10 text clarity improvements from version 1.092.
-- No monitoring, email, scheduler, Bridge, or compatibility behavior was changed.

@@ -1,7 +1,0 @@
-MCST-Watchdog 1.102 - Status Report Column Alignment Polish
-
-- Increased the SYSTEM STATUS component column to 25% so labels such as Tracker Snapshot no longer collide with the status indicator.
-- Set the status column to 13% and the description column to 62%; descriptions may wrap naturally when needed.
-- Aligned the OVERALL STATUS indicator to the exact same status-column position used by all SYSTEM STATUS rows.
-- Kept the unified Consolas/Courier New typography and CSS-rendered status indicators.
-- No monitoring, broker, AutoTrading, Bridge V155, scheduler, or compatibility logic was changed.

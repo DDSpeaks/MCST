@@ -1,8 +1,0 @@
-MCST-Watchdog 0.582
-====================
-
-- Brightened only the status indicator circles. Healthy green is now substantially brighter; status text colors are unchanged.
-- Fixed Email configuration migration: a missing [Email] enabled key no longer means disabled. Only an explicit enabled=false disables Email.
-- Email status now reports Not configured when SMTP fields are incomplete instead of incorrectly reporting Disabled.
-- Recent Activity timestamps now use a dedicated Consolas fixed-width font and a fixed left-aligned column, so every timestamp starts at exactly the same x-coordinate.
-- Updated visible and INI version to 0.582.

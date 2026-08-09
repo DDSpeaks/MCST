@@ -1,0 +1,11 @@
+// MCST Tracker Bridge 1.0 Stop helper
+
+External:
+    "C:\MCExtras\MCST-TrackerBridge.dll",
+    Int, "MCBridge_Shutdown";
+
+Variables:
+    StopResult(0);
+
+if LastBarOnChart then
+    StopResult = MCBridge_Shutdown();

@@ -1,7 +1,0 @@
-MCST-Watchdog 1.02 - HTML Status Report Restoration
-
-- Restored the production-tested HTML monospace Status Report email format from the original Watchdog.
-- Status Report, scheduled reports, heartbeat messages, AutoTrading alerts and Broker alerts now send HTML email when they include a full status report.
-- The archived report file remains plain UTF-8 text for easy diagnostics and long-term readability.
-- Added a dedicated BuildStatusReportHtml formatter so Dashboard rendering and email formatting remain independent.
-- Preserved Bridge Protocol V155 and the Compatibility Framework without changes.

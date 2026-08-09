@@ -1,8 +1,0 @@
-MCST-Watchdog 0.575 - AutoTrading Two-Instance Candidate Confirmation
-
-- MultiCharts process discovery no longer depends on window visibility.
-- Adds executable-process recovery discovery for MultiCharts instances.
-- Baseline and comparison reports list every detected PID and main-window title.
-- Comparison is aborted if the process count changes between baseline and current scan.
-- Keeps the strong candidate RVA 0xA457B8 / offset 0x142 visible in the dynamic ranking.
-- Passive diagnostics only; no clicks, input, or writes to MultiCharts memory.

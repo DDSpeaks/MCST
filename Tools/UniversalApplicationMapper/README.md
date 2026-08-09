@@ -1,20 +1,27 @@
-# MCST Universal Application Mapper Integration
+# Universal Application Mapper Integration
 
-The Universal Application Mapper is an optional developer tool in the MCST suite.
-It is not required for normal MCST-Watchdog operation.
+The Universal Application Mapper is an optional developer/research tool associated with the MCST suite. It is not required for normal MCST-Watchdog operation and is not a Watchdog runtime dependency.
 
-## Runtime location
+## Purpose
 
-The expected executable path is configurable in `MCST-Watchdog.ini`:
+The Mapper is application-independent and can be used to investigate Windows application UI structure, including window/control hierarchies and other UI information useful during compatibility research. Within MCST development it can assist investigations such as broker-authentication page/control detection and future UI-based monitoring work.
+
+It is intentionally kept as a separate executable rather than being merged into the production Watchdog.
+
+## Configured path
+
+Watchdog stores the optional executable path in its self-documenting INI configuration:
 
 ```ini
 [DeveloperTools]
 universal_application_mapper_path=C:\MCExtras\UniversalApplicationMapper.exe
 ```
 
-The Mapper executable itself is not rebuilt by the MCST-Watchdog solution. Copy the
-separately built `UniversalApplicationMapper.exe` to the configured location when it
-is available.
+If this known key is missing, Watchdog writes the default path during configuration normalization. The path may be changed to another location.
 
-The Mapper remains a standalone, application-independent research tool. It should not
-be started automatically in production mode.
+## Production behavior
+
+- The Mapper is not required for Watchdog monitoring.
+- It must not be started automatically in normal production mode.
+- Mapper-related actions belong to Developer Mode.
+- The Mapper executable is built/distributed separately from the current MCST-Watchdog solution.

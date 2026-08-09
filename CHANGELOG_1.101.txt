@@ -1,9 +1,0 @@
-MCST-Watchdog 1.101 - Status Report Responsive Layout Fix
-=========================================================
-
-- Removed fixed pixel widths and minimum widths from the SYSTEM STATUS HTML table.
-- Replaced them with responsive percentage columns: Component 20%, Status 14%, Description 66%.
-- Limited the table itself to the available message width so iPad Mail and other clients do not shrink the whole table to fit an oversized minimum width.
-- Explicitly enforces the report's Consolas / Courier New / monospace stack and 15 px size on every SYSTEM STATUS cell.
-- Preserved the fixed logical columns, CSS status indicators, unified typography and wide Description emphasis.
-- No monitoring, broker, AutoTrading, Bridge, email scheduling or Compatibility logic was changed.

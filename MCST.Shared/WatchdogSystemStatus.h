@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <chrono>
 #include <string>
@@ -59,6 +59,11 @@ namespace mcst
         std::wstring lastReport;
         std::wstring lastAlert;
         std::wstring lastError;
+
+        std::wstring multiChartsVersion;
+        std::wstring multiChartsFileVersion;
+        std::wstring multiChartsExecutable;
+        std::wstring multiChartsCompatibilityProfile;
 
         unsigned long processId = 0;
         std::size_t accountRows = 0;

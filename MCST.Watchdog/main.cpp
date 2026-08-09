@@ -18,6 +18,7 @@
 #include "BrokerAuthDetector.h"
 #include "LogAlertEngine.h"
 #include "DashboardLayout.h"
+#include "MultiChartsVersionDetector.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 
@@ -32,6 +33,8 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace
@@ -56,6 +59,7 @@ namespace
     constexpr int kButtonStatusMenu = 1011;
     constexpr int kButtonEmailMenu = 1012;
     constexpr int kButtonHeartbeatMenu = 1013;
+    constexpr int kButtonOpenSettings = 1014;
     constexpr int kMenuConfigure = 3001;
     constexpr int kMenuAction1 = 3002;
     constexpr int kMenuAction2 = 3003;
@@ -86,6 +90,7 @@ namespace
         mcst::WatchdogSystemStatus status;
         TrackerStatusSnapshot snapshot;
         BrokerAuthenticationDetection brokerAuthentication;
+        MultiChartsVersionInfo multiChartsVersionInfo;
         std::wstring diagnostic;
     };
 
@@ -115,10 +120,12 @@ namespace
     HFONT g_labelFont = nullptr;
     HFONT g_statusFont = nullptr;
     HFONT g_monoFont = nullptr;
+    HFONT g_developerButtonFont = nullptr;
     HWND g_refreshButton = nullptr;
     HWND g_reportButton = nullptr;
     HWND g_settingsButton = nullptr;
     HWND g_openFolderButton = nullptr;
+    HWND g_openSettingsButton = nullptr;
     HWND g_autoTradingDiagnosticsButton = nullptr;
     HWND g_autoTradingCaptureButton = nullptr;
     HWND g_autoTradingFinishButton = nullptr;
@@ -129,6 +136,84 @@ namespace
     HWND g_emailMenuButton = nullptr;
     HWND g_heartbeatMenuButton = nullptr;
     ULONG_PTR g_gdiplusToken = 0;
+
+
+    std::wstring StartupLogPathSafe() noexcept
+    {
+        wchar_t modulePath[MAX_PATH]{};
+        const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+            return L"MCST-Watchdog-Startup.log";
+        std::wstring path(modulePath, length);
+        const auto slash = path.find_last_of(L"\\/");
+        if (slash != std::wstring::npos)
+            path.resize(slash + 1);
+        else
+            path.clear();
+        path += L"MCST-Watchdog-Startup.log";
+        return path;
+    }
+
+    void AppendUtf8LineToFileSafe(const std::wstring& path, const std::wstring& line) noexcept
+    {
+        HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return;
+
+        const int bytesNeeded = WideCharToMultiByte(CP_UTF8, 0, line.c_str(), static_cast<int>(line.size()),
+            nullptr, 0, nullptr, nullptr);
+        if (bytesNeeded > 0)
+        {
+            std::string utf8(static_cast<size_t>(bytesNeeded), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, line.c_str(), static_cast<int>(line.size()),
+                utf8.data(), bytesNeeded, nullptr, nullptr);
+            DWORD written = 0;
+            WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        }
+        CloseHandle(file);
+    }
+
+    void AppendStartupLogSafe(const std::wstring& text) noexcept
+    {
+        try
+        {
+            SYSTEMTIME st{};
+            GetLocalTime(&st);
+            wchar_t prefix[64]{};
+            swprintf_s(prefix, L"%04u-%02u-%02u %02u:%02u:%02u  ",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            const std::wstring line = std::wstring(prefix) + text + L"\r\n";
+
+            // Primary log: next to the executable.
+            AppendUtf8LineToFileSafe(StartupLogPathSafe(), line);
+
+            // Diagnostic fallback: intentionally independent of the executable directory.
+            CreateDirectoryW(L"C:\\Temp", nullptr);
+            AppendUtf8LineToFileSafe(L"C:\\Temp\\MCST-Watchdog-Startup.log", line);
+
+            OutputDebugStringW((L"MCST STARTUP: " + text + L"\r\n").c_str());
+        }
+        catch (...) {}
+    }
+
+    LONG WINAPI StartupUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo) noexcept
+    {
+        DWORD code = exceptionInfo && exceptionInfo->ExceptionRecord
+            ? exceptionInfo->ExceptionRecord->ExceptionCode : 0;
+        AppendStartupLogSafe(L"FATAL SEH exception before normal error handling. Code=0x" +
+            [] (DWORD value) { wchar_t b[16]{}; swprintf_s(b, L"%08X", value); return std::wstring(b); }(code));
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
+    void ShowStartupFailureSafe(const std::wstring& detail) noexcept
+    {
+        AppendStartupLogSafe(L"FATAL: " + detail);
+        const std::wstring message =
+            L"MCST-Watchdog could not start.\r\n\r\n" + detail +
+            L"\r\n\r\nSee MCST-Watchdog-Startup.log next to the EXE for details.";
+        MessageBoxW(nullptr, message.c_str(), L"MCST-Watchdog startup error", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+    }
 
     std::wstring BrokerStateCachePath()
     {
@@ -194,18 +279,21 @@ namespace
         if (g_refreshButton) MoveWindow(g_refreshButton, 28, y, 110, 34, TRUE);
         if (g_reportButton) MoveWindow(g_reportButton, 148, y, 120, 34, TRUE);
         if (g_openFolderButton) MoveWindow(g_openFolderButton, 278, y, 120, 34, TRUE);
-        const int researchY = y - 42;
+        if (g_openSettingsButton) MoveWindow(g_openSettingsButton, 408, y, 130, 34, TRUE);
+        if (g_reloadSettingsButton) MoveWindow(g_reloadSettingsButton, 548, y, 150, 34, TRUE);
+        const DeveloperToolbarLayout developerLayout = CalculateDeveloperToolbarLayout(y);
         if (g_app.config.developerModeEnabled)
         {
-            if (g_autoTradingDiagnosticsButton) MoveWindow(g_autoTradingDiagnosticsButton, 28, researchY, 190, 34, TRUE);
-            if (g_autoTradingCaptureButton) MoveWindow(g_autoTradingCaptureButton, 228, researchY, 190, 34, TRUE);
-            if (g_autoTradingFinishButton) MoveWindow(g_autoTradingFinishButton, 428, researchY, 190, 34, TRUE);
-            if (g_reloadSettingsButton) MoveWindow(g_reloadSettingsButton, 628, researchY, 150, 34, TRUE);
-            if (g_testEmailButton) MoveWindow(g_testEmailButton, 788, researchY, 150, 34, TRUE);
+            const RECT startRect = CalculateDeveloperToolbarButtonRect(developerLayout, 0);
+            const RECT captureRect = CalculateDeveloperToolbarButtonRect(developerLayout, 1);
+            const RECT finishRect = CalculateDeveloperToolbarButtonRect(developerLayout, 2);
+            if (g_autoTradingDiagnosticsButton) MoveWindow(g_autoTradingDiagnosticsButton, startRect.left, startRect.top, startRect.right - startRect.left, startRect.bottom - startRect.top, TRUE);
+            if (g_autoTradingCaptureButton) MoveWindow(g_autoTradingCaptureButton, captureRect.left, captureRect.top, captureRect.right - captureRect.left, captureRect.bottom - captureRect.top, TRUE);
+            if (g_autoTradingFinishButton) MoveWindow(g_autoTradingFinishButton, finishRect.left, finishRect.top, finishRect.right - finishRect.left, finishRect.bottom - finishRect.top, TRUE);
         }
         else
         {
-            if (g_reloadSettingsButton) MoveWindow(g_reloadSettingsButton, 408, y, 150, 34, TRUE);
+            // Reload Settings remains on the normal bottom row next to Open Settings.
         }
         const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
         const int menuX = rowLayout.overflowButtonX;
@@ -591,7 +679,8 @@ namespace
         const auto now = std::chrono::system_clock::now();
         if (readOk)
         {
-            result.status.bridge = { mcst::HealthState::Healthy, L"Connected", L"Bridge V" + std::to_wstring(result.snapshot.bridgeVersion) };
+            result.status.bridge = { mcst::HealthState::Healthy, L"Connected",
+                L"MCST Tracker Bridge 1.0 - internal V" + std::to_wstring(result.snapshot.bridgeVersion) + L" - Protocol V" + std::to_wstring(result.snapshot.protocolVersion) };
             const bool trackerOk = result.snapshot.trackerFound && result.snapshot.trackerSameProcess;
             result.status.trackerSnapshot = {
                 trackerOk ? mcst::HealthState::Healthy : mcst::HealthState::Critical,
@@ -602,6 +691,13 @@ namespace
             result.status.openPositionRows = result.snapshot.openPositions.rows.size();
             result.status.recentLogRows = result.snapshot.recentLogs.rows.size();
             result.status.processId = result.snapshot.processId;
+            result.multiChartsVersionInfo = DetectMultiChartsVersion(result.snapshot.processId);
+            if (result.multiChartsVersionInfo.detected)
+            {
+                result.status.multiChartsVersion = result.multiChartsVersionInfo.displayVersion;
+                result.status.multiChartsFileVersion = result.multiChartsVersionInfo.fileVersion;
+                result.status.multiChartsExecutable = result.multiChartsVersionInfo.executableName;
+            }
             result.status.lastSuccessfulUpdate = now;
             result.status.lastSnapshot = FormatLocalTime(now);
 
@@ -633,11 +729,13 @@ namespace
                 result.status.lastAutoTradingRead = FormatLocalTime(autoTrading.lastSuccessfulRead);
                 result.status.autoTradingActive = autoTrading.activeStrategies;
                 const bool belowMinimum = autoTrading.activeStrategies < g_app.config.autoTradingMinimum;
+                result.status.multiChartsCompatibilityProfile = autoTrading.compatibilityProfile;
                 result.status.autoTrading = {
                     belowMinimum ? mcst::HealthState::Critical : mcst::HealthState::Healthy,
                     std::to_wstring(autoTrading.activeStrategies) + L" Active",
                     L"Minimum required " + std::to_wstring(g_app.config.autoTradingMinimum) +
                         L" - Objects found " + std::to_wstring(autoTrading.strategyObjectsFound) +
+                        (result.status.multiChartsVersion.empty() ? L"" : L" - MC " + result.status.multiChartsVersion) +
                         (autoTrading.compatibilityProfile.empty() ? L"" : L" - " + autoTrading.compatibilityProfile)
                 };
                 if (!autoTrading.fromCache)
@@ -665,6 +763,9 @@ namespace
         {
             result.status.autoTrading = { mcst::HealthState::Unknown, L"Disabled", L"" };
         }
+
+        if (readOk && result.multiChartsVersionInfo.detected)
+            WriteDetectedMultiChartsInfoToIni(result.multiChartsVersionInfo, result.status.multiChartsCompatibilityProfile);
 
         result.status.broker = { mcst::HealthState::Unknown, L"Waiting", L"Broker events are evaluated from Recent Logs" };
         result.status.statusReports = {
@@ -763,13 +864,13 @@ namespace
 
     HWND AddLabel(HWND parent, const wchar_t* text, int y)
     {
-        return CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE, 22, y + 4, 150, 22, parent, nullptr, nullptr, nullptr);
+        return CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE, 22, y + 4, 160, 22, parent, nullptr, nullptr, nullptr);
     }
 
     HWND AddEdit(HWND parent, const std::wstring& text, int id, int y, int width = 310, DWORD extra = 0)
     {
         return CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", text.c_str(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | extra,
-            178, y, width, 26, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
+            188, y, width, 26, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
     }
 
     LRESULT CALLBACK SimpleSettingsProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -816,13 +917,14 @@ namespace
                 AddLabel(hwnd, L"SMTP server", y); state->fields[0] = AddEdit(hwnd, c.smtpServer, kSimpleField1, y); y += 36;
                 AddLabel(hwnd, L"SMTP port", y); state->fields[1] = AddEdit(hwnd, std::to_wstring(c.smtpPort), kSimpleField2, y, 100, ES_NUMBER); y += 36;
                 AddLabel(hwnd, L"User name", y); state->fields[2] = AddEdit(hwnd, c.smtpUser, kSimpleField3, y); y += 36;
-                AddLabel(hwnd, L"Password", y); state->fields[3] = AddEdit(hwnd, L"", kSimpleField4, y, 310, ES_PASSWORD); y += 36;
+                AddLabel(hwnd, L"Password / App Password", y); state->fields[3] = AddEdit(hwnd, L"", kSimpleField4, y, 310, ES_PASSWORD); y += 36;
                 AddLabel(hwnd, L"From address", y); state->fields[4] = AddEdit(hwnd, c.emailFrom, kSimpleField5, y); y += 36;
                 AddLabel(hwnd, L"Alert recipient", y); state->fields[5] = AddEdit(hwnd, c.alertEmailTo, kSimpleField6, y); y += 36;
                 AddLabel(hwnd, L"Report recipient", y); state->fields[6] = AddEdit(hwnd, c.reportEmailTo, kSimpleField7, y); y += 38;
                 state->checks[0] = CreateWindowW(L"BUTTON", L"Use SSL/TLS", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 22, y, 160, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSimpleCheck1)), nullptr, nullptr);
                 SendMessageW(state->checks[0], BM_SETCHECK, c.smtpUseSsl ? BST_CHECKED : BST_UNCHECKED, 0); y += 36;
-                CreateWindowW(L"STATIC", L"Leave Password empty to keep the current stored password.", WS_CHILD | WS_VISIBLE, 22, y, 450, 22, hwnd, nullptr, nullptr, nullptr); y += 34;
+                CreateWindowW(L"STATIC", L"Use the SMTP credential required by your provider; Gmail normally requires a Google App Password.", WS_CHILD | WS_VISIBLE, 22, y, 480, 34, hwnd, nullptr, nullptr, nullptr); y += 34;
+                CreateWindowW(L"STATIC", L"Leave Password / App Password empty to keep the current stored value.", WS_CHILD | WS_VISIBLE, 22, y, 480, 22, hwnd, nullptr, nullptr, nullptr); y += 34;
             }
             CreateWindowW(L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 300, y, 90, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSimpleSave)), nullptr, nullptr);
             CreateWindowW(L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 400, y, 90, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSimpleCancel)), nullptr, nullptr);
@@ -877,7 +979,7 @@ namespace
             registered = true;
         }
         SimpleSettingsState state{}; state.kind = kind;
-        const int height = kind == SettingsPanelKind::Email ? 500 : 320;
+        const int height = kind == SettingsPanelKind::Email ? 540 : 320;
         HWND window = CreateWindowExW(WS_EX_DLGMODALFRAME, className, L"MCST-Watchdog Settings", WS_CAPTION | WS_SYSMENU | WS_POPUP,
             CW_USEDEFAULT, CW_USEDEFAULT, 530, height, owner, nullptr, GetModuleHandleW(nullptr), &state);
         if (!window) return false;
@@ -1031,7 +1133,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.104", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.110", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1061,9 +1163,10 @@ namespace
         SelectObject(dc, oldPen);
         DeleteObject(divider);
 
+        const std::wstring mcSuffix = status.multiChartsVersion.empty() ? L"" : L"    MC " + status.multiChartsVersion;
         const std::wstring updateText = status.lastSuccessfulUpdate.time_since_epoch().count() == 0
             ? L"Last successful system update: waiting for first successful update"
-            : L"Last successful system update: " + FormatClock(status.lastSuccessfulUpdate) + L"  (" + FormatAge(status.lastSuccessfulUpdate) + L")";
+            : L"Last successful system update: " + FormatClock(status.lastSuccessfulUpdate) + L"  (" + FormatAge(status.lastSuccessfulUpdate) + L")" + mcSuffix;
         DrawTextSimple(dc, { 28, 80, client.right - 250, 106 }, updateText, g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         DrawTextSimple(dc, { client.right - 245, 80, client.right - 28, 106 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
@@ -1128,6 +1231,7 @@ namespace
         g_labelFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
         g_statusFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
         g_monoFont = CreateUiFont(10, FW_NORMAL, L"Consolas", FIXED_PITCH | FF_MODERN);
+        g_developerButtonFont = CreateUiFont(9, FW_NORMAL, L"Segoe UI");
     }
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1139,17 +1243,20 @@ namespace
             g_reportButton = CreateWindowW(L"BUTTON", L"Save Report", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 148, 690, 120, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReport)), nullptr, nullptr);
             g_settingsButton = CreateWindowW(L"BUTTON", L"Status Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 278, 690, 110, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonSettings)), nullptr, nullptr);
             g_openFolderButton = CreateWindowW(L"BUTTON", L"Open Folder", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 398, 690, 120, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenFolder)), nullptr, nullptr);
-            g_autoTradingDiagnosticsButton = CreateWindowW(L"BUTTON", L"Start AT Research", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 28, 648, 190, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingDiagnostics)), nullptr, nullptr);
-            g_autoTradingCaptureButton = CreateWindowW(L"BUTTON", L"Capture AT Snapshot", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 228, 648, 190, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingCapture)), nullptr, nullptr);
-            g_autoTradingFinishButton = CreateWindowW(L"BUTTON", L"Finish AT Research", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 428, 648, 190, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingFinish)), nullptr, nullptr);
+            g_openSettingsButton = CreateWindowW(L"BUTTON", L"Open Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 528, 690, 130, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenSettings)), nullptr, nullptr);
+            g_autoTradingDiagnosticsButton = CreateWindowW(L"BUTTON", L"Start AT Research", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 28, 648, 164, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingDiagnostics)), nullptr, nullptr);
+            g_autoTradingCaptureButton = CreateWindowW(L"BUTTON", L"Capture AT Snapshot", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 200, 648, 164, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingCapture)), nullptr, nullptr);
+            g_autoTradingFinishButton = CreateWindowW(L"BUTTON", L"Finish AT Research", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 372, 648, 164, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingFinish)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
             g_testEmailButton = CreateWindowW(L"BUTTON", L"Send Test Email", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 788, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTestEmail)), nullptr, nullptr);
             g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 212, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
             g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 314, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
             g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 348, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
             g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 382, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
-            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
+            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+            for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton })
+                SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_developerButtonFont), TRUE);
             UpdateDeveloperControlVisibility(hwnd);
             SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
             SetTimer(hwnd, kClockTimer, 60000, nullptr);
@@ -1260,6 +1367,14 @@ namespace
             case kButtonOpenFolder:
                 ShellExecuteW(hwnd, L"open", GetApplicationDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 return 0;
+            case kButtonOpenSettings:
+            {
+                const std::wstring settingsPath = GetApplicationDirectory() + L"\\MCST-Watchdog.ini";
+                const HINSTANCE result = ShellExecuteW(hwnd, L"open", settingsPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                if (reinterpret_cast<INT_PTR>(result) <= 32)
+                    MessageBoxW(hwnd, (L"Could not open settings file:\r\n" + settingsPath).c_str(), L"Open Settings", MB_OK | MB_ICONWARNING);
+                return 0;
+            }
             case kButtonReloadSettings:
             {
             g_app.config = LoadAppConfig();
@@ -1292,7 +1407,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.104", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.110", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1375,9 +1490,9 @@ namespace
                     {
                         g_app.lastAlert = FormatLocalTime(monitorNow) + L" - " + brokerDecision.eventText;
                         g_app.status.lastAlert = g_app.lastAlert;
-                        const std::wstring body = brokerDecision.eventText + L"\r\n\r\n"
-                            + BuildStatusReport(g_app.status, g_app.snapshot);
-                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, brokerDecision.subject, BuildStatusReportHtml(body), true, brokerDecision.eventText, true, g_app.config.alertEmailTo);
+                        const std::wstring report = BuildStatusReport(g_app.status, g_app.snapshot);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, brokerDecision.subject,
+                            BuildAlertWithStatusReportHtml(brokerDecision.eventText, report), true, brokerDecision.eventText, true, g_app.config.alertEmailTo);
                     }
                 }
 
@@ -1393,10 +1508,9 @@ namespace
 
                     if (logAlertDecision.sendEmail)
                     {
-                        const std::wstring body = logAlertDecision.body + L"\r\n"
-                            + BuildStatusReport(g_app.status, g_app.snapshot);
+                        const std::wstring report = BuildStatusReport(g_app.status, g_app.snapshot);
                         SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config,
-                            logAlertDecision.subject, BuildStatusReportHtml(body), true,
+                            logAlertDecision.subject, BuildAlertWithStatusReportHtml(logAlertDecision.body, report), true,
                             L"Log alert email", true, g_app.config.alertEmailTo);
                     }
                 }
@@ -1410,9 +1524,9 @@ namespace
                         alertDecision.eventText);
                     if (alertDecision.sendEmail)
                     {
-                        const std::wstring body = alertDecision.eventText + L"\r\n\r\n"
-                            + BuildStatusReport(g_app.status, g_app.snapshot);
-                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, alertDecision.subject, BuildStatusReportHtml(body), true, alertDecision.eventText, true, g_app.config.alertEmailTo);
+                        const std::wstring report = BuildStatusReport(g_app.status, g_app.snapshot);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, alertDecision.subject,
+                            BuildAlertWithStatusReportHtml(alertDecision.eventText, report), true, alertDecision.eventText, true, g_app.config.alertEmailTo);
                     }
                 }
 
@@ -1459,8 +1573,8 @@ namespace
 
                 if (scheduleDecision.sendHeartbeat && !g_app.heartbeatEmailInFlight)
                 {
-                    const std::wstring heartbeatBody = L"MCST-Watchdog heartbeat. Monitoring is active.\r\n\r\n"
-                        + BuildStatusReport(g_app.status, g_app.snapshot);
+                    const std::wstring heartbeatIntroduction = L"MCST-Watchdog heartbeat. Monitoring is active.";
+                    const std::wstring heartbeatReport = BuildStatusReport(g_app.status, g_app.snapshot);
                     AddActivity(g_app.status, mcst::HealthState::Healthy, L"Heartbeat generated");
                     if (g_app.config.emailEnabled)
                     {
@@ -1468,7 +1582,7 @@ namespace
                         AddActivity(g_app.status, mcst::HealthState::Healthy,
                             L"Heartbeat queued to " + g_app.config.reportEmailTo);
                         SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog HEARTBEAT - " + FormatLocalTime(scheduleNow),
-                            BuildStatusReportHtml(heartbeatBody), false, L"Heartbeat email", true, g_app.config.reportEmailTo);
+                            BuildAlertWithStatusReportHtml(heartbeatIntroduction, heartbeatReport), false, L"Heartbeat email", true, g_app.config.reportEmailTo);
                     }
                 }
 
@@ -1545,86 +1659,140 @@ namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
-    HANDLE singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
-    if (!singleInstanceMutex)
-        return 1;
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    // This is deliberately the first executable application code. If the process reaches
+    // wWinMain, a marker should be visible either beside the EXE or in C:\Temp.
+    SetUnhandledExceptionFilter(StartupUnhandledExceptionFilter);
+    AppendStartupLogSafe(L"Startup -1: entered wWinMain before application initialization");
+
+    HANDLE singleInstanceMutex = nullptr;
+    bool gdiplusStarted = false;
+
+    try
     {
-        MessageBoxW(nullptr, L"MCST-Watchdog is already running.", L"MCST-Watchdog", MB_OK | MB_ICONINFORMATION);
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.110 process entered protected startup");
+
+        singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
+        if (!singleInstanceMutex)
+        {
+            ShowStartupFailureSafe(L"Startup 1 failed: unable to create the single-instance mutex. Win32 error " + std::to_wstring(GetLastError()) + L".");
+            return 1;
+        }
+        if (GetLastError() == ERROR_ALREADY_EXISTS)
+        {
+            AppendStartupLogSafe(L"Startup 1: another MCST-Watchdog instance is already running");
+            MessageBoxW(nullptr, L"MCST-Watchdog is already running.", L"MCST-Watchdog", MB_OK | MB_ICONINFORMATION);
+            CloseHandle(singleInstanceMutex);
+            return 0;
+        }
+        AppendStartupLogSafe(L"Startup 1: single-instance mutex OK");
+
+        Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+        if (Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr) != Gdiplus::Ok)
+            throw std::runtime_error("GDI+ initialization failed");
+        gdiplusStarted = true;
+        AppendStartupLogSafe(L"Startup 2: GDI+ OK");
+
+        AppendStartupLogSafe(L"Startup 3: loading and normalizing configuration");
+        g_app.config = LoadAppConfig();
+        AppendStartupLogSafe(L"Startup 4: configuration OK");
+
+        g_app.brokerMonitor.LoadConnectedStateCache(
+            BrokerStateCachePath(), std::chrono::system_clock::now(), g_app.config.brokerStateCacheMaxAgeMinutes);
+        AppendStartupLogSafe(L"Startup 5: broker state cache OK");
+
+        g_app.status.overall = mcst::HealthState::Unknown;
+        g_app.status.bridge = { mcst::HealthState::Unknown, L"Starting", L"" };
+        g_app.status.trackerSnapshot = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.autoTrading = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.broker = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.recentLogs = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.statusReports = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.email = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.heartbeat = { mcst::HealthState::Unknown, L"Waiting", L"" };
+        g_app.status.lastSnapshot = L"Never";
+        g_app.status.lastAutoTradingRead = L"Never";
+        g_app.status.lastReport = L"Never";
+        g_app.status.lastAlert = L"None";
+        for (const auto& normalizationMessage : g_app.config.normalizationMessages)
+            AddActivity(g_app.status, mcst::HealthState::Attention, L"INI normalized: " + normalizationMessage);
+
+        CreateFonts();
+        AppendStartupLogSafe(L"Startup 6: fonts OK");
+
+        WNDCLASSEXW windowClass{};
+        windowClass.cbSize = sizeof(windowClass);
+        windowClass.style = CS_HREDRAW | CS_VREDRAW;
+        windowClass.lpfnWndProc = WindowProc;
+        windowClass.hInstance = instance;
+        windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        windowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+        windowClass.lpszClassName = kWindowClass;
+        if (!RegisterClassExW(&windowClass))
+            throw std::runtime_error("RegisterClassExW failed");
+        AppendStartupLogSafe(L"Startup 7: window class OK");
+
+        const RECT initialRect = ResolveInitialWindowRect(g_app.config);
+        const int initialX = initialRect.left == CW_USEDEFAULT ? CW_USEDEFAULT : initialRect.left;
+        const int initialY = initialRect.top == CW_USEDEFAULT ? CW_USEDEFAULT : initialRect.top;
+        const int initialWidth = initialRect.left == CW_USEDEFAULT ? g_app.config.windowWidth : initialRect.right - initialRect.left;
+        const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
+
+        HWND window = CreateWindowExW(
+            0, kWindowClass, L"MCST-Watchdog 1.110 - Production Release",
+            WS_OVERLAPPEDWINDOW,
+            initialX, initialY, initialWidth, initialHeight,
+            nullptr, nullptr, instance, nullptr);
+        if (!window)
+            throw std::runtime_error("CreateWindowExW failed");
+        AppendStartupLogSafe(L"Startup 8: main window created");
+
+        ShowWindow(window, g_app.config.windowMaximized ? SW_SHOWMAXIMIZED : showCommand);
+        UpdateWindow(window);
+        AppendStartupLogSafe(L"Startup 9: entering message loop");
+
+        MSG message{};
+        while (GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+
+        AppendStartupLogSafe(L"Shutdown: normal message-loop exit");
+        DeleteObject(g_titleFont);
+        DeleteObject(g_headerFont);
+        DeleteObject(g_bodyFont);
+        DeleteObject(g_labelFont);
+        DeleteObject(g_statusFont);
+        DeleteObject(g_monoFont);
+        DeleteObject(g_developerButtonFont);
+        if (gdiplusStarted)
+            Gdiplus::GdiplusShutdown(g_gdiplusToken);
+        if (singleInstanceMutex)
+            CloseHandle(singleInstanceMutex);
+        return static_cast<int>(message.wParam);
+    }
+    catch (const std::exception& ex)
+    {
+        const int needed = MultiByteToWideChar(CP_UTF8, 0, ex.what(), -1, nullptr, 0);
+        std::wstring detail = L"Unhandled startup exception";
+        if (needed > 1)
+        {
+            std::wstring converted(static_cast<size_t>(needed), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, ex.what(), -1, converted.data(), needed);
+            if (!converted.empty() && converted.back() == L'\0') converted.pop_back();
+            detail += L": " + converted;
+        }
+        ShowStartupFailureSafe(detail);
+    }
+    catch (...)
+    {
+        ShowStartupFailureSafe(L"Unhandled non-standard exception during startup.");
+    }
+
+    if (gdiplusStarted)
+        Gdiplus::GdiplusShutdown(g_gdiplusToken);
+    if (singleInstanceMutex)
         CloseHandle(singleInstanceMutex);
-        return 0;
-    }
-
-    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-    if (Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr) != Gdiplus::Ok)
-    {
-        CloseHandle(singleInstanceMutex);
-        return 1;
-    }
-
-    g_app.config = LoadAppConfig();
-    g_app.brokerMonitor.LoadConnectedStateCache(
-        BrokerStateCachePath(), std::chrono::system_clock::now(), g_app.config.brokerStateCacheMaxAgeMinutes);
-    g_app.status.overall = mcst::HealthState::Unknown;
-    g_app.status.bridge = { mcst::HealthState::Unknown, L"Starting", L"" };
-    g_app.status.trackerSnapshot = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.autoTrading = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.broker = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.recentLogs = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.statusReports = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.email = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.heartbeat = { mcst::HealthState::Unknown, L"Waiting", L"" };
-    g_app.status.lastSnapshot = L"Never";
-    g_app.status.lastAutoTradingRead = L"Never";
-    g_app.status.lastReport = L"Never";
-    g_app.status.lastAlert = L"None";
-    for (const auto& normalizationMessage : g_app.config.normalizationMessages)
-        AddActivity(g_app.status, mcst::HealthState::Attention, L"INI normalized: " + normalizationMessage);
-    CreateFonts();
-
-    WNDCLASSEXW windowClass{};
-    windowClass.cbSize = sizeof(windowClass);
-    windowClass.style = CS_HREDRAW | CS_VREDRAW;
-    windowClass.lpfnWndProc = WindowProc;
-    windowClass.hInstance = instance;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    windowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
-    windowClass.lpszClassName = kWindowClass;
-    if (!RegisterClassExW(&windowClass))
-        return 1;
-
-    const RECT initialRect = ResolveInitialWindowRect(g_app.config);
-    const int initialX = initialRect.left == CW_USEDEFAULT ? CW_USEDEFAULT : initialRect.left;
-    const int initialY = initialRect.top == CW_USEDEFAULT ? CW_USEDEFAULT : initialRect.top;
-    const int initialWidth = initialRect.left == CW_USEDEFAULT ? g_app.config.windowWidth : initialRect.right - initialRect.left;
-    const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
-
-    HWND window = CreateWindowExW(
-        0, kWindowClass, L"MCST-Watchdog 1.104 - Content-Sized Status Columns",
-        WS_OVERLAPPEDWINDOW,
-        initialX, initialY, initialWidth, initialHeight,
-        nullptr, nullptr, instance, nullptr);
-    if (!window)
-        return 1;
-
-    ShowWindow(window, g_app.config.windowMaximized ? SW_SHOWMAXIMIZED : showCommand);
-    UpdateWindow(window);
-
-    MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0)
-    {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-    }
-
-    DeleteObject(g_titleFont);
-    DeleteObject(g_headerFont);
-    DeleteObject(g_bodyFont);
-    DeleteObject(g_labelFont);
-    DeleteObject(g_statusFont);
-    DeleteObject(g_monoFont);
-    Gdiplus::GdiplusShutdown(g_gdiplusToken);
-    CloseHandle(singleInstanceMutex);
-    return static_cast<int>(message.wParam);
+    return 1;
 }

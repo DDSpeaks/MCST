@@ -1,8 +1,0 @@
-MCST-Watchdog 1.091 - UI Polish Build Fix
-
-Fixed
-- Added the required COM interface header before GDI+ headers.
-- Removed three accidental duplicate GDI+ startup fragments inserted inside normal UI code paths.
-- Kept GDI+ startup exclusively in wWinMain and shutdown at application exit.
-- Preserved all 1.09 UI polish features, status indicators, row menus, and uptime placement.
-- Updated visible and configuration version numbers to 1.091.

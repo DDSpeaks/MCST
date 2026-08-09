@@ -1,7 +1,30 @@
-MCST-Watchdog Build Information
-===============================
-Version: 1.104
-Edition: Content-Sized Status Columns
-Bridge Protocol: V155
-Target: Windows x64 / Windows 10 compatible
-Recommended build: Debug x64 for validation, Release x64 for production
+MCST Production Build Information
+=================================
+
+MCST-Watchdog
+-------------
+Version:             1.110
+Configuration:       Release x64
+Runtime linkage:     Static /MT
+Optimization:        /O2
+Debug configuration: Not included
+Language standard:   C++17
+Toolset:             Visual Studio 2022 / MSVC v143
+
+MCST Tracker Bridge
+-------------------
+Product version:     1.0
+Internal build:      V155
+Protocol:            V2
+DLL:                 MCST-TrackerBridge.dll
+
+Runtime
+-------
+Runtime directory:   C:\MCExtras
+Primary executable:  C:\MCExtras\MCST-Watchdog.exe
+Bridge DLL:          C:\MCExtras\MCST-TrackerBridge.dll
+
+Release validation
+------------------
+Static tree check:   Tools\Validate-Release.ps1
+Windows build:       Rebuild Solution / Release x64

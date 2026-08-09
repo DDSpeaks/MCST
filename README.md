@@ -1,98 +1,126 @@
-# MCST-src — MCST-Watchdog 0.584 Dashboard Polish
+# MCST
 
-This version activates the newly verified AutoTrading reader for the current MultiCharts build.
+MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and compatibility diagnostics.
 
-## Verified compatibility values
+## Current production versions
 
-- `Charting.dll` PE timestamp: `0x6A5684BF`
-- Strategy vtable RVA: `0xA457B8`
-- AutoTrading offset: `0x142`
-- Verification result: 8 exact responses in 8 controlled ON/OFF transitions
+- MCST-Watchdog: **1.110**
+- MCST Tracker Bridge: **1.0**
+- Tracker Bridge internal build: **V155**
+- Bridge protocol: **V2**
+- Build target: **Release x64**
+- C/C++ runtime linkage: **static `/MT`**
 
-The Dashboard now reads the real active AutoTrading strategy count with these verified values.
-
-- Green when the active count is at least `minimum_active_strategies`
-- Red immediately when the active count is below the configured minimum
-- Unknown if the passive memory read cannot be completed safely
-
-The reader remains passive. It uses process/module enumeration, `VirtualQueryEx`, and `ReadProcessMemory`; it does not click MultiCharts, send input, or write process memory.
-
-## Configuration
-
-```ini
-[AutoTrading]
-enabled=true
-minimum_active_strategies=65
-check_interval_minutes=5
-```
-
-The automated research-session buttons are retained for diagnostics and future MultiCharts compatibility work, but they are no longer required for normal AutoTrading monitoring.
-
-
-## Email and AutoTrading alerts (0.580a)
-
-Configure `MCST-Watchdog.ini`:
-
-```ini
-[AutoTrading]
-enabled=true
-minimum_active_strategies=65
-check_interval_minutes=5
-
-[Email]
-enabled=true
-smtp_server=smtp.example.com
-smtp_port=587
-use_ssl=true
-smtp_user=your-user
-smtp_password=your-password
-from=sender@example.com
-to=recipient@example.com
-autotrading_alerts=true
-autotrading_recovery=true
-```
-
-Use **Reload Settings** after editing the INI. Use **Send Test Email** to verify SMTP settings. An AutoTrading alert is sent once when the active count falls below the minimum, and a recovery message is sent once when the count returns to the accepted level.
-
-
-## Scheduled reports and heartbeat (0.580a)
-
-```ini
-[StatusReport]
-enabled=true
-interval_minutes=60
-send_on_startup=false
-
-[Heartbeat]
-enabled=true
-interval_minutes=60
-send_on_startup=false
-```
-
-Scheduled reports use the same Dashboard-based status model and are saved to the configured report path. When email is enabled, the report is also sent by email. Heartbeat messages include the current status report so they confirm both that MCST-Watchdog is alive and what MultiCharts currently looks like.
-
-
-## Architecture cleanup (0.580a)
-
-Email dispatch, AutoTrading alert transitions, and scheduled report/heartbeat timing are separated into dedicated modules. The user-visible behavior remains the same as 0.580, while the malformed multiline strings that prevented compilation are fixed.
-
-
-## Dashboard polish (0.584)
-
-- All Dashboard status indicators are 20% larger while retaining fixed row positions.
-- The overall-status indicator is enlarged from 20 px to 24 px.
-- System-status row indicators are enlarged from 14 px to 17 px.
-- Recent Activity timestamps use a fixed right-aligned column, so every event description begins at exactly the same horizontal position.
-- User-visible version strings are updated to 0.584.
-
-## Centralized INI normalization (0.584)
-
-At startup and whenever **Reload Settings** is pressed, MCST-Watchdog checks every known INI key. Missing settings are written with safe defaults, invalid values are corrected, and numeric values outside supported ranges are clamped. Changes are recorded in `MCST-Watchdog-ConfigNormalization.log`. SMTP credentials and other user-specific strings are never invented.
+The public Tracker Bridge product version, internal bridge build, and bridge protocol are separate identifiers. V155 is not the public product version.
 
 ## Runtime installation
 
-Install the runtime EXE and DLL files in `C:\MCExtras`. Source code and documentation may be stored in any user-selected location. See `Docs/INSTALLATION.md`.
+Install the runtime files in:
 
-## Engineering policy
+```text
+C:\MCExtras
+```
 
-All source comments, UI text, logs, and documentation are written in English. See `CODING_STANDARD.md`.
+Principal runtime files:
+
+```text
+C:\MCExtras\MCST-Watchdog.exe
+C:\MCExtras\MCST-TrackerBridge.dll
+C:\MCExtras\MCST-Watchdog.ini
+C:\MCExtras\MCST-Compatibility.ini
+```
+
+The source tree and documentation may be stored anywhere.
+
+## MultiCharts integration
+
+MultiCharts loads `MCST-TrackerBridge.dll` through the supplied PowerLanguage host. Add `MCST_Tracker_Bridge_Host.txt` as an indicator to one chart in each MultiCharts64 instance that owns an Order and Position Tracker monitored by MCST-Watchdog.
+
+The production bridge path is:
+
+```text
+C:\MCExtras\MCST-TrackerBridge.dll
+```
+
+MCST-Watchdog does not load this DLL as a normal EXE dependency. The Bridge runs inside MultiCharts and communicates with Watchdog through Bridge Protocol V2.
+
+## Self-documenting configuration
+
+`MCST-Watchdog.ini` follows a **self-documenting configuration** model. When a known setting is missing, Watchdog writes the setting to the INI file with its safe built-in default. Invalid Boolean or numeric values are normalized to valid values where defined. This makes the INI file itself a practical reference for the settings supported by the installed version.
+
+User-specific values and secrets are never invented. Address, account, SMTP user, and password fields may therefore be created as empty placeholders and must be completed by the user when needed.
+
+Watchdog also maintains a generated diagnostic section similar to:
+
+```ini
+[DetectedMultiCharts]
+product_version=...
+file_version=...
+product_name=...
+executable=MultiCharts64.exe
+process_id=...
+charting_pe_timestamp=...
+charting_image_size=...
+compatibility_profile=...
+last_detected=...
+```
+
+This section is output from detection, not a user-maintained configuration section.
+
+## Email password / App Password
+
+The `smtp_password` setting is the SMTP credential required by the selected email provider. When the provider supports or requires an application-specific password, use an **App Password** instead of the normal account password. Gmail normally requires a Google App Password for this style of SMTP authentication. Other providers may use a normal SMTP password, an app-specific password, or another authentication policy.
+
+MCST does not intentionally include the configured password or App Password in status reports, alert messages, or diagnostic logs.
+
+## MultiCharts compatibility safety
+
+Watchdog detects the active MultiCharts executable version for human-readable diagnostics. Internal-memory compatibility is validated separately using an exact build fingerprint, currently based on `Charting.dll` PE timestamp and image size.
+
+A readable MultiCharts version number is not, by itself, proof that an internal-memory profile is compatible. Unknown internal builds fail safely: affected readers remain `UNKNOWN` rather than reusing unverified addresses.
+
+The compatibility framework is designed to hold all future MultiCharts-build-dependent internal values. The current production profile supplies the verified values required by the AutoTrading reader; future internal readers must add and verify their own build-dependent values before production use.
+
+## Developer Mode
+
+Developer Mode is disabled by default. When enabled, research controls are shown as a compact toolbar that is visually distinct from normal production controls and leaves room for future compatibility-research actions.
+
+```ini
+[Developer]
+enabled=false
+```
+
+Developer tools are not required for normal monitoring.
+
+## Building
+
+Open `MCST.sln` in Visual Studio 2022 and build:
+
+```text
+Configuration: Release
+Platform:      x64
+```
+
+The production source tree intentionally contains no Debug solution configuration. Before packaging a release, run:
+
+```powershell
+.\Tools\Validate-Release.ps1
+```
+
+Static validation does not replace a real Windows/MSVC build.
+
+## Documentation
+
+- `Docs/INSTALLATION.md`
+- `Docs/USER_GUIDE.md`
+- `Docs/DEVELOPER_GUIDE.md`
+- `Docs/ARCHITECTURE.md`
+- `Docs/COMPATIBILITY.md`
+- `CODING_STANDARD.md`
+- `RELEASE_NOTES.md`
+- `CHANGELOG.md`
+- `BUILD_INFO.txt`
+
+## Engineering language policy
+
+Source comments, identifiers, UI strings, log and error messages, documentation, release notes, and Git commit messages are written in English.

@@ -23,3 +23,22 @@ struct DashboardRowLayout
 };
 
 DashboardRowLayout CalculateDashboardRowLayout(int clientWidth);
+/**
+ * @brief Compact geometry for Developer Mode research controls.
+ *
+ * Developer controls are intentionally smaller than normal production buttons.
+ * Keeping their geometry centralized leaves room for additional compatibility
+ * research actions without changing the production button row.
+ */
+struct DeveloperToolbarLayout
+{
+    int left = 28;
+    int top = 0;
+    int buttonWidth = 164;
+    int buttonHeight = 24;
+    int horizontalGap = 8;
+};
+
+DeveloperToolbarLayout CalculateDeveloperToolbarLayout(int productionButtonY);
+RECT CalculateDeveloperToolbarButtonRect(const DeveloperToolbarLayout& layout, int buttonIndex);
+

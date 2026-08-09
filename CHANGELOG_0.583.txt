@@ -1,9 +1,0 @@
-MCST-Watchdog 0.584
-=====================
-
-- Heartbeat no longer defaults to Disabled when [Heartbeat] enabled is absent.
-- Missing Heartbeat enabled key now means enabled; only explicit enabled=false disables it.
-- Heartbeat reports Not configured when email delivery is unavailable.
-- New default INI files write [Heartbeat] enabled=true.
-- LATEST ACTIVITY timestamps now use one absolute fixed x-coordinate for both rows.
-- Version updated to 0.584.
