@@ -1,16 +1,26 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.111'
+$currentVersion = '1.113'
+$currentBridgeBuild = 156
+$currentProtocolVersion = 2
 
 $required = @(
     'MCST.sln',
     'MCST.Shared\MCST.Shared.vcxproj',
+    'MCST.Shared\MCBridgeProtocol.h',
     'MCST.TrackerBridge\MCST.TrackerBridge.vcxproj',
+    'MCST.TrackerBridge\TrackerBridgeReader.h',
+    'MCST.TrackerBridge\TrackerBridgeReader.cpp',
     'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.vcxproj',
+    'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc',
+    'MCST.TrackerBridgeHost\MCTrackerBridge.cpp',
     'MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Host.txt',
     'MCST.Watchdog\MCST.Watchdog.vcxproj',
     'MCST.Watchdog\MCST.Watchdog.rc',
+    'MCST.Watchdog\main.cpp',
+    'MCST.Watchdog\CompatibilityManager.cpp',
+    'MCST.Watchdog\MultiChartsVersionDetector.cpp',
     'MCST.Tests\MCST.Tests.vcxproj',
     'README.md',
     'CODING_STANDARD.md',
@@ -66,10 +76,17 @@ Get-ChildItem -Path $root -Recurse -Filter *.vcxproj | ForEach-Object {
     }
 }
 
-
 $watchdogMain = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
 if ($watchdogMain -match 'RECENT ACTIVITY') {
     throw 'The redundant RECENT ACTIVITY Dashboard section must not be present in the production UI.'
+}
+if ($watchdogMain -match [regex]::Escape('std::wstring message = diagnostic;')) {
+    throw 'Tracker Capture still contains the local message variable that shadows WindowProc message.'
+}
+if ($watchdogMain -notmatch 'Tracker Capture' -or
+    $watchdogMain -notmatch 'Open Compat' -or
+    $watchdogMain -notmatch 'Reload Compat') {
+    throw 'Required Tracker compatibility Developer controls are missing.'
 }
 
 $watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
@@ -85,6 +102,9 @@ $hostText = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\Po
 if ($hostText -notmatch [regex]::Escape('C:\MCExtras\MCST-TrackerBridge.dll')) {
     throw 'PowerLanguage host does not reference the production Tracker Bridge DLL path.'
 }
+if ($hostText -notmatch "Internal bridge build: V$currentBridgeBuild") {
+    throw "PowerLanguage host does not identify Tracker Bridge internal build V$currentBridgeBuild."
+}
 
 $watchdogRc = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.rc') -Raw
 $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
@@ -92,22 +112,93 @@ if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
 
-$publicDocs = @(
+$bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
+if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).parent_path()')) {
+    throw 'Invalid vector-to-filesystem::path construction found in Tracker Bridge Host compatibility path.'
+}
+if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
+    throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
+}
+if ($bridgeSource -match 'required CATPTTabView or ATOnPTracker module anchor was not found') {
+    throw 'Ambiguous legacy Tracker read diagnostic is still present.'
+}
+foreach ($requiredTrackerToken in @(
+    'atonptracker_pe_timestamp',
+    'atonptracker_image_size',
+    'tracker_tabview_vtable_rva',
+    'tracker_accounts_page_offset',
+    'tracker_open_positions_page_offset',
+    'tracker_logs_page_offset',
+    'tracker_grid_member_offset',
+    'tracker_rows_offset_1',
+    'tracker_rows_offset_2',
+    'tracker_gettext_slot',
+    'tracker_flexgrid_vtable_rva',
+    'tracker_gettext_rva',
+    'Candidate.ATOnPTracker-'
+)) {
+    if ($bridgeSource -notmatch [regex]::Escape($requiredTrackerToken)) {
+        throw "Tracker compatibility implementation token is missing: $requiredTrackerToken"
+    }
+}
+
+$bridgeRc = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc') -Raw
+if ($bridgeRc -notmatch "internal bridge build V$currentBridgeBuild" -or
+    $bridgeRc -notmatch "1\.0\.$currentBridgeBuild\.0") {
+    throw "Tracker Bridge version resource is not aligned with internal build V$currentBridgeBuild."
+}
+
+$readerHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
+if ($readerHeader -notmatch "kTrackerBridgeInternalBuildVersion = $currentBridgeBuild") {
+    throw "TrackerBridgeReader header is not aligned with internal build V$currentBridgeBuild."
+}
+
+$readerSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
+if ($readerSource -notmatch 'snapshot\.bridgeVersion < kTrackerBridgeInternalBuildVersion') {
+    throw 'Watchdog-side Tracker reader does not enforce the required Bridge internal build.'
+}
+
+$protocolHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
+if ($protocolHeader -notmatch "kProtocolVersion = $currentProtocolVersion") {
+    throw "Bridge protocol is not V$currentProtocolVersion."
+}
+
+$versionDetector = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsVersionDetector.cpp') -Raw
+foreach ($requiredDetectedKey in @(
+    'atonptracker_pe_timestamp',
+    'atonptracker_image_size',
+    'autotrading_compatibility_profile',
+    'tracker_compatibility_profile'
+)) {
+    if ($versionDetector -notmatch [regex]::Escape($requiredDetectedKey)) {
+        throw "DetectedMultiCharts output is missing: $requiredDetectedKey"
+    }
+}
+
+$publicCurrentDocs = @(
     'README.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\USER_GUIDE.md',
     'Docs\DEVELOPER_GUIDE.md',
     'Docs\ARCHITECTURE.md',
-    'Docs\COMPATIBILITY.md'
+    'Docs\COMPATIBILITY.md',
+    'MCST.TrackerBridgeHost\README.md'
 )
-foreach ($doc in $publicDocs) {
+foreach ($doc in $publicCurrentDocs) {
     $text = Get-Content -LiteralPath (Join-Path $root $doc) -Raw
-    if ($text -match 'MCST-StartupProbe' -or $text -match 'user-verified working 1\.108' -or $text -match 'C:\\MCBridge\\MCTrackerBridge\.dll') {
+    if ($text -match 'MCST-StartupProbe' -or
+        $text -match 'user-verified working 1\.108' -or
+        $text -match 'C:\\MCBridge\\MCTrackerBridge\.dll') {
         throw "Internal development-history text found in public documentation: $doc"
     }
+}
+
+$releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
+if ($releaseNotes -notmatch "MCST 1\.112 Production Release" -or
+    $releaseNotes -notmatch "Internal build:\s+V156") {
+    throw 'Release notes do not identify MCST 1.113 and Tracker Bridge V156.'
 }
 
 Write-Host "MCST $currentVersion production release tree validation passed." -ForegroundColor Green

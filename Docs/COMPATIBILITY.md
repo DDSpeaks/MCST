@@ -2,117 +2,202 @@
 
 ## Purpose
 
-Some MCST features read MultiCharts internal process data that is not a stable public API. Internal addresses and layouts may change after a MultiCharts update. The compatibility framework prevents production readers from silently reusing unverified build-dependent values.
+MCST reads selected MultiCharts internal structures that are not public stable APIs. Those structures can move when MultiCharts is updated. The compatibility framework prevents a previously valid address, offset, vtable RVA, or layout assumption from being silently reused for a different module build.
 
-## Two different version concepts
+The production policy is simple: **exact verified profile or safe failure**.
 
-MCST records two different kinds of identity.
+## Compatibility database
 
-### Human-readable MultiCharts version
-
-Watchdog reads the active MultiCharts executable Windows version resource and exposes product/file version information in diagnostics and Status Reports.
-
-This information is useful to a human operator, but it is **not sufficient to authorize internal-memory offsets**.
-
-### Internal module fingerprint
-
-Production compatibility is selected from an exact module fingerprint. The current AutoTrading reader uses:
-
-- `Charting.dll` PE timestamp
-- `Charting.dll` image size
-
-A profile is accepted only when both values match the verified profile.
-
-## Runtime compatibility database
-
-The database is stored beside `MCST-Watchdog.exe`:
+The shared database is:
 
 ```text
-MCST-Compatibility.ini
+C:\MCExtras\MCST-Compatibility.ini
 ```
 
-It is intentionally separate from `MCST-Watchdog.ini`. Normal operational settings may use safe defaults; verified internal compatibility data must not be invented.
+Watchdog and the Tracker Bridge both use this file. The file is separate from `MCST-Watchdog.ini` because verified internal build data is not ordinary user configuration.
 
-## Current verified profile
+The database metadata is normalized safely:
 
-The production database contains the verified profile required by the current AutoTrading reader:
+```ini
+[Compatibility]
+schema_version=2
+unknown_build_policy=reject
+```
+
+MCST may create known schema/default metadata, but it never invents verified offsets or addresses for an unknown MultiCharts build.
+
+## Human-readable version versus fingerprint
+
+Watchdog detects the MultiCharts executable product/file version for diagnostics. It also records module fingerprints in the generated `[DetectedMultiCharts]` section:
+
+```ini
+[DetectedMultiCharts]
+product_version=...
+file_version=...
+charting_pe_timestamp=0x...
+charting_image_size=...
+atonptracker_pe_timestamp=0x...
+atonptracker_image_size=...
+autotrading_compatibility_profile=...
+tracker_compatibility_profile=...
+```
+
+A product version is **not** sufficient proof for internal-memory compatibility. Profile selection is based on the exact relevant module fingerprint.
+
+## Independent compatibility consumers
+
+A `Profile.*` section can contain data for AutoTrading, Tracker, or both. The consumers evaluate only the fields relevant to them.
+
+### AutoTrading / Charting.dll
+
+Watchdog matches:
+
+```ini
+charting_pe_timestamp=0x...
+charting_image_size=...
+```
+
+A complete AutoTrading profile also supplies:
+
+```ini
+strategy_vtable_rva=0x...
+autotrading_offset=0x...
+```
+
+The currently bundled verified AutoTrading profile is:
 
 ```ini
 [Profile.MC16-Charting-6A5684BF]
 name=MC16 verified Charting.dll 0x6A5684BF
 enabled=true
-pe_timestamp=0x6A5684BF
-image_size=18493440
+charting_pe_timestamp=0x6A5684BF
+charting_image_size=18493440
 strategy_vtable_rva=0xA457B8
 autotrading_offset=0x142
 verification=Controlled research session: 8/8 exact toggle responses
 ```
 
-The `verification` text records provenance. It is not a substitute for the exact fingerprint check.
+Legacy `pe_timestamp` and `image_size` aliases remain readable for compatibility with older databases, but new profile data should use the canonical `charting_*` names.
 
-## General compatibility principle
+### Tracker / ATOnPTracker.dll
 
-The framework is not conceptually limited to AutoTrading. Any future production feature that depends on MultiCharts internal layout must treat its build-dependent data as compatibility-profile data.
+The Bridge matches:
 
-Examples include, when applicable:
+```ini
+atonptracker_pe_timestamp=0x...
+atonptracker_image_size=...
+```
 
-- vtable RVAs
-- structure or field offsets
-- interface signatures
-- internal object-family signatures
-- semantic locators tied to a specific binary build
-- any other value obtained by reverse-engineering a particular MultiCharts module
+A complete externally verified production Tracker profile requires:
 
-The current production schema exposes the AutoTrading values because those are the build-dependent values used by the current Watchdog internal reader. Future readers should extend the profile/schema rather than introduce unrelated hard-coded production offsets.
+```ini
+tracker_tabview_vtable_rva=0x...
+tracker_accounts_page_offset=0x...
+tracker_open_positions_page_offset=0x...
+tracker_logs_page_offset=0x...
+tracker_grid_member_offset=0x...
+tracker_rows_offset_1=0x...
+tracker_rows_offset_2=0x...
+tracker_gettext_slot=...
+tracker_flexgrid_vtable_rva=0x...
+tracker_gettext_rva=0x...
+```
 
-## Unknown-build policy
+Optional research metadata can include:
 
-The production policy is fail-safe `reject` behavior. If an exact verified profile is unavailable:
+```ini
+tracker_accounts_extractor_rva=0x...
+tracker_open_positions_extractor_rva=0x...
+```
 
-- old internal addresses are not reused;
-- the affected reader reports `UNKNOWN`;
-- diagnostics report the detected fingerprint;
-- Developer Mode research remains available for controlled verification.
+Example verified Tracker section shape:
 
-A matching human-readable MultiCharts version alone does not override this policy.
+```ini
+[Profile.MC16-Tracker-EXAMPLE]
+name=Verified ATOnPTracker build
+enabled=true
+atonptracker_pe_timestamp=0x12345678
+atonptracker_image_size=1234567
+tracker_tabview_vtable_rva=0x...
+tracker_accounts_page_offset=0x...
+tracker_open_positions_page_offset=0x...
+tracker_logs_page_offset=0x...
+tracker_grid_member_offset=0x...
+tracker_rows_offset_1=0x...
+tracker_rows_offset_2=0x...
+tracker_gettext_slot=...
+tracker_flexgrid_vtable_rva=0x...
+tracker_gettext_rva=0x...
+verification=Describe the controlled verification performed for this exact build
+```
 
-## Missing profile values
+The example fingerprint and blank values above are placeholders only and must not be copied as real profile data.
 
-When a production reader needs a build-dependent value, that value must exist and be verified for the selected build. A missing value must not be substituted from another build. The affected reader should remain `UNKNOWN` until the profile is complete.
+## Candidate sections
 
-## Detecting a MultiCharts update
+If the Bridge sees a new `ATOnPTracker.dll` fingerprint without a complete verified profile, it can create a disabled section similar to:
 
-A MultiCharts update may change the executable product version, internal module fingerprints, both, or neither. Watchdog therefore records the visible version for diagnostics and independently fingerprints the relevant internal module before selecting a profile.
+```ini
+[Candidate.ATOnPTracker-12345678-1234567]
+candidate_created=true
+enabled=false
+name=Unverified ATOnPTracker build
+atonptracker_pe_timestamp=0x12345678
+atonptracker_image_size=1234567
+tracker_tabview_vtable_rva=
+tracker_accounts_page_offset=
+tracker_open_positions_page_offset=
+tracker_logs_page_offset=
+tracker_grid_member_offset=
+tracker_rows_offset_1=
+tracker_rows_offset_2=
+tracker_gettext_slot=
+tracker_flexgrid_vtable_rva=
+tracker_gettext_rva=
+tracker_accounts_extractor_rva=
+tracker_open_positions_extractor_rva=
+verification=UNVERIFIED - Developer Mode research required before creating an enabled Profile.* section
+```
 
-`[DetectedMultiCharts]` in `MCST-Watchdog.ini` is automatically maintained diagnostic output. When available it includes both the human-readable executable version and the detected `Charting.dll` PE timestamp/image size. It is not a compatibility authorization database and should not be edited to force a match.
+Candidate sections are intentionally **never selected** by the production reader. They are a self-documenting record of the detected build and a workspace for research.
 
-## Verifying a new build
+Do not simply rename a candidate to `Profile.*` or set `enabled=true`. Each required value must first be discovered and verified for the exact fingerprint.
 
-A safe verification workflow is:
+## Tracker profile verification workflow
 
-1. Allow Watchdog to detect the new MultiCharts build.
-2. Record the exact relevant module fingerprint reported by diagnostics.
-3. Confirm that production readers remain `UNKNOWN` rather than using an old profile.
-4. Enable Developer Mode in a controlled environment.
-5. Use the appropriate research tool for the internal value being investigated.
-6. Change one controlled observable state at a time where possible.
-7. Repeat transitions to distinguish stable structure from incidental values.
-8. Record candidate RVAs/offsets/signatures together with the exact module fingerprint.
-9. Re-run the controlled experiment after process or workspace restart when practical.
-10. Add a new profile only after the evidence is repeatable.
-11. Rebuild/reload as required and confirm that the exact new fingerprint selects only the intended profile.
-12. Verify the production reader against independently known state before deployment.
+1. Confirm the detected `ATOnPTracker.dll` PE timestamp and image size.
+2. Keep the production Tracker reader blocked while the build is unverified.
+3. Enable Developer Mode.
+4. Use **Tracker Capture** to collect the passive research bundle.
+5. Identify the exact CATPTTabView and CFlexGridImpl identities and the required layout values.
+6. Verify Accounts, Open Positions, and Recent Logs across controlled states.
+7. Verify that row counters, GetText slot/function, page pointers, and grid identity remain consistent.
+8. Create an enabled `Profile.*` section for the exact fingerprint.
+9. Add a meaningful `verification=` note describing the evidence.
+10. Use **Reload Compat**.
+11. Confirm the selected Tracker profile is reported and all three sections read without SEH failures or identity mismatches.
 
-Profiles must never be copied to a different build merely because the product version looks similar.
+A single plausible address or one successful read is not sufficient verification.
 
-## AutoTrading research safety
+## Runtime reload
 
-AutoTrading research is passive. It may enumerate processes and memory regions and use `ReadProcessMemory`. It must not write to MultiCharts process memory or inject input.
+The Bridge reads Tracker compatibility data from `MCST-Compatibility.ini` when each production snapshot is requested. Watchdog's **Reload Compat** action forces a fresh Watchdog refresh and bypasses the AutoTrading compatibility/read cache.
 
-Research candidates are evidence, not automatically trusted production values.
+Therefore, adding a newly verified compatibility profile does not require recompiling MCST. Replacing the Bridge DLL itself still requires MultiCharts to reload that DLL, normally by restarting MultiCharts.
 
-## Self-documenting INI versus compatibility trust
+## Unknown-build behavior
 
-The normal Watchdog INI deliberately writes missing known settings with safe defaults. **That rule does not mean verified compatibility addresses are generated by default.**
+When an exact profile is not available:
 
-`MCST-Compatibility.ini` contains trust-sensitive build data. A profile may have schema defaults for non-sensitive metadata, but a verified internal address or offset must come from actual build verification, not configuration normalization.
+- AutoTrading remains `UNKNOWN` for an unverified `Charting.dll` build;
+- Tracker production reads remain unavailable for an unverified `ATOnPTracker.dll` layout;
+- the Dashboard and Status Report expose the detected fingerprint and compatibility diagnostic;
+- Developer Mode remains available for controlled research.
+
+MCST must never convert an unknown build into a healthy state by guessing old internal values.
+
+## Scope of the framework
+
+The framework is intended for **production build-dependent values**. Research tools can contain clearly labelled probes or historical research constants when needed to discover a new layout, but those values do not authorize production reads.
+
+Future MC-internal readers should extend the profile schema rather than introduce new silent hard-coded production assumptions.

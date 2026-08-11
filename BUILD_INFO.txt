@@ -1,27 +1,39 @@
-MCST Production Build Information
+﻿MCST Production Build Information
 =================================
 
 MCST-Watchdog
 -------------
-Version:             1.111
+Version:             1.113
 Configuration:       Release x64
 Runtime linkage:     Static /MT
-Optimization:        /O2
+Optimization:        /O2 with production-safe project settings
 Debug configuration: Not included
-Language standard:   C++17
-Toolset:             Visual Studio 2022 / MSVC v143
 
 MCST Tracker Bridge
 -------------------
 Product version:     1.0
-Internal build:      V155
+Internal build:      V156
 Protocol:            V2
 DLL:                 MCST-TrackerBridge.dll
 
-Runtime
--------
-Runtime directory:   C:\MCExtras
-Primary executable:  C:\MCExtras\MCST-Watchdog.exe
+Compatibility
+-------------
+Database:            C:\MCExtras\MCST-Compatibility.ini
+Schema version:      2
+AutoTrading module:  Charting.dll
+Tracker module:      ATOnPTracker.dll
+Unknown-build policy: reject
+
+Build environment
+-----------------
+IDE:                 Visual Studio 2022
+Toolset:             MSVC v143
+Language:            C++17
+Target:              Windows x64
+
+Runtime installation
+--------------------
+Watchdog EXE:        C:\MCExtras\MCST-Watchdog.exe
 Bridge DLL:          C:\MCExtras\MCST-TrackerBridge.dll
 
 Release validation

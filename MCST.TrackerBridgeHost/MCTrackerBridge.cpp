@@ -17,12 +17,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cerrno>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <iterator>
 #include <map>
 #include <set>
 #include <cwctype>
+#include <cwchar>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -39,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 155;
+    constexpr int kBridgeVersion = 156;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -92,6 +95,7 @@ namespace
         HMODULE atonpTrackerModule = nullptr;
         std::uintptr_t atonpTrackerBase = 0;
         DWORD atonpTrackerSize = 0;
+        DWORD atonpTrackerPeTimestamp = 0;
         std::size_t pageCount = 0;
         std::size_t flexGridCount = 0;
         std::vector<WindowRecord> windows;
@@ -465,6 +469,32 @@ namespace
         return result;
     }
 
+    bool ReadPeTimestampFromFile(const std::wstring& path, DWORD& timestamp)
+    {
+        std::ifstream input(std::filesystem::path(path), std::ios::binary);
+        if (!input)
+            return false;
+
+        IMAGE_DOS_HEADER dos{};
+        input.read(reinterpret_cast<char*>(&dos), sizeof(dos));
+        if (!input || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0)
+            return false;
+
+        input.seekg(dos.e_lfanew, std::ios::beg);
+        DWORD signature = 0;
+        input.read(reinterpret_cast<char*>(&signature), sizeof(signature));
+        if (!input || signature != IMAGE_NT_SIGNATURE)
+            return false;
+
+        IMAGE_FILE_HEADER fileHeader{};
+        input.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
+        if (!input)
+            return false;
+
+        timestamp = fileHeader.TimeDateStamp;
+        return true;
+    }
+
     std::vector<DWORD> EnumerateThreads()
     {
         std::vector<DWORD> result;
@@ -533,6 +563,9 @@ namespace
             {
                 snapshot.atonpTrackerBase = module.base;
                 snapshot.atonpTrackerSize = module.size;
+                DWORD timestamp = 0;
+                if (ReadPeTimestampFromFile(module.path, timestamp))
+                    snapshot.atonpTrackerPeTimestamp = timestamp;
                 break;
             }
         }
@@ -585,6 +618,7 @@ namespace
         out << "\"atonptracker_loaded\":" << (snapshot.atonpTrackerBase != 0 ? "true" : "false") << ',';
         out << "\"atonptracker_base\":\"" << HexValue(snapshot.atonpTrackerBase) << "\",";
         out << "\"atonptracker_size\":" << snapshot.atonpTrackerSize << ',';
+        out << "\"atonptracker_pe_timestamp\":" << snapshot.atonpTrackerPeTimestamp << ',';
         out << "\"page_count\":" << snapshot.pageCount << ',';
         out << "\"flexgrid_count\":" << snapshot.flexGridCount << ',';
         out << "\"generation\":" << snapshot.generation << ',';
@@ -772,6 +806,304 @@ namespace
     constexpr std::uintptr_t kExtractAccountsRva = 0x10FAE6;
     constexpr std::uintptr_t kExtractOpenPositionsRva = 0x10FF56;
     constexpr DWORD kKnownAtonpSize = 3534848;
+
+    struct TrackerCompatibilityProfile
+    {
+        bool matched = false;
+        bool externalVerified = false;
+        std::wstring name;
+        std::wstring section;
+        std::wstring source;
+        std::wstring mode;
+        std::wstring diagnostic;
+        DWORD atonpTrackerPeTimestamp = 0;
+        std::uint64_t atonpTrackerImageSize = 0;
+        std::uintptr_t tabViewVtableRva = 0;
+        std::uintptr_t accountsExtractorRva = 0;
+        std::uintptr_t openPositionsExtractorRva = 0;
+        std::size_t accountsPageOffset = 0;
+        std::size_t openPositionsPageOffset = 0;
+        std::size_t logsPageOffset = 0;
+        std::size_t gridMemberOffset = 0;
+        std::size_t rowsOffset1 = 0;
+        std::size_t rowsOffset2 = 0;
+        std::size_t getTextSlot = 0;
+        std::uintptr_t flexGridVtableRva = 0;
+        std::uintptr_t getTextRva = 0;
+        bool allowAdaptiveFlexGridIdentity = false;
+    };
+
+    std::wstring TrimCompatibilityValue(std::wstring value)
+    {
+        const auto notSpace = [](wchar_t ch) { return iswspace(ch) == 0; };
+        value.erase(value.begin(), std::find_if(value.begin(), value.end(), notSpace));
+        value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(), value.end());
+        return value;
+    }
+
+    bool TryParseCompatibilityUnsigned(const std::wstring& text, unsigned long long& value)
+    {
+        const std::wstring normalized = TrimCompatibilityValue(text);
+        if (normalized.empty())
+            return false;
+        wchar_t* end = nullptr;
+        errno = 0;
+        const unsigned long long parsed = std::wcstoull(normalized.c_str(), &end, 0);
+        if (errno == ERANGE || end == normalized.c_str() || *end != L'\0')
+            return false;
+        value = parsed;
+        return true;
+    }
+
+    std::wstring CompatibilityReadValue(
+        const std::wstring& path,
+        const std::wstring& section,
+        const wchar_t* key,
+        const wchar_t* fallback = L"")
+    {
+        wchar_t buffer[2048]{};
+        GetPrivateProfileStringW(section.c_str(), key, fallback, buffer,
+            static_cast<DWORD>(std::size(buffer)), path.c_str());
+        return buffer;
+    }
+
+    std::vector<std::wstring> CompatibilityReadSections(const std::wstring& path)
+    {
+        std::vector<wchar_t> buffer(65536, L'\0');
+        const DWORD count = GetPrivateProfileSectionNamesW(
+            buffer.data(), static_cast<DWORD>(buffer.size()), path.c_str());
+        std::vector<std::wstring> sections;
+        if (count == 0)
+            return sections;
+        const wchar_t* current = buffer.data();
+        while (*current != L'\0')
+        {
+            sections.emplace_back(current);
+            current += sections.back().size() + 1;
+        }
+        return sections;
+    }
+
+    std::wstring BridgeCompatibilityDatabasePath()
+    {
+        std::vector<wchar_t> path(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(
+            g_module, path.data(), static_cast<DWORD>(path.size()));
+        if (length == 0 || length >= path.size())
+            return L"MCST-Compatibility.ini";
+        const std::wstring modulePath(path.data(), length);
+        return (std::filesystem::path(modulePath).parent_path() / L"MCST-Compatibility.ini").wstring();
+    }
+
+    std::wstring CompatibilityHex(DWORD value)
+    {
+        std::wostringstream out;
+        out << L"0x" << std::hex << std::uppercase << value;
+        return out.str();
+    }
+
+    void EnsureTrackerCandidateTemplate(const Snapshot& snapshot)
+    {
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerPeTimestamp == 0 || snapshot.atonpTrackerSize == 0)
+            return;
+
+        const std::wstring path = BridgeCompatibilityDatabasePath();
+        WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"2", path.c_str());
+        WritePrivateProfileStringW(L"Compatibility", L"unknown_build_policy", L"reject", path.c_str());
+
+        std::wostringstream sectionBuilder;
+        sectionBuilder << L"Candidate.ATOnPTracker-" << std::hex << std::uppercase
+                       << snapshot.atonpTrackerPeTimestamp << L"-" << std::dec << snapshot.atonpTrackerSize;
+        const std::wstring section = sectionBuilder.str();
+
+        wchar_t existing[8]{};
+        GetPrivateProfileStringW(section.c_str(), L"candidate_created", L"", existing,
+            static_cast<DWORD>(std::size(existing)), path.c_str());
+        if (existing[0] != L'\0')
+            return;
+
+        WritePrivateProfileStringW(section.c_str(), L"candidate_created", L"true", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"enabled", L"false", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"name", L"Unverified ATOnPTracker build", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"atonptracker_pe_timestamp", CompatibilityHex(snapshot.atonpTrackerPeTimestamp).c_str(), path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"atonptracker_image_size", std::to_wstring(snapshot.atonpTrackerSize).c_str(), path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_tabview_vtable_rva", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_accounts_page_offset", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_open_positions_page_offset", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_logs_page_offset", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_grid_member_offset", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_rows_offset_1", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_rows_offset_2", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_gettext_slot", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_flexgrid_vtable_rva", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_gettext_rva", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_accounts_extractor_rva", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_open_positions_extractor_rva", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"verification", L"UNVERIFIED - Developer Mode research required before creating an enabled Profile.* section", path.c_str());
+        WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+    }
+
+    TrackerCompatibilityProfile ResolveExternalTrackerCompatibilityProfile(const Snapshot& snapshot)
+    {
+        TrackerCompatibilityProfile profile;
+        profile.mode = L"unknown";
+        if (!snapshot.atonpTrackerBase)
+        {
+            profile.diagnostic = L"ATOnPTracker.dll is not loaded.";
+            return profile;
+        }
+        if (snapshot.atonpTrackerPeTimestamp == 0 || snapshot.atonpTrackerSize == 0)
+        {
+            profile.diagnostic = L"ATOnPTracker.dll fingerprint could not be read.";
+            return profile;
+        }
+
+        const std::wstring path = BridgeCompatibilityDatabasePath();
+        std::wstring incompleteProfile;
+        for (const auto& section : CompatibilityReadSections(path))
+        {
+            if (section.rfind(L"Profile.", 0) != 0)
+                continue;
+            const std::wstring enabled = CompatibilityReadValue(path, section, L"enabled", L"true");
+            if (_wcsicmp(enabled.c_str(), L"false") == 0 || enabled == L"0")
+                continue;
+
+            unsigned long long timestamp = 0;
+            unsigned long long imageSize = 0;
+            if (!TryParseCompatibilityUnsigned(
+                    CompatibilityReadValue(path, section, L"atonptracker_pe_timestamp"), timestamp) ||
+                !TryParseCompatibilityUnsigned(
+                    CompatibilityReadValue(path, section, L"atonptracker_image_size"), imageSize))
+            {
+                continue;
+            }
+            if (timestamp != snapshot.atonpTrackerPeTimestamp || imageSize != snapshot.atonpTrackerSize)
+                continue;
+
+            unsigned long long tabViewVtableRva = 0;
+            unsigned long long accountsPageOffset = 0;
+            unsigned long long openPositionsPageOffset = 0;
+            unsigned long long logsPageOffset = 0;
+            unsigned long long gridMemberOffset = 0;
+            unsigned long long rowsOffset1 = 0;
+            unsigned long long rowsOffset2 = 0;
+            unsigned long long getTextSlot = 0;
+            unsigned long long flexGridVtableRva = 0;
+            unsigned long long getTextRva = 0;
+            if (!TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_tabview_vtable_rva"), tabViewVtableRva) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_accounts_page_offset"), accountsPageOffset) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_open_positions_page_offset"), openPositionsPageOffset) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_logs_page_offset"), logsPageOffset) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_grid_member_offset"), gridMemberOffset) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_rows_offset_1"), rowsOffset1) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_rows_offset_2"), rowsOffset2) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_gettext_slot"), getTextSlot) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_flexgrid_vtable_rva"), flexGridVtableRva) ||
+                !TryParseCompatibilityUnsigned(CompatibilityReadValue(path, section, L"tracker_gettext_rva"), getTextRva))
+            {
+                incompleteProfile = section;
+                continue;
+            }
+
+            const bool layoutValuesSane =
+                tabViewVtableRva > 0 && tabViewVtableRva < imageSize &&
+                accountsPageOffset > 0 && accountsPageOffset < 0x10000 &&
+                openPositionsPageOffset > 0 && openPositionsPageOffset < 0x10000 &&
+                logsPageOffset > 0 && logsPageOffset < 0x10000 &&
+                gridMemberOffset > 0 && gridMemberOffset < 0x10000 &&
+                rowsOffset1 > 0 && rowsOffset1 < 0x10000 &&
+                rowsOffset2 > rowsOffset1 && rowsOffset2 < 0x10000 &&
+                getTextSlot > 0 && getTextSlot < 512 &&
+                flexGridVtableRva > 0 && flexGridVtableRva < imageSize &&
+                getTextRva > 0 && getTextRva < imageSize;
+            if (!layoutValuesSane)
+            {
+                incompleteProfile = section + L" (invalid Tracker layout value)";
+                continue;
+            }
+
+            unsigned long long accountsExtractorRva = 0;
+            unsigned long long openPositionsExtractorRva = 0;
+            (void)TryParseCompatibilityUnsigned(
+                CompatibilityReadValue(path, section, L"tracker_accounts_extractor_rva"), accountsExtractorRva);
+            (void)TryParseCompatibilityUnsigned(
+                CompatibilityReadValue(path, section, L"tracker_open_positions_extractor_rva"), openPositionsExtractorRva);
+
+            profile.matched = true;
+            profile.externalVerified = true;
+            profile.name = CompatibilityReadValue(path, section, L"name", section.c_str());
+            profile.section = section;
+            profile.source = path + L" [" + section + L"]";
+            profile.mode = L"external_verified";
+            profile.atonpTrackerPeTimestamp = snapshot.atonpTrackerPeTimestamp;
+            profile.atonpTrackerImageSize = snapshot.atonpTrackerSize;
+            profile.tabViewVtableRva = static_cast<std::uintptr_t>(tabViewVtableRva);
+            profile.accountsExtractorRva = static_cast<std::uintptr_t>(accountsExtractorRva);
+            profile.openPositionsExtractorRva = static_cast<std::uintptr_t>(openPositionsExtractorRva);
+            profile.accountsPageOffset = static_cast<std::size_t>(accountsPageOffset);
+            profile.openPositionsPageOffset = static_cast<std::size_t>(openPositionsPageOffset);
+            profile.logsPageOffset = static_cast<std::size_t>(logsPageOffset);
+            profile.gridMemberOffset = static_cast<std::size_t>(gridMemberOffset);
+            profile.rowsOffset1 = static_cast<std::size_t>(rowsOffset1);
+            profile.rowsOffset2 = static_cast<std::size_t>(rowsOffset2);
+            profile.getTextSlot = static_cast<std::size_t>(getTextSlot);
+            profile.flexGridVtableRva = static_cast<std::uintptr_t>(flexGridVtableRva);
+            profile.getTextRva = static_cast<std::uintptr_t>(getTextRva);
+            profile.allowAdaptiveFlexGridIdentity = false;
+            profile.diagnostic = L"Verified Tracker compatibility profile selected: " + profile.name;
+            return profile;
+        }
+
+        // Record the exact fingerprint as a disabled research candidate whenever
+        // no complete external verified Tracker profile is available. This is
+        // safe even when a bundled validated baseline can keep an older layout
+        // operational because Candidate.* sections are never selected.
+        EnsureTrackerCandidateTemplate(snapshot);
+
+        std::wostringstream diagnostic;
+        if (!incompleteProfile.empty())
+        {
+            diagnostic << L"Tracker compatibility profile " << incompleteProfile
+                       << L" matches the ATOnPTracker.dll fingerprint but is incomplete.";
+        }
+        else
+        {
+            diagnostic << L"No verified Tracker compatibility profile for ATOnPTracker.dll timestamp "
+                       << CompatibilityHex(snapshot.atonpTrackerPeTimestamp)
+                       << L", image size " << snapshot.atonpTrackerSize << L".";
+        }
+        profile.diagnostic = diagnostic.str();
+        return profile;
+    }
+
+    TrackerCompatibilityProfile EmbeddedLegacyTrackerCompatibilityProfile(const Snapshot& snapshot)
+    {
+        TrackerCompatibilityProfile profile;
+        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize != kKnownAtonpSize)
+            return profile;
+        profile.matched = true;
+        profile.externalVerified = false;
+        profile.name = L"Embedded validated Tracker baseline";
+        profile.source = L"MCST-TrackerBridge.dll embedded compatibility";
+        profile.mode = L"embedded_legacy";
+        profile.atonpTrackerPeTimestamp = snapshot.atonpTrackerPeTimestamp;
+        profile.atonpTrackerImageSize = snapshot.atonpTrackerSize;
+        // Preserve the validated RTTI-based locator for the embedded fallback.
+        // Exact CATPTTabView vtable authorization is required only for external profiles.
+        profile.tabViewVtableRva = 0;
+        profile.accountsExtractorRva = kExtractAccountsRva;
+        profile.openPositionsExtractorRva = kExtractOpenPositionsRva;
+        profile.accountsPageOffset = 0x58;
+        profile.openPositionsPageOffset = 0x68;
+        profile.logsPageOffset = 0x80;
+        profile.gridMemberOffset = 0x118;
+        profile.rowsOffset1 = 0xD20;
+        profile.rowsOffset2 = 0xD24;
+        profile.getTextSlot = 60;
+        profile.allowAdaptiveFlexGridIdentity = true;
+        profile.diagnostic = L"Using the embedded validated Tracker baseline for the original authorized ATOnPTracker.dll image size.";
+        return profile;
+    }
 
     // ITS_TradingCenter::ITC_TradeInfo IID observed in ATOnPTracker symbols.
     const GUID kIidTradeInfo =
@@ -977,8 +1309,10 @@ DWORD sehCode = 0;
         return count;
     }
 
-    std::vector<TabViewCandidate> FindKnownTabViewVtableObjects(
+    std::vector<TabViewCandidate> FindProfileTabViewVtableObjects(
         const Snapshot& snapshot,
+        std::uintptr_t tabViewVtableRva,
+        std::uint64_t expectedImageSize,
         std::string& scanDiagnostic)
     {
         // V147 diagnostic change: keep the targeted scan bounded, but allow up to 30 seconds. Build a small set
@@ -986,18 +1320,19 @@ DWORD sehCode = 0;
         // only their allocation neighborhoods for the exact known CATPTTabView
         // vtable. Every read is validated, the diagnostic work is time-bounded, and candidate
         // growth is capped before any extractor call can be considered.
-        constexpr std::uintptr_t kKnownTabViewVtableRva = 0x1D78E0;
         constexpr ULONGLONG kTimeBudgetMs = 30000;
         constexpr std::size_t kMaxAllocationBytes = 8ull * 1024ull * 1024ull;
         constexpr std::size_t kMaxTotalInspectedBytes = 32ull * 1024ull * 1024ull;
         constexpr std::size_t kMaxCandidates = 64;
 
-        const std::uintptr_t targetVtable = snapshot.atonpTrackerBase + kKnownTabViewVtableRva;
+        const std::uintptr_t targetVtable = snapshot.atonpTrackerBase + tabViewVtableRva;
         std::vector<TabViewCandidate> candidates;
-        if (!snapshot.atonpTrackerBase || snapshot.atonpTrackerSize != kKnownAtonpSize ||
+        if (!snapshot.atonpTrackerBase || tabViewVtableRva == 0 ||
+            snapshot.atonpTrackerSize != expectedImageSize ||
+            tabViewVtableRva >= snapshot.atonpTrackerSize ||
             !MemoryRangeHasProtection(reinterpret_cast<void*>(targetVtable), sizeof(void*), false))
         {
-            scanDiagnostic = "known vtable unavailable or ATOnPTracker build mismatch";
+            scanDiagnostic = "profile CATPTTabView vtable unavailable or ATOnPTracker fingerprint/layout mismatch";
             return candidates;
         }
 
@@ -2011,11 +2346,23 @@ DWORD sehCode = 0;
         WriteUtf8File(path, out.str());
     }
 
-    std::uintptr_t FindTabViewObject(const Snapshot& snapshot, std::string& diagnostic)
+    std::uintptr_t FindTabViewObject(
+        const Snapshot& snapshot,
+        std::string& diagnostic,
+        const TrackerCompatibilityProfile* trackerProfile = nullptr)
     {
         std::string rttiDiagnostic;
         const std::vector<RttiVtableRecord> vtables = ResolveRttiVtables(
             snapshot, ".?AVCATPTTabView@ATOnPTracker@@", rttiDiagnostic);
+
+        const auto profileVtableMatches = [&](std::uintptr_t object) -> bool {
+            if (!trackerProfile || !trackerProfile->matched || trackerProfile->tabViewVtableRva == 0)
+                return true;
+            std::uintptr_t actualVtable = 0;
+            if (!VtableStartsWithExecutableCode(object, actualVtable))
+                return false;
+            return actualVtable == snapshot.atonpTrackerBase + trackerProfile->tabViewVtableRva;
+        };
 
         AcquireSRWLockShared(&g_tabViewCacheLock);
         const std::uintptr_t cached = g_cachedTabView;
@@ -2025,12 +2372,14 @@ DWORD sehCode = 0;
         if (cached && cachedBase == snapshot.atonpTrackerBase && cachedTracker == snapshot.trackerWindow)
         {
             std::uintptr_t cachedVtable = 0;
-            if (VtableStartsWithExecutableCode(cached, cachedVtable) &&
+            const bool rttiValid = VtableStartsWithExecutableCode(cached, cachedVtable) &&
                 std::any_of(vtables.begin(), vtables.end(), [cachedVtable](const RttiVtableRecord& item) {
                     return item.vtable == cachedVtable;
-                }))
+                });
+            const bool profileValid = profileVtableMatches(cached);
+            if ((rttiValid || (trackerProfile && trackerProfile->matched)) && profileValid)
             {
-                diagnostic = "V147 RTTI COL locator cache hit object=" + HexValue(cached) +
+                diagnostic = "CATPTTabView cache hit object=" + HexValue(cached) +
                              " vtable=" + HexValue(cachedVtable) + "; " + rttiDiagnostic;
                 return cached;
             }
@@ -2064,8 +2413,9 @@ DWORD sehCode = 0;
         {
             scanDiagnostic += " candidate_cache_hit=true";
         }
+
         std::ostringstream out;
-        out << "V147 RTTI Complete Object Locator " << rttiDiagnostic << "; " << scanDiagnostic;
+        out << "RTTI Complete Object Locator " << rttiDiagnostic << "; " << scanDiagnostic;
         if (!candidates.empty())
         {
             const TabViewCandidate& best = candidates.front();
@@ -2112,6 +2462,46 @@ DWORD sehCode = 0;
         else
         {
             out << "; no stable CATPTTabView RTTI-vtable object found";
+        }
+
+        if (accepted && !profileVtableMatches(accepted))
+        {
+            out << "; RTTI object rejected because its vtable does not match the selected Tracker profile";
+            accepted = 0;
+        }
+
+        if (!accepted && trackerProfile && trackerProfile->matched && trackerProfile->tabViewVtableRva != 0)
+        {
+            std::string profileScanDiagnostic;
+            std::vector<TabViewCandidate> profileCandidates = FindProfileTabViewVtableObjects(
+                snapshot,
+                trackerProfile->tabViewVtableRva,
+                trackerProfile->atonpTrackerImageSize,
+                profileScanDiagnostic);
+            out << "; profile_vtable_scan=" << profileScanDiagnostic;
+            if (!profileCandidates.empty())
+            {
+                const TabViewCandidate& best = profileCandidates.front();
+                if (profileCandidates.size() == 1)
+                {
+                    accepted = best.object;
+                    out << "; exact profile vtable produced one CATPTTabView candidate";
+                }
+                else
+                {
+                    const TabViewCandidate& second = profileCandidates[1];
+                    const int bestReferences = best.trackerWindowReferences + best.pageWindowReferences + best.flexGridReferences;
+                    if (bestReferences > 0 && best.score >= second.score + 20)
+                    {
+                        accepted = best.object;
+                        out << "; exact profile vtable produced a uniquely strongest CATPTTabView candidate";
+                    }
+                    else
+                    {
+                        out << "; exact profile vtable candidates were ambiguous";
+                    }
+                }
+            }
         }
 
         if (accepted)
@@ -7230,6 +7620,7 @@ DWORD sehCode = 0;
         const Snapshot& snapshot,
         const std::vector<RttiVtableRecord>& flexGridRttiVtables,
         std::uintptr_t tabView,
+        const TrackerCompatibilityProfile& profile,
         const char* name,
         std::size_t pageOffset,
         unsigned int firstColumn,
@@ -7244,29 +7635,33 @@ DWORD sehCode = 0;
             std::uintptr_t getTextRva;
             const wchar_t* buildLabel;
         };
-        constexpr FlexGridIdentity kSupportedFlexGridIdentities[] =
+        constexpr FlexGridIdentity kEmbeddedFlexGridIdentities[] =
         {
             { 0x1FD778, 0x135E40, L"legacy validated build" },
             { 0x1FD6F8, 0x136230, L"MultiCharts build 2026-08-01" }
         };
-        constexpr std::size_t kGetTextSlot = 60;
-        constexpr std::size_t kGridMemberOffset = 0x118;
-        constexpr std::size_t kRowsOffset1 = 0xD20;
-        constexpr std::size_t kRowsOffset2 = 0xD24;
         constexpr unsigned int kBufferCharacters = 2048;
 
         V153GridSectionResult result;
         result.name = name ? name : "unknown";
 
-        if (!snapshot.atonpTrackerModule || !tabView)
+        if (!snapshot.atonpTrackerModule)
         {
-            result.diagnostic = L"required CATPTTabView or ATOnPTracker module anchor was not found";
+            result.diagnostic = L"ATOnPTracker.dll is not loaded.";
+            return result;
+        }
+        if (!profile.matched)
+        {
+            result.diagnostic = L"Tracker compatibility UNKNOWN: " + profile.diagnostic;
+            return result;
+        }
+        if (!tabView)
+        {
+            result.diagnostic = L"CATPTTabView object was not found for Tracker profile " + profile.name;
             return result;
         }
 
         const std::uintptr_t moduleBase = reinterpret_cast<std::uintptr_t>(snapshot.atonpTrackerModule);
-        const FlexGridIdentity* matchedIdentity = nullptr;
-        bool adaptiveIdentity = false;
         std::wstring identityLabel;
 
         std::uintptr_t pageObject = 0;
@@ -7278,90 +7673,112 @@ DWORD sehCode = 0;
 
         const bool anchorsOk =
             SafeReadValue(reinterpret_cast<void*>(tabView + pageOffset), pageObject) && pageObject &&
-            SafeReadValue(reinterpret_cast<void*>(pageObject + kGridMemberOffset), gridObject) && gridObject &&
+            SafeReadValue(reinterpret_cast<void*>(pageObject + profile.gridMemberOffset), gridObject) && gridObject &&
             SafeReadValue(reinterpret_cast<void*>(gridObject), actualVtable) &&
-            SafeReadValue(reinterpret_cast<void*>(actualVtable + kGetTextSlot * sizeof(std::uintptr_t)), actualGetText) &&
-            SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset1), rows1) &&
-            SafeReadValue(reinterpret_cast<void*>(gridObject + kRowsOffset2), rows2);
+            SafeReadValue(reinterpret_cast<void*>(actualVtable + profile.getTextSlot * sizeof(std::uintptr_t)), actualGetText) &&
+            SafeReadValue(reinterpret_cast<void*>(gridObject + profile.rowsOffset1), rows1) &&
+            SafeReadValue(reinterpret_cast<void*>(gridObject + profile.rowsOffset2), rows2);
 
         if (!anchorsOk)
         {
-            result.diagnostic = L"one or more page/grid anchors could not be read";
+            std::wostringstream diagnostic;
+            diagnostic << L"Tracker profile layout read failed for " << profile.name
+                       << L" at page_offset=0x" << std::hex << std::uppercase << pageOffset
+                       << L" grid_member_offset=0x" << profile.gridMemberOffset
+                       << L" rows_offsets=(0x" << profile.rowsOffset1 << L",0x" << profile.rowsOffset2 << L")";
+            result.diagnostic = diagnostic.str();
             return result;
         }
-        for (const auto& identity : kSupportedFlexGridIdentities)
+
+        if (profile.externalVerified)
         {
-            if (actualVtable == moduleBase + identity.vtableRva &&
-                actualGetText == moduleBase + identity.getTextRva)
+            const std::uintptr_t expectedVtable = moduleBase + profile.flexGridVtableRva;
+            const std::uintptr_t expectedGetText = moduleBase + profile.getTextRva;
+            if (actualVtable != expectedVtable || actualGetText != expectedGetText)
             {
-                matchedIdentity = &identity;
-                break;
+                std::wostringstream diagnostic;
+                diagnostic << L"Verified Tracker profile identity mismatch: actual_vtable_rva=0x"
+                           << std::hex << std::uppercase << (actualVtable - moduleBase)
+                           << L" expected_vtable_rva=0x" << profile.flexGridVtableRva
+                           << L" actual_gettext_rva=0x" << (actualGetText - moduleBase)
+                           << L" expected_gettext_rva=0x" << profile.getTextRva;
+                result.diagnostic = diagnostic.str();
+                return result;
             }
-        }
-        if (matchedIdentity)
-        {
-            identityLabel = std::wstring(L"known:") + matchedIdentity->buildLabel;
+            identityLabel = L"verified-profile:" + profile.name;
         }
         else
         {
-            // Version-adaptive path: accept a moved vtable/function only when the
-            // object has the exact MSVC RTTI identity for CFlexGridImpl, slot 60
-            // points to executable code inside ATOnPTracker.dll, and the vtable
-            // has a substantial executable-method population. This avoids binding
-            // normal operation to fixed RVAs while still failing closed on layout
-            // or class-identity changes.
-            const bool rttiMatched = std::any_of(
-                flexGridRttiVtables.begin(), flexGridRttiVtables.end(),
-                [actualVtable](const RttiVtableRecord& item) { return item.vtable == actualVtable; });
-            const bool vtableInsideModule = ModuleContains(snapshot, actualVtable, sizeof(std::uintptr_t));
-            const bool getTextInsideModule = ModuleContains(snapshot, actualGetText, 1);
-            const bool getTextExecutable =
-                getTextInsideModule && MemoryRangeHasProtection(reinterpret_cast<void*>(actualGetText), 1, true);
-
-            std::size_t executableSlots = 0;
-            constexpr std::size_t kVtableSlotsToValidate = 64;
-            for (std::size_t slot = 0; slot < kVtableSlotsToValidate; ++slot)
+            const FlexGridIdentity* matchedIdentity = nullptr;
+            for (const auto& identity : kEmbeddedFlexGridIdentities)
             {
-                std::uintptr_t method = 0;
-                if (!SafeReadValue(reinterpret_cast<void*>(actualVtable + slot * sizeof(std::uintptr_t)), method))
-                    continue;
-                if (ModuleContains(snapshot, method, 1) &&
-                    MemoryRangeHasProtection(reinterpret_cast<void*>(method), 1, true))
+                if (actualVtable == moduleBase + identity.vtableRva &&
+                    actualGetText == moduleBase + identity.getTextRva)
                 {
-                    ++executableSlots;
+                    matchedIdentity = &identity;
+                    break;
                 }
             }
 
-            constexpr std::size_t kMinimumExecutableSlots = 32;
-            if (rttiMatched && vtableInsideModule && getTextExecutable &&
-                executableSlots >= kMinimumExecutableSlots)
+            if (matchedIdentity)
             {
-                adaptiveIdentity = true;
-                identityLabel = L"adaptive:RTTI CFlexGridImpl + executable vtable slot 60";
+                identityLabel = std::wstring(L"embedded-known:") + matchedIdentity->buildLabel;
+            }
+            else if (profile.allowAdaptiveFlexGridIdentity)
+            {
+                // The embedded validated fallback preserves the adaptive RTTI path.
+                // Externally verified profiles never use this path: they must match
+                // their exact configured identity pair.
+                const bool rttiMatched = std::any_of(
+                    flexGridRttiVtables.begin(), flexGridRttiVtables.end(),
+                    [actualVtable](const RttiVtableRecord& item) { return item.vtable == actualVtable; });
+                const bool vtableInsideModule = ModuleContains(snapshot, actualVtable, sizeof(std::uintptr_t));
+                const bool getTextInsideModule = ModuleContains(snapshot, actualGetText, 1);
+                const bool getTextExecutable =
+                    getTextInsideModule && MemoryRangeHasProtection(reinterpret_cast<void*>(actualGetText), 1, true);
+
+                std::size_t executableSlots = 0;
+                constexpr std::size_t kVtableSlotsToValidate = 64;
+                for (std::size_t slot = 0; slot < kVtableSlotsToValidate; ++slot)
+                {
+                    std::uintptr_t method = 0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(actualVtable + slot * sizeof(std::uintptr_t)), method))
+                        continue;
+                    if (ModuleContains(snapshot, method, 1) &&
+                        MemoryRangeHasProtection(reinterpret_cast<void*>(method), 1, true))
+                    {
+                        ++executableSlots;
+                    }
+                }
+
+                constexpr std::size_t kMinimumExecutableSlots = 32;
+                if (rttiMatched && vtableInsideModule && getTextExecutable &&
+                    executableSlots >= kMinimumExecutableSlots)
+                {
+                    identityLabel = L"embedded-adaptive:RTTI CFlexGridImpl + executable configured slot";
+                }
+                else
+                {
+                    std::wostringstream diagnostic;
+                    diagnostic << L"Unsupported embedded CFlexGridImpl identity: actual_vtable_rva=0x"
+                               << std::hex << std::uppercase << (actualVtable - moduleBase)
+                               << L" actual_gettext_rva=0x" << (actualGetText - moduleBase)
+                               << L" rtti_match=" << (rttiMatched ? L"yes" : L"no")
+                               << L" vtable_in_module=" << (vtableInsideModule ? L"yes" : L"no")
+                               << L" gettext_executable=" << (getTextExecutable ? L"yes" : L"no")
+                               << L" executable_slots=" << std::dec << executableSlots
+                               << L"/" << kVtableSlotsToValidate;
+                    result.diagnostic = diagnostic.str();
+                    return result;
+                }
             }
             else
             {
-                std::wostringstream diag;
-                diag << L"Unsupported CFlexGridImpl identity: actual_vtable_rva=0x"
-                     << std::hex << std::uppercase << (actualVtable - moduleBase)
-                     << L" actual_gettext_rva=0x" << (actualGetText - moduleBase)
-                     << L" rtti_match=" << (rttiMatched ? L"yes" : L"no")
-                     << L" vtable_in_module=" << (vtableInsideModule ? L"yes" : L"no")
-                     << L" gettext_executable=" << (getTextExecutable ? L"yes" : L"no")
-                     << L" executable_slots=" << std::dec << executableSlots
-                     << L"/" << kVtableSlotsToValidate
-                     << L". Known pairs: ";
-                for (std::size_t i = 0; i < _countof(kSupportedFlexGridIdentities); ++i)
-                {
-                    if (i) diag << L", ";
-                    diag << L"(0x" << std::hex << std::uppercase
-                         << kSupportedFlexGridIdentities[i].vtableRva
-                         << L",0x" << kSupportedFlexGridIdentities[i].getTextRva << L")";
-                }
-                result.diagnostic = diag.str();
+                result.diagnostic = L"Tracker profile does not authorize an adaptive FlexGrid identity.";
                 return result;
             }
         }
+
         if (rows1 != rows2 || rows1 == 0 || rows1 > 100000)
         {
             result.diagnostic = L"FlexGrid mirrored row-capacity fields were inconsistent";
@@ -7397,11 +7814,11 @@ DWORD sehCode = 0;
                 if (!callOk)
                 {
                     ++result.sehFailures;
-                    std::wostringstream diag;
-                    diag << L"GetText failed at row=" << rowIndex
-                         << L" column=" << (firstColumn + columnOffset)
-                         << L" seh=0x" << std::hex << std::uppercase << sehCode;
-                    result.diagnostic = diag.str();
+                    std::wostringstream diagnostic;
+                    diagnostic << L"GetText failed at row=" << rowIndex
+                               << L" column=" << (firstColumn + columnOffset)
+                               << L" seh=0x" << std::hex << std::uppercase << sehCode;
+                    result.diagnostic = diagnostic.str();
                     rowCallFailed = true;
                     break;
                 }
@@ -7431,17 +7848,19 @@ DWORD sehCode = 0;
         result.ok = result.sehFailures == 0;
         if (result.ok)
         {
-            std::wostringstream diag;
-            diag << L"grid validated; identity=" << identityLabel
-                 << L"; rows_returned=" << result.rows.size()
-                 << L" calls=" << result.callsSucceeded
-                 << L" reported_capacity=" << result.reportedRows;
+            std::wostringstream diagnostic;
+            diagnostic << L"grid validated; profile=" << profile.name
+                       << L"; identity=" << identityLabel
+                       << L"; rows_returned=" << result.rows.size()
+                       << L"; calls=" << result.callsSucceeded
+                       << L"; reported_capacity=" << result.reportedRows;
             if (!sawNonEmptyRow)
-                diag << L"; no non-empty rows";
-            result.diagnostic = diag.str();
+                diagnostic << L"; no non-empty rows";
+            result.diagnostic = diagnostic.str();
         }
         return result;
     }
+
 
     void AppendV153Section(std::ostringstream& out, const V153GridSectionResult& section, unsigned int columnCount)
     {
@@ -7470,20 +7889,38 @@ DWORD sehCode = 0;
     {
         V153GridReadLockGuard lock;
 
-        ExtractorAttempt accountsAnchor = BuildExtractorProbe(snapshot, "accounts", kExtractAccountsRva);
-        ExtractorAttempt positionsAnchor = BuildExtractorProbe(snapshot, "open_positions", kExtractOpenPositionsRva);
-        const std::uintptr_t tabView = accountsAnchor.tabView ? accountsAnchor.tabView : positionsAnchor.tabView;
+        TrackerCompatibilityProfile trackerProfile = ResolveExternalTrackerCompatibilityProfile(snapshot);
+        if (!trackerProfile.matched)
+        {
+            TrackerCompatibilityProfile embedded = EmbeddedLegacyTrackerCompatibilityProfile(snapshot);
+            if (embedded.matched)
+            {
+                trackerProfile = embedded;
+            }
+        }
+        std::string tabViewDiagnostic;
+        const std::uintptr_t tabView = trackerProfile.matched
+            ? FindTabViewObject(snapshot, tabViewDiagnostic, &trackerProfile)
+            : 0;
 
         std::string flexGridRttiDiagnostic;
-        const std::vector<RttiVtableRecord> flexGridRttiVtables = ResolveRttiVtables(
-            snapshot, ".?AVCFlexGridImpl@implementation@UILayer@@", flexGridRttiDiagnostic);
+        const std::vector<RttiVtableRecord> flexGridRttiVtables = trackerProfile.matched
+            ? ResolveRttiVtables(
+                snapshot, ".?AVCFlexGridImpl@implementation@UILayer@@", flexGridRttiDiagnostic)
+            : std::vector<RttiVtableRecord>{};
+
+        if (!trackerProfile.matched && tabViewDiagnostic.empty())
+            tabViewDiagnostic = "Tracker reader blocked before CATPTTabView lookup because no compatibility profile is authorized.";
 
         V153GridSectionResult accounts = ReadV153GridSection(
-            snapshot, flexGridRttiVtables, tabView, "accounts", 0x58, 1, 12, 100, 100, 3);
+            snapshot, flexGridRttiVtables, tabView, trackerProfile, "accounts",
+            trackerProfile.accountsPageOffset, 1, 12, 100, 100, 3);
         V153GridSectionResult positions = ReadV153GridSection(
-            snapshot, flexGridRttiVtables, tabView, "open_positions", 0x68, 1, 8, 1000, 1000, 3);
+            snapshot, flexGridRttiVtables, tabView, trackerProfile, "open_positions",
+            trackerProfile.openPositionsPageOffset, 1, 8, 1000, 1000, 3);
         V153GridSectionResult logs = ReadV153GridSection(
-            snapshot, flexGridRttiVtables, tabView, "recent_logs", 0x80, 1, 6, 200, 10, 3);
+            snapshot, flexGridRttiVtables, tabView, trackerProfile, "recent_logs",
+            trackerProfile.logsPageOffset, 1, 6, 200, 10, 3);
 
         const std::size_t pagesOk =
             static_cast<std::size_t>(accounts.ok) +
@@ -7499,7 +7936,17 @@ DWORD sehCode = 0;
         out << "META\tcaptured_utc\t" << V153UtcText(snapshot.capturedUtc) << "\n";
         out << "META\ttracker_found\t" << (snapshot.trackerFound ? "true" : "false") << "\n";
         out << "META\ttracker_same_process\t" << (snapshot.trackerInSameProcess ? "true" : "false") << "\n";
-        out << "META\tflexgrid_identity_mode\tknown_or_adaptive_rtti\n";
+        out << "META\tatonptracker_loaded\t" << (snapshot.atonpTrackerBase ? "true" : "false") << "\n";
+        out << "META\tatonptracker_pe_timestamp\t" << snapshot.atonpTrackerPeTimestamp << "\n";
+        out << "META\tatonptracker_image_size\t" << snapshot.atonpTrackerSize << "\n";
+        out << "META\ttracker_compatibility_matched\t" << (trackerProfile.matched ? "true" : "false") << "\n";
+        out << "META\ttracker_compatibility_mode\t" << V153EscapeField(trackerProfile.mode) << "\n";
+        out << "META\ttracker_compatibility_profile\t" << V153EscapeField(trackerProfile.name) << "\n";
+        out << "META\ttracker_compatibility_source\t" << V153EscapeField(trackerProfile.source) << "\n";
+        out << "META\ttracker_compatibility_diagnostic\t" << V153EscapeField(trackerProfile.diagnostic) << "\n";
+        out << "META\ttabview_diagnostic\t" << V153EscapeFieldUtf8(tabViewDiagnostic) << "\n";
+        out << "META\tflexgrid_identity_mode\t"
+            << (trackerProfile.externalVerified ? "exact_verified_profile" : "embedded_known_or_adaptive_rtti") << "\n";
         out << "META\tflexgrid_rtti_diagnostic\t" << V153EscapeFieldUtf8(flexGridRttiDiagnostic) << "\n";
         AppendV153Section(out, accounts, 12);
         AppendV153Section(out, positions, 8);
@@ -7511,6 +7958,7 @@ DWORD sehCode = 0;
         payload = out.str();
         return pagesOk > 0 && totalSeh == 0;
     }
+
 
     mcbridge::Status ProcessRequest(
         const mcbridge::MessageHeader& request,

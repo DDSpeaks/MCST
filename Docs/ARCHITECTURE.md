@@ -2,9 +2,9 @@
 
 ## Purpose
 
-MCST-Watchdog provides an operational view of MultiCharts health at a glance while keeping invasive research functions separate from normal production monitoring.
+MCST-Watchdog provides an operational view of MultiCharts health at a glance while keeping build-dependent MultiCharts internals behind explicit compatibility controls.
 
-## System overview
+## Runtime data flow
 
 ```text
 MultiCharts64
@@ -15,134 +15,144 @@ MCST-TrackerBridge.dll
     |
     | Bridge Protocol V2
     v
-MCST TrackerBridgeClient
+TrackerBridgeClient
     |
     +-- Accounts
     +-- Open Positions
     +-- Recent Logs
-    +-- Tracker metadata
-    |
-    v
-MCST-Watchdog
-    |
-    +-- Broker State Engine
-    +-- Broker Authentication Detector
-    +-- Log Alert Engine
-    +-- AutoTrading Reader
-    +-- MultiCharts Version Detector
-    +-- Compatibility Manager
-    +-- Schedule Service
-    +-- Email / Alert Service
-    +-- Resource Monitor
-    |
-    +--> Dashboard
-    +--> Status Reports
-    +--> Alerts
-    +--> Heartbeats
+    +-- Bridge / Tracker compatibility metadata
+            |
+            v
+       MCST-Watchdog
+            |
+            +-- Broker State Engine
+            +-- Log Alert Engine
+            +-- AutoTrading Reader
+            +-- MultiCharts Version Detector
+            +-- Compatibility Manager
+            +-- Email / Alert Service
+            +-- Scheduler
+            +-- Resource Monitor
+            |
+            v
+       Dashboard / Status Reports / Alerts
 ```
 
-## Component boundaries
+## Main components
 
-### MultiCharts64
+### MultiCharts
 
-The monitored trading platform. One or more MultiCharts instances may be active.
+The monitored trading platform. MCST does not modify MultiCharts process memory.
 
-### MCST Tracker Bridge 1.0
+### MCST Tracker Bridge
 
-`MCST-TrackerBridge.dll` runs inside MultiCharts and exposes Tracker snapshot information through Bridge Protocol V2. It is loaded by the supplied PowerLanguage host.
-
-Identifiers:
+The Bridge runs inside MultiCharts and provides a stable Tracker snapshot boundary.
 
 ```text
 Product version: 1.0
-Internal build:  V155
+Internal build:  V156
 Protocol:        V2
 ```
 
-The internal V155 build identifier is a Tracker Bridge implementation identifier. It is not a MultiCharts compatibility fingerprint.
-
-### TrackerBridgeClient
-
-The Watchdog-side static client library that requests and parses Bridge snapshots.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 adds profile-driven Tracker compatibility handling while keeping the wire protocol at V2.
 
 ### MCST-Watchdog
 
-Combines independent monitor inputs into the Dashboard and report state. Subsystems should preserve uncertainty rather than converting missing evidence into a false healthy state.
+Watchdog combines Tracker snapshots, AutoTrading state, broker/log monitoring, scheduled reporting, email, resources, and compatibility diagnostics into one operational state.
+
+### Developer and research tools
+
+Research tools are deliberately separated from normal production operation. Developer Mode is used to discover and verify values for a new MultiCharts build before those values become production profile data.
+
+## Compatibility architecture
+
+The shared database is:
+
+```text
+C:\MCExtras\MCST-Compatibility.ini
+```
+
+Two module fingerprints are currently important:
+
+```text
+Charting.dll
+    -> AutoTrading build-dependent profile values
+
+ATOnPTracker.dll
+    -> Tracker build-dependent profile values
+```
+
+Watchdog and Bridge consume the same database independently:
+
+```text
+                 MCST-Compatibility.ini
+                       /       \
+                      /         \
+                     v           v
+             MCST-Watchdog   Tracker Bridge
+                  |              |
+             Charting.dll   ATOnPTracker.dll
+                  |              |
+             AutoTrading       Tracker
+```
+
+A human-readable MultiCharts version helps identify the installed release, but it does not authorize internal memory access. Exact module fingerprints and verified profile values provide that authorization.
+
+## Unknown-build policy
+
+The compatibility policy is fail-safe:
+
+```text
+fingerprint changed
+        |
+        v
+exact verified profile available? ---- yes ---> use verified values
+        |
+        no
+        v
+affected reader UNKNOWN / unavailable
+        |
+        v
+Developer Mode research
+        |
+        v
+verified Profile.* added
+        |
+        v
+Reload Compat / fresh snapshot
+```
+
+For an unknown `ATOnPTracker.dll`, the Bridge can create a disabled `Candidate.*` section that records the fingerprint. A candidate is not selected by production code and contains no fabricated verified offsets.
 
 ## Bridge stability rule
 
-Bridge Protocol V2 should remain stable unless new information must cross the MultiCharts/Watchdog boundary. A Watchdog-only feature should not cause a Bridge protocol change.
+Bridge Protocol V2 should remain stable unless the information crossing the Bridge boundary fundamentally requires a protocol revision. Adding internal metadata fields that existing parsers safely ignore, or changing how the Bridge resolves its own internal layout, does not by itself require a protocol change.
 
-## MultiCharts version and internal compatibility
+Watchdog-only features should not force a Bridge protocol revision.
 
-The architecture deliberately separates the visible MultiCharts version from internal-memory compatibility.
+## Tracker snapshot safety
 
-### MultiCharts Version Detector
+For an externally verified Tracker profile, the production reader checks the configured CATPTTabView/CFlexGrid identities and layout values before calling the grid text reader. Failures are reported as specific diagnostics such as:
 
-Reads the running MultiCharts executable path and Windows version resource. The result is useful to users, Status Reports, and diagnostics and is written to `[DetectedMultiCharts]`.
+- `ATOnPTracker.dll is not loaded.`
+- no verified Tracker profile for the exact fingerprint;
+- CATPTTabView not found for the selected profile;
+- Tracker profile layout read failure;
+- verified FlexGrid identity mismatch.
 
-### Compatibility Manager
+This distinguishes compatibility failure from an actual critical Recent Logs message.
 
-Selects a verified profile only when the internal module fingerprint matches exactly. The current AutoTrading profile uses:
+## Broker authentication signal priority
 
-- `Charting.dll` PE timestamp
-- `Charting.dll` image size
+The Broker State Engine prefers current evidence over stale historical evidence:
 
-A profile currently supplies the build-dependent vtable and field offset needed by the AutoTrading reader.
+1. configured browser authentication/login evidence;
+2. explicit Recent Logs disconnect/reconnect events;
+3. reconnect grace-period state;
+4. unknown when no reliable evidence is available.
 
-The compatibility architecture is intentionally broader than AutoTrading. Any future production reader that depends on MultiCharts internal layout must obtain its build-dependent values from a verified profile or equivalent exact build authorization. A new product-version string alone must never authorize old offsets.
-
-## Fail-safe state model
-
-For internal readers:
-
-```text
-fingerprint known + profile verified -> reader may operate
-fingerprint unknown                -> reader reports UNKNOWN
-required profile value missing     -> affected reader reports UNKNOWN
-```
-
-This policy prevents an apparently plausible but incorrect value from being treated as production truth.
-
-## AutoTrading Reader
-
-The AutoTrading reader performs passive process-memory inspection. It does not write to MultiCharts memory. Research and production modes are separate: research can generate candidate evidence, while production requires a verified compatibility profile.
-
-## Broker State Engine
-
-Broker state combines multiple types of evidence. Current evidence is preferred over stale historical evidence.
-
-Priority is conceptually:
-
-1. configured current broker-authentication/login evidence;
-2. explicit Recent Logs connection/disconnection evidence;
-3. reconnect grace-timer state;
-4. `UNKNOWN` when reliable evidence is unavailable.
-
-A confirmed authentication/login page therefore cannot be cleared merely by an older historical success log.
-
-## Log Alert Engine
-
-Recent Logs alert classification is independent of Broker connection state. Keyword matches can generate Fatal, Critical, or Warning events without changing the Broker State Engine rules.
-
-## Scheduling and email
-
-Status Reports and Heartbeats use the report channel. Operational alerts use the alert channel. Scheduling logic maintains independent state so a report operation does not suppress heartbeat or alert delivery.
-
-## Status Report rendering
-
-Scheduled Status Reports, Heartbeats, and alert messages that embed system status share the same HTML Status Report renderer. This avoids layout drift between message types.
+A confirmed login page cannot be cleared merely by an older successful connection log.
 
 ## Configuration architecture
 
-`MCST-Watchdog.ini` follows a self-documenting configuration model. Known missing keys are materialized with safe defaults. Invalid bounded values are normalized. User-specific values and secrets are not fabricated.
-
-`[DetectedMultiCharts]` is program-generated diagnostic output rather than configuration input.
-
-`MCST-Compatibility.ini` is separate because verified internal build data has different trust requirements from normal user settings. A verified profile must never be created by guessing or ordinary default normalization.
-
-## Developer and research tools
-
-Developer Mode is hidden by default. Its compact toolbar is intentionally separated from production controls and is designed to accept additional compatibility-research actions as new MC-internal readers are developed.
-
-The Universal Application Mapper remains a separate application-independent developer tool rather than a Watchdog runtime dependency.
+`MCST-Watchdog.ini` is self-documenting for normal settings: known missing settings are written with safe defaults and bounded values are normalized. Generated diagnostics and verified compatibility data are treated separately so the program never invents secrets or verified internal addresses.

@@ -1,4 +1,4 @@
-#define NOMINMAX
+﻿#define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winver.h>
@@ -85,7 +85,7 @@ namespace
         return true;
     }
 
-    void DetectChartingFingerprint(DWORD processId, MultiChartsVersionInfo& result)
+    void DetectInternalModuleFingerprints(DWORD processId, MultiChartsVersionInfo& result)
     {
         HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId);
         if (snapshot == INVALID_HANDLE_VALUE)
@@ -97,17 +97,25 @@ namespace
         {
             do
             {
-                if (_wcsicmp(module.szModule, L"Charting.dll") != 0)
-                    continue;
-
                 DWORD timestamp = 0;
-                if (ReadPeTimestampFromFile(module.szExePath, timestamp))
+                if (_wcsicmp(module.szModule, L"Charting.dll") == 0)
                 {
-                    result.chartingDetected = true;
-                    result.chartingPeTimestamp = timestamp;
-                    result.chartingImageSize = static_cast<unsigned long long>(module.modBaseSize);
+                    if (ReadPeTimestampFromFile(module.szExePath, timestamp))
+                    {
+                        result.chartingDetected = true;
+                        result.chartingPeTimestamp = timestamp;
+                        result.chartingImageSize = static_cast<unsigned long long>(module.modBaseSize);
+                    }
                 }
-                break;
+                else if (_wcsicmp(module.szModule, L"ATOnPTracker.dll") == 0)
+                {
+                    if (ReadPeTimestampFromFile(module.szExePath, timestamp))
+                    {
+                        result.atonpTrackerDetected = true;
+                        result.atonpTrackerPeTimestamp = timestamp;
+                        result.atonpTrackerImageSize = static_cast<unsigned long long>(module.modBaseSize);
+                    }
+                }
             } while (Module32NextW(snapshot, &module));
         }
         CloseHandle(snapshot);
@@ -191,13 +199,16 @@ MultiChartsVersionInfo DetectMultiChartsVersion(DWORD processId)
 
     result.displayVersion = !result.productVersion.empty() ? result.productVersion : result.fileVersion;
     if (result.displayVersion.empty()) result.displayVersion = L"version unavailable";
-    DetectChartingFingerprint(processId, result);
+    DetectInternalModuleFingerprints(processId, result);
     result.detected = true;
     result.diagnostic = L"Detected from " + result.executableName;
     return result;
 }
 
-void WriteDetectedMultiChartsInfoToIni(const MultiChartsVersionInfo& info, const std::wstring& compatibilityProfile)
+void WriteDetectedMultiChartsInfoToIni(
+    const MultiChartsVersionInfo& info,
+    const std::wstring& autoTradingCompatibilityProfile,
+    const std::wstring& trackerCompatibilityProfile)
 {
     if (!info.detected) return;
     WriteIni(L"product_version", info.productVersion);
@@ -207,7 +218,12 @@ void WriteDetectedMultiChartsInfoToIni(const MultiChartsVersionInfo& info, const
     WriteIni(L"process_id", std::to_wstring(info.processId));
     WriteIni(L"charting_pe_timestamp", info.chartingDetected ? HexTimestamp(info.chartingPeTimestamp) : L"");
     WriteIni(L"charting_image_size", info.chartingDetected ? std::to_wstring(info.chartingImageSize) : L"");
-    WriteIni(L"compatibility_profile", compatibilityProfile);
+    WriteIni(L"atonptracker_pe_timestamp", info.atonpTrackerDetected ? HexTimestamp(info.atonpTrackerPeTimestamp) : L"");
+    WriteIni(L"atonptracker_image_size", info.atonpTrackerDetected ? std::to_wstring(info.atonpTrackerImageSize) : L"");
+    WriteIni(L"autotrading_compatibility_profile", autoTradingCompatibilityProfile);
+    WriteIni(L"tracker_compatibility_profile", trackerCompatibilityProfile);
+    // Keep the historical key as an alias for AutoTrading so existing diagnostics remain readable.
+    WriteIni(L"compatibility_profile", autoTradingCompatibilityProfile);
 
     SYSTEMTIME local{};
     GetLocalTime(&local);

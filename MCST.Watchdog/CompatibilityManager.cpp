@@ -1,4 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
+﻿#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include "CompatibilityManager.h"
@@ -71,10 +71,13 @@ namespace
     bool WriteKnownProfile(const std::wstring& path)
     {
         bool ok = true;
-        ok = ok && WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"1", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"2", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(L"Compatibility", L"unknown_build_policy", L"reject", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"name", L"MC16 verified Charting.dll 0x6A5684BF", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"enabled", L"true", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"charting_pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownSection, L"charting_image_size", L"18493440", path.c_str()) != FALSE;
+        // Legacy aliases remain readable by older MCST builds.
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"image_size", L"18493440", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(kKnownSection, L"strategy_vtable_rva", L"0xA457B8", path.c_str()) != FALSE;
@@ -95,6 +98,23 @@ bool EnsureCompatibilityDatabase(std::wstring& diagnostic)
     const std::wstring path = GetCompatibilityDatabasePath();
     if (std::filesystem::exists(path))
     {
+        // Schema metadata is safe to normalize. Verified address/offset values are never fabricated.
+        WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"2", path.c_str());
+        WritePrivateProfileStringW(L"Compatibility", L"unknown_build_policy", L"reject", path.c_str());
+
+        // The Tracker Bridge can legitimately create the shared database first when it
+        // records an unknown ATOnPTracker candidate. Ensure that this does not prevent
+        // the bundled, already-verified AutoTrading profile from being installed later.
+        const auto sections = ReadSections(path);
+        const bool knownProfileExists = std::any_of(sections.begin(), sections.end(), [](const std::wstring& section) {
+            return _wcsicmp(section.c_str(), kKnownSection) == 0;
+        });
+        if (!knownProfileExists && !WriteKnownProfile(path))
+        {
+            diagnostic = L"Compatibility database exists but the bundled verified AutoTrading profile could not be added: " + path;
+            return false;
+        }
+
         diagnostic = L"Compatibility database available: " + path;
         return true;
     }
@@ -133,8 +153,12 @@ CompatibilityProfile ResolveCompatibilityProfile(DWORD peTimestamp, unsigned lon
         unsigned long long candidateImageSize = 0;
         unsigned long long candidateRva = 0;
         unsigned long long candidateOffset = 0;
-        if (!TryParseUnsigned(ReadValue(path, section, L"pe_timestamp"), candidateTimestamp) ||
-            !TryParseUnsigned(ReadValue(path, section, L"image_size"), candidateImageSize) ||
+        std::wstring timestampText = ReadValue(path, section, L"charting_pe_timestamp");
+        if (timestampText.empty()) timestampText = ReadValue(path, section, L"pe_timestamp");
+        std::wstring imageSizeText = ReadValue(path, section, L"charting_image_size");
+        if (imageSizeText.empty()) imageSizeText = ReadValue(path, section, L"image_size");
+        if (!TryParseUnsigned(timestampText, candidateTimestamp) ||
+            !TryParseUnsigned(imageSizeText, candidateImageSize) ||
             !TryParseUnsigned(ReadValue(path, section, L"strategy_vtable_rva"), candidateRva) ||
             !TryParseUnsigned(ReadValue(path, section, L"autotrading_offset"), candidateOffset))
         {

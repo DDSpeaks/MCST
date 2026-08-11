@@ -44,6 +44,8 @@ Build-dependent internal values belong in the compatibility framework rather tha
 
 If a future internal reader needs additional profile fields, extend the compatibility schema and document the verification procedure.
 
+Automatically created `Candidate.*` sections may record an unknown module fingerprint and empty research fields, but candidate data must remain disabled and must never be selected as a production profile. Promotion to `Profile.*` requires explicit controlled verification.
+
 ## Bridge stability
 
 MCST Tracker Bridge product version, internal build identifier, and protocol version are separate concepts.

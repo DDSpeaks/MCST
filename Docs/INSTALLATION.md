@@ -1,11 +1,11 @@
-# MCST Installation Guide
+﻿# MCST Installation Guide
 
 ## Requirements
 
 - 64-bit Windows
 - MultiCharts64 for the monitored trading environment
 - Visual Studio 2022 with the v143 C++ toolset only when building from source
-- An SMTP account only if email alerts, status reports, or heartbeats are enabled
+- An SMTP account only when email alerts, status reports, or heartbeats are enabled
 
 ## Build the production binaries
 
@@ -17,14 +17,14 @@ Normal outputs are written to:
 bin\Release
 ```
 
-The principal production binaries are:
+The principal runtime binaries are:
 
 ```text
 MCST-Watchdog.exe
 MCST-TrackerBridge.dll
 ```
 
-The build uses static Microsoft C/C++ runtime linkage (`/MT`), so a separate Visual C++ Redistributable is not intended to be an MCST runtime requirement. Windows system DLLs remain normal operating-system dependencies.
+MCST uses static Microsoft C/C++ runtime linkage (`/MT`). A separate Visual C++ Redistributable is therefore not intended to be an MCST runtime requirement. Normal Windows system DLLs remain operating-system dependencies.
 
 ## Runtime directory
 
@@ -34,7 +34,7 @@ Copy the runtime files to:
 C:\MCExtras
 ```
 
-Typical installed files are:
+A normal installation contains:
 
 ```text
 C:\MCExtras\MCST-Watchdog.exe
@@ -43,7 +43,9 @@ C:\MCExtras\MCST-Watchdog.ini
 C:\MCExtras\MCST-Compatibility.ini
 ```
 
-`MCST-Watchdog.ini` and `MCST-Compatibility.ini` are created or completed by the application when required. Source code and documentation can be stored anywhere and do not need to be installed in `C:\MCExtras`.
+Keeping the Watchdog EXE and Tracker Bridge DLL in the same production directory is important because both components use the same `MCST-Compatibility.ini` database.
+
+Source code and documentation may be stored anywhere.
 
 ## Install the PowerLanguage host
 
@@ -67,29 +69,30 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended DLL build is loaded cleanly.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.113 requires Tracker Bridge internal build V156 or newer for production Tracker snapshots.
 
 ## First Watchdog start
 
-Start MultiCharts and its Bridge host first, then start:
+Start MultiCharts and the Bridge host first, then start:
 
 ```text
 C:\MCExtras\MCST-Watchdog.exe
 ```
 
-On startup Watchdog normalizes its configuration and fills in missing known settings. This is intentional.
+Watchdog normalizes its configuration on startup and fills in missing known settings. This is intentional.
 
-### Self-documenting INI behavior
+## Self-documenting INI behavior
 
 MCST uses a **self-documenting INI** approach:
 
 - a missing known setting is written with the built-in safe default;
-- invalid Boolean and numeric values are normalized where a valid range is defined;
-- the normalization is recorded in `MCST-Watchdog-ConfigNormalization.log`;
-- user-specific values and secrets are not invented;
-- automatically detected information, such as `[DetectedMultiCharts]`, is written by the application and is not a user setting.
+- invalid Boolean and bounded numeric values are normalized where a valid range is defined;
+- normalization changes are recorded in `MCST-Watchdog-ConfigNormalization.log`;
+- user-specific values and secrets are never invented;
+- generated diagnostic sections such as `[DetectedMultiCharts]` are maintained by the application and are not user settings;
+- verified compatibility addresses and offsets are never fabricated as defaults.
 
-As a result, the installed `MCST-Watchdog.ini` becomes a useful reference for the configuration keys supported by that version.
+As a result, the installed `MCST-Watchdog.ini` becomes a practical reference for the settings supported by the running MCST version.
 
 ## Configure email
 
@@ -110,15 +113,15 @@ alert_to=alerts@example.com
 report_to=reports@example.com
 ```
 
-### Important: password / App Password
+### Important: Password / App Password
 
-`smtp_password` means the **SMTP credential required by the email provider**. It does not always mean the normal password used to sign in interactively to the email account.
+`smtp_password` means the **SMTP credential required by the email provider**. It does not necessarily mean the normal password used to sign in interactively to the email account.
 
-When the provider supports or requires application-specific passwords, create and use an **App Password**. Gmail normally requires a Google App Password for this type of SMTP authentication. Other providers may use an App Password, an app-specific password, a dedicated SMTP password, or another provider-specific credential.
+When the provider supports or requires application-specific passwords, create and use an **App Password**. Gmail normally uses a Google App Password for this type of SMTP authentication. Other providers may use an App Password, an app-specific password, a dedicated SMTP password, or another provider-specific credential.
 
 Do not assume that the normal account password is the correct SMTP credential. Follow the current instructions of the email provider.
 
-MCST does not intentionally include the configured password or App Password in status reports, alert emails, or diagnostic logs.
+MCST does not intentionally include configured passwords or App Passwords in reports, alerts, research output, or diagnostic logs.
 
 ## Email channels
 
@@ -137,13 +140,22 @@ AutoTrading, Broker, and Log Alert messages use the alert channel. Status Report
 
 ## Compatibility database
 
-`MCST-Compatibility.ini` is stored next to the Watchdog executable. It contains verified internal MultiCharts build profiles. Do not copy internal addresses from one MultiCharts build to another without verification.
+`MCST-Compatibility.ini` is stored in `C:\MCExtras` beside both production binaries.
 
-The human-readable MultiCharts version shown by Watchdog is diagnostic information. Internal compatibility requires an exact verified fingerprint.
+The database can contain independent verified data for:
+
+- `Charting.dll` / AutoTrading
+- `ATOnPTracker.dll` / Tracker snapshot layout
+
+Watchdog records the detected fingerprints in `[DetectedMultiCharts]` inside `MCST-Watchdog.ini`.
+
+If a new `ATOnPTracker.dll` fingerprint has no verified Tracker profile, the Bridge creates a disabled `Candidate.ATOnPTracker-*` section in `MCST-Compatibility.ini`. The candidate records the fingerprint only; it is never used for production memory access. Developer research is required before the values are promoted to an enabled `Profile.*` section.
+
+See `COMPATIBILITY.md` before editing compatibility profiles.
 
 ## Optional Universal Application Mapper
 
-The Universal Application Mapper is a separate Developer Mode research tool. If it is available, its default configured path is:
+The Universal Application Mapper is a separate Developer Mode research tool. Its default configured path is:
 
 ```text
 C:\MCExtras\UniversalApplicationMapper.exe
@@ -160,14 +172,4 @@ C:\MCExtras\MCST-Watchdog-Startup.log
 C:\Temp\MCST-Watchdog-Startup.log
 ```
 
-Watchdog writes startup stages to both locations when possible and displays a startup error dialog for failures that can be reported safely.
-
-## Release validation
-
-Before distributing a build, run:
-
-```powershell
-.\Tools\Validate-Release.ps1
-```
-
-Then perform a real `Release|x64` rebuild in Visual Studio and verify normal Watchdog and MultiCharts Bridge operation on Windows.
+When possible, critical startup failures are also shown in a message box.

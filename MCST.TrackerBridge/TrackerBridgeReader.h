@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 inline constexpr wchar_t kTrackerBridgeProductVersion[] = L"1.0";
-inline constexpr int kTrackerBridgeInternalBuildVersion = 155;
+inline constexpr int kTrackerBridgeInternalBuildVersion = 156;
 
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +30,14 @@ struct TrackerStatusSnapshot
     std::wstring capturedUtc;
     bool trackerFound = false;
     bool trackerSameProcess = false;
+    bool atonpTrackerLoaded = false;
+    std::uint32_t atonpTrackerPeTimestamp = 0;
+    std::uint64_t atonpTrackerImageSize = 0;
+    bool trackerCompatibilityMatched = false;
+    std::wstring trackerCompatibilityMode;
+    std::wstring trackerCompatibilityProfile;
+    std::wstring trackerCompatibilitySource;
+    std::wstring trackerCompatibilityDiagnostic;
     TrackerBridgeSection accounts;
     TrackerBridgeSection openPositions;
     TrackerBridgeSection recentLogs;
@@ -39,7 +47,7 @@ struct TrackerStatusSnapshot
     std::string rawPayload;
 };
 
-// Requests one production snapshot from MCTrackerBridge V155.
+// Requests one production snapshot from MCTrackerBridge V156.
 // The Bridge response contains Accounts, Open Positions and at most ten newest
 // Logs rows. A parsed partial response is returned even when one section failed.
 bool ReadTrackerStatusSnapshot(
@@ -51,3 +59,14 @@ bool WriteTrackerStatusRawPayload(
     const TrackerStatusSnapshot& snapshot,
     const std::wstring& path,
     std::wstring& diagnostic);
+
+/**
+ * @brief Requests the existing passive Tracker research bundle from Bridge V156.
+ *
+ * The bundle is written by the Bridge inside the MultiCharts process to its
+ * normal research-output location. This does not change Bridge Protocol V2.
+ */
+bool CaptureTrackerResearchBundle(
+    std::wstring& responseSummary,
+    std::wstring& diagnostic,
+    unsigned long connectTimeoutMilliseconds = 5000);

@@ -161,6 +161,14 @@ namespace
                     else if (key == "captured_utc") snapshot.capturedUtc = DecodeField(value);
                     else if (key == "tracker_found") snapshot.trackerFound = value == "true";
                     else if (key == "tracker_same_process") snapshot.trackerSameProcess = value == "true";
+                    else if (key == "atonptracker_loaded") snapshot.atonpTrackerLoaded = value == "true";
+                    else if (key == "atonptracker_pe_timestamp") snapshot.atonpTrackerPeTimestamp = static_cast<std::uint32_t>(std::stoull(value));
+                    else if (key == "atonptracker_image_size") snapshot.atonpTrackerImageSize = std::stoull(value);
+                    else if (key == "tracker_compatibility_matched") snapshot.trackerCompatibilityMatched = value == "true";
+                    else if (key == "tracker_compatibility_mode") snapshot.trackerCompatibilityMode = DecodeField(value);
+                    else if (key == "tracker_compatibility_profile") snapshot.trackerCompatibilityProfile = DecodeField(value);
+                    else if (key == "tracker_compatibility_source") snapshot.trackerCompatibilitySource = DecodeField(value);
+                    else if (key == "tracker_compatibility_diagnostic") snapshot.trackerCompatibilityDiagnostic = DecodeField(value);
                 }
                 catch (...)
                 {
@@ -255,9 +263,10 @@ namespace
             diagnostic = L"Bridge payload was incomplete";
             return false;
         }
-        if (snapshot.bridgeVersion < 153)
+        if (snapshot.bridgeVersion < kTrackerBridgeInternalBuildVersion)
         {
-            diagnostic = L"Bridge version is older than V153";
+            diagnostic = L"Tracker Bridge internal build V" + std::to_wstring(snapshot.bridgeVersion) +
+                L" is older than the required V" + std::to_wstring(kTrackerBridgeInternalBuildVersion) + L".";
             return false;
         }
         if (!snapshot.accounts.present || !snapshot.openPositions.present || !snapshot.recentLogs.present)
@@ -401,3 +410,46 @@ bool WriteTrackerStatusRawPayload(
     diagnostic = L"Raw Bridge snapshot written to " + path;
     return true;
 }
+
+bool CaptureTrackerResearchBundle(
+    std::wstring& responseSummary,
+    std::wstring& diagnostic,
+    unsigned long connectTimeoutMilliseconds)
+{
+    responseSummary.clear();
+    diagnostic.clear();
+
+    MCBridgeClient client;
+    std::wstring connectDiagnostic;
+    if (!client.Connect(connectTimeoutMilliseconds, connectDiagnostic))
+    {
+        diagnostic = L"MCTrackerBridge connection failed: " + connectDiagnostic;
+        return false;
+    }
+
+    mcbridge::Status responseStatus{};
+    std::string payload;
+    std::wstring requestDiagnostic;
+    if (!client.Request(
+            mcbridge::Command::CaptureResearchBundle,
+            {},
+            responseStatus,
+            payload,
+            requestDiagnostic))
+    {
+        diagnostic = L"MCTrackerBridge research request failed: " + requestDiagnostic;
+        return false;
+    }
+
+    responseSummary = Utf8ToWide(payload);
+    if (responseStatus != mcbridge::Status::Ok)
+    {
+        diagnostic = L"Tracker research bundle failed; Bridge status=" +
+            std::to_wstring(static_cast<unsigned int>(responseStatus)) + L"; " + requestDiagnostic;
+        return false;
+    }
+
+    diagnostic = L"Tracker research bundle captured; " + requestDiagnostic;
+    return true;
+}
+

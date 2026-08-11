@@ -64,6 +64,7 @@ namespace mcst
         std::wstring multiChartsFileVersion;
         std::wstring multiChartsExecutable;
         std::wstring multiChartsCompatibilityProfile;
+        std::wstring trackerCompatibilityProfile;
 
         unsigned long processId = 0;
         std::size_t accountRows = 0;

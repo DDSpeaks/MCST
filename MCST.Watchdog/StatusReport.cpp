@@ -1,4 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
+﻿#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include "StatusReport.h"
@@ -138,11 +138,18 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.111\n"
+        << L"Watchdog version       1.113\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
-        << L"Compatibility profile  " << (status.multiChartsCompatibilityProfile.empty() ? L"Unknown" : status.multiChartsCompatibilityProfile) << L"\n\n"
+        << L"AutoTrading profile    " << (status.multiChartsCompatibilityProfile.empty() ? L"Unknown" : status.multiChartsCompatibilityProfile) << L"\n"
+        << L"Tracker profile        " << (status.trackerCompatibilityProfile.empty() ? L"Unknown" : status.trackerCompatibilityProfile) << L"\n";
+    if (snapshot.atonpTrackerLoaded)
+    {
+        out << L"ATOnPTracker fingerprint 0x" << std::hex << std::uppercase << snapshot.atonpTrackerPeTimestamp
+            << std::dec << L" / " << snapshot.atonpTrackerImageSize << L" bytes\n";
+    }
+    out << L"\n"
         << L"OVERALL STATUS\n"
         << L"--------------\n"
         << StateCell(status.overall) << L"\n\n"

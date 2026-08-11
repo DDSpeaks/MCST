@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <windows.h>
 
@@ -34,9 +34,9 @@ struct DeveloperToolbarLayout
 {
     int left = 28;
     int top = 0;
-    int buttonWidth = 164;
+    int buttonWidth = 116;
     int buttonHeight = 24;
-    int horizontalGap = 8;
+    int horizontalGap = 6;
 };
 
 DeveloperToolbarLayout CalculateDeveloperToolbarLayout(int productionButtonY);

@@ -2,153 +2,57 @@
 
 ## Purpose
 
-The Dashboard is designed to answer one operational question quickly: **Is the monitored MultiCharts environment healthy?**
+The Dashboard is designed to answer one operational question quickly: **Is MultiCharts healthy?**
 
-Normal operation should require no Developer Mode tools.
+The overall status summarizes the subsystem rows. Green/OK represents a verified healthy state, warning indicates attention is required, critical means monitoring or a monitored condition has failed, and unknown means MCST does not have enough verified information to make a safe claim.
 
-## Starting the system
+## Normal operation
 
-1. Start the required MultiCharts64 instances.
-2. Ensure the supplied Tracker Bridge PowerLanguage host is active in each monitored instance.
-3. Start `C:\MCExtras\MCST-Watchdog.exe`.
-4. Confirm that the Dashboard reaches the expected state.
+1. Start MultiCharts and make sure the MCST Tracker Bridge host is running in each monitored MultiCharts instance.
+2. Start `C:\MCExtras\MCST-Watchdog.exe`.
+3. Confirm the expected status for Bridge, Tracker Snapshot, AutoTrading, Broker, Recent Logs, Status Reports, Email, and Heartbeat.
+4. Leave Watchdog running during trading operation.
 
-## Reading the Dashboard
+The Dashboard uses **Latest Activity** as its single activity summary. There is no separate Recent Activity section.
 
-MCST uses four operational states:
+## Configuration
 
-- `HEALTHY` — the subsystem is operating as expected.
-- `WARNING` — attention may be required, but the condition is not yet treated as critical.
-- `CRITICAL` — a configured production condition requires attention.
-- `UNKNOWN` — Watchdog does not have enough verified information to claim a valid state.
+`MCST-Watchdog.ini` is stored beside the Watchdog executable.
 
-`UNKNOWN` is intentional fail-safe behavior. MCST prefers an explicit unknown state over guessing.
+MCST intentionally uses a **self-documenting INI** model. Missing known settings are written with safe built-in defaults, and invalid Boolean or bounded numeric values are normalized where appropriate. This allows the INI file itself to show the configuration keys known by the installed version.
 
-The System Status area includes Bridge, Tracker Snapshot, AutoTrading, Broker, Recent Logs, Status Reports, Email, and Heartbeat state. Latest Activity and process/resource information provide additional context.
+User-specific addresses, account identifiers, usernames, passwords, and App Passwords are never invented. Generated sections such as `[DetectedMultiCharts]` are diagnostic output and should not be treated as user settings.
 
-The Dashboard also displays the detected MultiCharts version and compatibility information where available. A readable MultiCharts version does not by itself authorize internal-memory access; build-dependent readers require a verified compatibility profile.
+Use **Open Settings** on the Dashboard to open the INI file in the system's associated text editor. Use **Reload Settings** after manual configuration changes.
 
-## Normal controls
+## Email Password / App Password
 
-The normal production control row includes actions such as:
+The Email settings field is labelled **Password / App Password** because the required credential depends on the email provider.
 
-- `Refresh`
-- `Save Report`
-- `Open Folder`
-- `Open Settings`
-- `Reload Settings`
+- If the provider requires an application-specific password, use that App Password.
+- Gmail normally uses a Google App Password for this SMTP authentication style.
+- Other providers may use a normal SMTP password or another provider-specific credential.
 
-System Status rows with a `...` button provide focused configuration and subsystem-specific actions.
+Do not assume that the normal interactive account password is correct. MCST does not intentionally expose the configured credential in reports, alerts, or diagnostic logs.
 
-## Developer Mode controls
+## Email channels
 
-Developer Mode is disabled by default:
+Urgent alerts and routine reports can be sent to different addresses.
 
-```ini
-[Developer]
-enabled=false
-```
+- AutoTrading, Broker, and Log Alert messages use the alert recipient.
+- Status Reports and Heartbeats use the report recipient.
 
-When enabled, research controls appear as a **compact, lower-height toolbar** that is visually distinct from the normal production buttons. The compact layout intentionally leaves room for future MultiCharts compatibility-research tools.
-
-Current AutoTrading research controls include:
-
-- `Start AT Research`
-- `Capture AT Snapshot`
-- `Finish AT Research`
-
-These controls are not required for normal production monitoring.
-
-## Self-documenting configuration
-
-`MCST-Watchdog.ini` is stored beside the executable. MCST intentionally treats it as a **self-documenting configuration file**.
-
-When a known setting is missing, Watchdog writes the setting with its safe built-in default. Invalid Boolean or numeric values are normalized where appropriate. This allows an existing INI file to grow automatically when new supported settings are introduced.
-
-User-specific values and secrets are not invented. For example, email addresses, SMTP user names, and SMTP passwords may remain empty until the user configures them.
-
-Configuration normalization changes are recorded in:
-
-```text
-MCST-Watchdog-ConfigNormalization.log
-```
-
-The `[DetectedMultiCharts]` section is different from normal settings: it is diagnostic information written by Watchdog and should not be maintained manually.
-
-## Email settings
-
-The Email settings panel separates alert and report recipients. Alerts are intended for urgent operational events, while routine Status Reports and Heartbeats can be sent to a different mailbox.
-
-### Password / App Password
-
-The Email settings field is labelled **Password / App Password** because the correct credential depends on the email provider.
-
-Use the SMTP credential required by the provider. When an application-specific password is supported or required, use an **App Password** instead of the normal interactive account password. Gmail normally requires a Google App Password for this type of SMTP authentication. Other providers may use a different mechanism.
-
-Leaving the Password / App Password field empty when editing Email settings preserves the currently stored value.
-
-MCST does not intentionally include the configured credential in status reports, alert messages, or diagnostic logs.
-
-## Status Reports
-
-Status Reports provide a consolidated operational snapshot containing:
-
-- Watchdog and Tracker Bridge versions
-- detected MultiCharts version and executable
-- selected compatibility profile
-- overall and per-subsystem status
-- latest activity
-- system resources
-- Watchdog process resources
-- Accounts
-- Open Positions
-- Recent Logs
-
-HTML reports use the same status semantics as the Dashboard.
-
-Status Report scheduling is configured under `[StatusReport]`, including interval, startup behavior, weekdays, sending window, and recipient.
-
-## Heartbeat
-
-Heartbeat messages confirm that the monitoring system is still operating. They use the report email channel rather than the urgent alert channel.
-
-The Heartbeat row menu can send a manual heartbeat immediately.
-
-## AutoTrading monitor
-
-AutoTrading monitoring reads MultiCharts internal state passively. Production reading is allowed only when the detected `Charting.dll` build matches a verified compatibility profile.
-
-If the build is unknown, AutoTrading remains `UNKNOWN` rather than using an old address.
-
-The configured minimum number of active strategies determines when the AutoTrading state becomes critical.
+This allows the alert mailbox to use stronger notification rules without making every routine status message urgent.
 
 ## Broker Monitor
 
-The Broker Monitor consumes recognized events from MultiCharts Recent Logs and also supports configured browser-based authentication detection.
+Broker state is derived from recognized MultiCharts Recent Logs events plus optional broker-authentication browser profiles.
 
-A disconnect or reconnect event starts a grace period. If recovery is recognized before the grace period expires, an outage alert is not sent. If the grace period expires, Broker state becomes critical and an alert can be sent. A recovery message is sent only after an alerted outage recovers.
+A disconnect/reconnect event starts a grace period. A successful recovery during the grace period cancels the pending outage alert. If the grace period expires, the Broker state becomes critical and an alert can be sent. A later verified recovery can produce a recovery message.
 
-A configured broker authentication/login page is treated as stronger current evidence than an older successful connection log.
+A configured browser authentication/login page is considered stronger current evidence than an older successful connection log. This prevents stale historical log evidence from incorrectly clearing a current authentication condition.
 
-Typical configuration:
-
-```ini
-[BrokerMonitor]
-enabled=true
-disconnect_grace_seconds=60
-state_cache_max_age_minutes=1440
-alert_email=true
-recovery_email=true
-disconnect_patterns=connection lost|connection disconnected|broker disconnected|connection closed
-reconnecting_patterns=reconnecting|reconnect attempt|trying to connect
-connected_patterns=connection restored|reconnected|connection established|logged on
-```
-
-Patterns are case-insensitive and separated with `|`.
-
-## Browser-based broker authentication
-
-Broker authentication profiles are data-driven. Example:
+Broker authentication profiles are configured using sections such as:
 
 ```ini
 [BrokerAuth.Saxo]
@@ -161,13 +65,11 @@ recovery_log_contains=saxo|saxo group
 alert_after_seconds=10
 ```
 
-Prefer a stable `url_contains` value. Title and text terms are useful as additional or fallback evidence. Avoid overly generic match terms when a broker-specific URL is available.
-
-The detector is passive. It does not enter credentials or interact with the page.
+Prefer stable URL terms over generic words when possible.
 
 ## Recent Logs alerts
 
-The Log Alert Engine watches newly observed Tracker Logs rows and can send an alert when configured keywords are found.
+The Log Alert Engine evaluates newly observed Recent Logs rows and can send alerts for configured keywords.
 
 ```ini
 [LogAlerts]
@@ -181,21 +83,58 @@ warning_keywords=
 ignore_keywords=simulated trades are not shown on historical data
 ```
 
-Matching is case-insensitive and keywords are separated with `|`. Existing rows normally establish a startup baseline rather than generating historical alerts.
+Matching is case-insensitive and keywords are separated with `|`. The Log Alert Engine is separate from the Broker State Engine.
 
-The Log Alert Engine is separate from the Broker State Engine.
+## Status Reports and Heartbeats
 
-## System resources
+Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs.
 
-Status Reports include system-wide RAM, CPU, and system-drive information. Watchdog-specific private memory, handle count, and uptime are reported separately.
+Heartbeat messages are routine proof-of-life messages and use the report recipient rather than the alert recipient.
 
-## Startup troubleshooting
+## MultiCharts version and compatibility
 
-If Watchdog closes before showing the Dashboard, inspect:
+Watchdog displays the human-readable MultiCharts version and records module fingerprints in the generated `[DetectedMultiCharts]` section.
 
-```text
-C:\MCExtras\MCST-Watchdog-Startup.log
-C:\Temp\MCST-Watchdog-Startup.log
+The important distinction is:
+
+- a product version tells you which MultiCharts release appears to be running;
+- an exact module fingerprint determines whether MCST is authorized to use build-dependent internal values.
+
+AutoTrading and Tracker compatibility are evaluated independently. A new MultiCharts build may therefore leave one subsystem verified while another becomes `UNKNOWN` or unreadable until its module profile is verified.
+
+For Tracker compatibility, a new `ATOnPTracker.dll` build without a verified profile is deliberately blocked rather than read using guessed offsets. The Bridge creates a disabled candidate entry to support later Developer Mode research.
+
+## Developer Mode
+
+Developer Mode is disabled by default:
+
+```ini
+[Developer]
+enabled=false
 ```
 
-If Watchdog starts but a subsystem is `UNKNOWN` or `CRITICAL`, use the row description, Latest Activity, Status Report, and the relevant configuration section to determine the cause before changing compatibility data.
+When enabled, the compact Developer toolbar contains:
+
+- **AT Start** — begins a controlled AutoTrading research session.
+- **AT Capture** — captures the current AutoTrading research state.
+- **AT Finish** — completes/analyzes the AutoTrading research session.
+- **Tracker Capture** — requests the passive Tracker research bundle from the Bridge and opens the research-output location.
+- **Open Compat** — opens `MCST-Compatibility.ini`.
+- **Reload Compat** — forces a fresh compatibility evaluation for AutoTrading and Tracker.
+
+These controls are intentionally smaller than normal production buttons and are hidden in normal operation.
+
+### Tracker profile workflow
+
+When a MultiCharts update changes `ATOnPTracker.dll`:
+
+1. Watchdog/Bridge records the new fingerprint.
+2. The Tracker reader remains safely unavailable if no verified profile matches.
+3. A disabled `Candidate.ATOnPTracker-*` section is created automatically.
+4. Use **Tracker Capture** and other Developer Mode research tools to discover the new build-dependent values.
+5. Verify the values through controlled research.
+6. Create or complete an enabled `Profile.*` section with the exact fingerprint and verified values.
+7. Use **Reload Compat**.
+8. Confirm that Tracker Snapshot, Accounts, Open Positions, and Recent Logs are readable and that the selected profile is reported.
+
+Never enable unverified candidate values simply to remove an `UNKNOWN` state.

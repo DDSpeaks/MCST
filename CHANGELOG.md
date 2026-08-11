@@ -1,4 +1,20 @@
-# Changelog
+﻿# Changelog
+
+## 1.113
+
+- Corrected the Tracker Bridge Host compatibility-database path construction so the Release x64 source compiles cleanly with `std::filesystem::path`.
+- Removed the Watchdog local-variable shadowing warning in the Tracker Capture command handler.
+- Added exact-fingerprint Tracker compatibility-profile support for `ATOnPTracker.dll` in the production Tracker Bridge reader.
+- Added Tracker layout fields to the shared `MCST-Compatibility.ini` schema and kept unknown-build policy fail-safe.
+- Added automatic disabled `Candidate.ATOnPTracker-*` sections for new unverified Tracker module fingerprints; candidate sections are never selected by production code.
+- Added `ATOnPTracker.dll` PE timestamp and image size to detected MultiCharts diagnostics.
+- Added separate AutoTrading and Tracker compatibility-profile names to `[DetectedMultiCharts]` and Status Report diagnostics.
+- Added compact Developer actions: `Tracker Capture`, `Open Compat`, and `Reload Compat` alongside the existing AutoTrading research controls.
+- Added runtime profile reload behavior so a verified Tracker profile can be put into service without recompiling MCST.
+- Replaced the ambiguous combined CATPTTabView/ATOnPTracker read error with subsystem-specific compatibility and layout diagnostics.
+- Updated Tracker Snapshot health/activity handling so a partial or unavailable Tracker reader is not reported as a fully successful snapshot.
+- Bumped MCST Tracker Bridge internal build from V155 to V156 while preserving public product version 1.0 and Bridge Protocol V2.
+- Updated public documentation and release validation for the generalized MultiCharts Internal Compatibility Framework.
 
 ## 1.111
 
@@ -6,19 +22,12 @@
 - Kept `LATEST ACTIVITY` as the single user-facing activity summary.
 - Preserved internal activity/event tracking and production monitoring logic.
 - Updated the User Guide and release metadata to match the simplified Dashboard.
-- Preserved Bridge Protocol V2, Tracker Bridge internal build V155, and established production Release settings.
 
 ## 1.110
 
 - Added a compact, lower-height Developer Mode toolbar with centralized layout geometry for future compatibility research controls.
-- Added a smaller font for Developer Mode research buttons to distinguish them from production controls.
-- Changed the Email settings credential label to `Password / App Password` and added provider-specific guidance without renaming the existing `smtp_password` INI key.
+- Added provider-aware `Password / App Password` guidance without renaming the existing `smtp_password` INI key.
 - Documented MCST's self-documenting INI behavior: missing known settings are written with safe defaults while user-specific values and secrets are not invented.
-- Expanded the compatibility documentation from an AutoTrading-specific view to a general MultiCharts Internal Compatibility Framework.
-- Clarified that the human-readable MultiCharts version is diagnostic information, while internal-memory access requires an exact verified module fingerprint.
-- Added detected `Charting.dll` PE timestamp and image size to the generated `[DetectedMultiCharts]` INI diagnostics when available.
-- Documented that future MC-internal readers must add their build-dependent values to a verified compatibility profile/schema before production use.
-- Updated the Tracker Bridge documentation for product version 1.0, internal build V155, and Bridge Protocol V2.
-- Reworked README, Installation Guide, User Guide, Developer Guide, Architecture, Compatibility, Coding Standard, build information, release notes, and release validation for public distribution.
-- Removed historical per-version changelog files from the production source package in favor of this single public changelog.
-- Preserved Bridge Protocol V2, Tracker Bridge internal build V155, and established Watchdog production Release settings.
+- Expanded compatibility documentation from an AutoTrading-specific view to a general MultiCharts Internal Compatibility Framework.
+- Added detected `Charting.dll` fingerprint information to `[DetectedMultiCharts]` diagnostics.
+- Reworked public documentation for distribution and consolidated release history into this changelog.
