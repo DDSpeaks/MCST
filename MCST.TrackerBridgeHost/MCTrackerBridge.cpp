@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 157;
+    constexpr int kBridgeVersion = 158;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -7954,7 +7954,7 @@ DWORD sehCode = 0;
             const wchar_t ch = buffer[length];
             if (ch == L'\0')
                 break;
-            if (!(iswalnum(ch) || iswspace(ch) || ch == L'/' || ch == L'-' || ch == L'_' || ch == L'$' || ch == L'\x20AC' || ch == L'\x00A3'))
+            if (!(iswalnum(ch) || iswspace(ch) || ch == L'/' || ch == L'-' || ch == L'_' || ch == L':' || ch == L'.' || ch == L'@' || ch == L'$' || ch == L'\x20AC' || ch == L'\x00A3'))
                 return L"";
         }
         if (length == 0 || length == availableCharacters)
@@ -7991,13 +7991,680 @@ DWORD sehCode = 0;
         return std::string(buffer, length);
     }
 
+    struct PositionResearchRegion
+    {
+        std::uintptr_t base = 0;
+        std::size_t size = 0;
+        DWORD protect = 0;
+        DWORD type = 0;
+        std::string source;
+    };
+
+    struct PositionResearchRow
+    {
+        std::size_t rowIndex = 0;
+        const std::vector<std::wstring>* fields = nullptr;
+        bool quantityOk = false;
+        bool averageOk = false;
+        bool openPlOk = false;
+        long long quantityAbs = 0;
+        double averagePrice = 0.0;
+        double displayedOpenPl = 0.0;
+    };
+
+    struct PositionResearchCandidate
+    {
+        std::uintptr_t averageAddress = 0;
+        std::uintptr_t regionBase = 0;
+        std::size_t regionSize = 0;
+        std::string regionSource;
+        std::vector<long long> quantityI32Offsets;
+        std::vector<long long> quantityI64Offsets;
+        std::vector<long long> openPlOffsets;
+        int score = 0;
+    };
+
+    struct PositionResearchScanStats
+    {
+        std::size_t regionsConsidered = 0;
+        std::size_t regionsRead = 0;
+        std::uint64_t bytesRead = 0;
+        std::uint64_t valuesChecked = 0;
+        bool byteLimitReached = false;
+        bool runtimeLimitReached = false;
+    };
+
+    bool PositionResearchRegionIsDataCandidate(const MEMORY_BASIC_INFORMATION& mbi)
+    {
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+            return false;
+        const DWORD basic = mbi.Protect & 0xFFu;
+        const bool readable = basic == PAGE_READONLY || basic == PAGE_READWRITE || basic == PAGE_WRITECOPY;
+        if (!readable)
+            return false;
+        return mbi.Type == MEM_PRIVATE || mbi.Type == MEM_MAPPED;
+    }
+
+    bool AddPositionResearchRegion(
+        std::vector<PositionResearchRegion>& regions,
+        std::map<std::uintptr_t, std::size_t>& regionIndex,
+        std::uintptr_t address,
+        const std::string& source)
+    {
+        std::uintptr_t regionEnd = 0;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!QueryReadableSpan(address, regionEnd, mbi) || !PositionResearchRegionIsDataCandidate(mbi))
+            return false;
+
+        const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+        auto found = regionIndex.find(base);
+        if (found != regionIndex.end())
+        {
+            PositionResearchRegion& existing = regions[found->second];
+            if (existing.source.find(source) == std::string::npos)
+                existing.source += "|" + source;
+            return true;
+        }
+
+        PositionResearchRegion region;
+        region.base = base;
+        region.size = mbi.RegionSize;
+        region.protect = mbi.Protect;
+        region.type = mbi.Type;
+        region.source = source;
+        regionIndex[base] = regions.size();
+        regions.push_back(region);
+        return true;
+    }
+
+    void DiscoverPositionResearchRegions(
+        const std::vector<std::pair<std::uintptr_t, std::string>>& seeds,
+        std::vector<PositionResearchRegion>& regions,
+        std::size_t& pointerNodesScanned)
+    {
+        regions.clear();
+        pointerNodesScanned = 0;
+
+        std::map<std::uintptr_t, std::size_t> regionIndex;
+        std::set<std::uintptr_t> queued;
+        struct Pending
+        {
+            std::uintptr_t address = 0;
+            std::size_t depth = 0;
+            std::string source;
+        };
+        std::deque<Pending> pending;
+
+        auto enqueue = [&](std::uintptr_t address, std::size_t depth, const std::string& source)
+        {
+            if (!address || address < 0x10000 || queued.size() >= 4096)
+                return;
+            if (!queued.insert(address).second)
+                return;
+            pending.push_back({ address, depth, source });
+        };
+
+        for (const auto& seed : seeds)
+            enqueue(seed.first, 0, seed.second);
+
+        constexpr std::size_t kMaximumDepth = 3;
+        constexpr std::size_t kMaximumNodes = 4096;
+        constexpr std::size_t kMaximumBytesPerNode = 64u * 1024u;
+        constexpr std::size_t kMaximumChildrenPerNode = 128;
+
+        while (!pending.empty() && pointerNodesScanned < kMaximumNodes)
+        {
+            Pending node = pending.front();
+            pending.pop_front();
+
+            std::uintptr_t regionEnd = 0;
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!QueryReadableSpan(node.address, regionEnd, mbi))
+                continue;
+
+            AddPositionResearchRegion(regions, regionIndex, node.address, node.source);
+
+            const std::size_t available = static_cast<std::size_t>(regionEnd - node.address);
+            const std::size_t bytesToInspect = (std::min)(kMaximumBytesPerNode, available);
+            if (bytesToInspect < sizeof(std::uintptr_t))
+                continue;
+
+            std::vector<unsigned char> bytes(bytesToInspect, 0);
+            if (!SafeReadBytes(reinterpret_cast<void*>(node.address), bytes.data(), bytes.size()))
+                continue;
+
+            ++pointerNodesScanned;
+            std::size_t children = 0;
+            for (std::size_t offset = 0; offset + sizeof(std::uintptr_t) <= bytes.size(); offset += sizeof(std::uintptr_t))
+            {
+                std::uintptr_t value = 0;
+                std::memcpy(&value, bytes.data() + offset, sizeof(value));
+                if (!value || value < 0x10000)
+                    continue;
+
+                std::uintptr_t targetEnd = 0;
+                MEMORY_BASIC_INFORMATION targetMbi{};
+                if (!QueryReadableSpan(value, targetEnd, targetMbi) ||
+                    !PositionResearchRegionIsDataCandidate(targetMbi))
+                    continue;
+
+                std::ostringstream edgeSource;
+                edgeSource << node.source << "+ptr@" << HexValue(offset);
+                AddPositionResearchRegion(regions, regionIndex, value, edgeSource.str());
+
+                if (node.depth < kMaximumDepth && children < kMaximumChildrenPerNode)
+                {
+                    enqueue(value, node.depth + 1, edgeSource.str());
+                    ++children;
+                }
+            }
+        }
+    }
+
+    std::vector<PositionResearchRegion> EnumerateFallbackPositionResearchRegions(
+        const std::map<std::uintptr_t, std::size_t>& alreadyKnown)
+    {
+        std::vector<PositionResearchRegion> result;
+
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        std::uintptr_t cursor = reinterpret_cast<std::uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+        const std::uintptr_t maximum = reinterpret_cast<std::uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+
+        while (cursor < maximum)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+            {
+                cursor += 0x1000;
+                continue;
+            }
+
+            const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+            const std::uintptr_t next = base + mbi.RegionSize;
+            if (next <= cursor)
+                break;
+
+            if (PositionResearchRegionIsDataCandidate(mbi) &&
+                alreadyKnown.find(base) == alreadyKnown.end() &&
+                mbi.RegionSize >= 0x1000)
+            {
+                PositionResearchRegion region;
+                region.base = base;
+                region.size = mbi.RegionSize;
+                region.protect = mbi.Protect;
+                region.type = mbi.Type;
+                region.source = "process_fallback";
+                result.push_back(region);
+            }
+
+            cursor = next;
+        }
+
+        std::stable_sort(
+            result.begin(),
+            result.end(),
+            [](const PositionResearchRegion& a, const PositionResearchRegion& b)
+            {
+                // Smaller committed data regions are more likely to be object/container
+                // allocations and are cheaper to inspect. Large heaps remain eligible.
+                if (a.size != b.size)
+                    return a.size < b.size;
+                return a.base < b.base;
+            });
+
+        return result;
+    }
+
+    void FindPositionResearchNeighborhood(
+        const PositionResearchRow& row,
+        std::uintptr_t averageAddress,
+        PositionResearchCandidate& candidate)
+    {
+        candidate.averageAddress = averageAddress;
+        constexpr long long kWindow = 0x180;
+
+        for (long long delta = -kWindow; delta <= kWindow; delta += 4)
+        {
+            const std::uintptr_t address = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(averageAddress) + delta);
+            std::int32_t value32 = 0;
+            if (SafeReadValue(reinterpret_cast<void*>(address), value32))
+            {
+                const long long magnitude = value32 < 0
+                    ? -static_cast<long long>(value32)
+                    : static_cast<long long>(value32);
+                if (magnitude == row.quantityAbs)
+                    candidate.quantityI32Offsets.push_back(delta);
+            }
+        }
+
+        for (long long delta = -kWindow; delta <= kWindow; delta += 8)
+        {
+            const std::uintptr_t address = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(averageAddress) + delta);
+
+            std::int64_t value64 = 0;
+            if (SafeReadValue(reinterpret_cast<void*>(address), value64))
+            {
+                const unsigned long long magnitude =
+                    value64 < 0
+                    ? static_cast<unsigned long long>(-(value64 + 1)) + 1ull
+                    : static_cast<unsigned long long>(value64);
+                if (magnitude == static_cast<unsigned long long>(row.quantityAbs))
+                    candidate.quantityI64Offsets.push_back(delta);
+            }
+
+            if (row.openPlOk)
+            {
+                double value = 0.0;
+                if (SafeReadValue(reinterpret_cast<void*>(address), value) && std::isfinite(value))
+                {
+                    const double tolerance = (std::max)(0.011, std::fabs(row.displayedOpenPl) * 1.0e-7);
+                    if (std::fabs(value - row.displayedOpenPl) <= tolerance)
+                        candidate.openPlOffsets.push_back(delta);
+                }
+            }
+        }
+
+        if (!candidate.quantityI32Offsets.empty() || !candidate.quantityI64Offsets.empty())
+            candidate.score += 10;
+        if (!candidate.openPlOffsets.empty())
+            candidate.score += 8;
+        if (!candidate.quantityI32Offsets.empty() && !candidate.quantityI64Offsets.empty())
+            candidate.score += 1;
+    }
+
+    void ScanPositionResearchRegions(
+        const std::vector<PositionResearchRegion>& regions,
+        const std::vector<PositionResearchRow>& parsedRows,
+        std::vector<std::vector<PositionResearchCandidate>>& rowCandidates,
+        std::vector<std::set<std::uintptr_t>>& seenAverageAddresses,
+        std::uint64_t byteBudget,
+        const std::chrono::steady_clock::time_point& deadline,
+        PositionResearchScanStats& stats)
+    {
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+        constexpr std::size_t kMaximumRegionBytes = 128u * 1024u * 1024u;
+        constexpr std::size_t kMaximumCandidatesPerRow = 32;
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            if (stats.bytesRead >= byteBudget)
+            {
+                stats.byteLimitReached = true;
+                break;
+            }
+
+            ++stats.regionsConsidered;
+            const std::size_t regionLimit = (std::min)(region.size, kMaximumRegionBytes);
+            std::size_t regionOffset = 0;
+            bool regionReadAny = false;
+
+            while (regionOffset < regionLimit)
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                if (stats.bytesRead >= byteBudget)
+                {
+                    stats.byteLimitReached = true;
+                    break;
+                }
+
+                const std::uint64_t remainingBudget = byteBudget - stats.bytesRead;
+                std::size_t bytesToRead = (std::min)(
+                    kChunkBytes,
+                    regionLimit - regionOffset);
+                bytesToRead = static_cast<std::size_t>(
+                    (std::min)(static_cast<std::uint64_t>(bytesToRead), remainingBudget));
+                if (bytesToRead < sizeof(double))
+                    break;
+
+                const std::uintptr_t chunkAddress = region.base + regionOffset;
+                std::vector<unsigned char> bytes(bytesToRead, 0);
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), bytes.data(), bytes.size()))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+
+                regionReadAny = true;
+                stats.bytesRead += bytes.size();
+
+                const std::size_t firstAligned =
+                    static_cast<std::size_t>((8u - (chunkAddress & 7u)) & 7u);
+                for (std::size_t offset = firstAligned;
+                     offset + sizeof(double) <= bytes.size();
+                     offset += 8)
+                {
+                    double value = 0.0;
+                    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+                    ++stats.valuesChecked;
+                    if (!std::isfinite(value))
+                        continue;
+
+                    for (const PositionResearchRow& row : parsedRows)
+                    {
+                        if (!row.averageOk ||
+                            rowCandidates[row.rowIndex].size() >= kMaximumCandidatesPerRow)
+                            continue;
+
+                        const double tolerance =
+                            (std::max)(0.00051, std::fabs(row.averagePrice) * 1.0e-8);
+                        if (std::fabs(value - row.averagePrice) > tolerance)
+                            continue;
+
+                        const std::uintptr_t averageAddress = chunkAddress + offset;
+                        if (!seenAverageAddresses[row.rowIndex].insert(averageAddress).second)
+                            continue;
+
+                        PositionResearchCandidate candidate;
+                        candidate.regionBase = region.base;
+                        candidate.regionSize = region.size;
+                        candidate.regionSource = region.source;
+                        FindPositionResearchNeighborhood(row, averageAddress, candidate);
+
+                        // Average Price alone is too weak. Require Quantity nearby before
+                        // retaining the candidate; Open P/L match raises its confidence.
+                        if (candidate.quantityI32Offsets.empty() &&
+                            candidate.quantityI64Offsets.empty())
+                            continue;
+
+                        rowCandidates[row.rowIndex].push_back(candidate);
+                    }
+                }
+
+                regionOffset += bytesToRead;
+            }
+
+            if (regionReadAny)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached)
+                break;
+        }
+    }
+
+    struct PositionResearchSignatureEvidence
+    {
+        std::string signature;
+        std::string sectionName;
+        std::uintptr_t stringVa = 0;
+        std::uintptr_t stringRva = 0;
+        std::vector<std::uintptr_t> rawRipReferences;
+    };
+
+    bool FindAsciiSignatureInPeSections(
+        const Snapshot& snapshot,
+        const std::vector<PeSectionAnalysis>& sections,
+        const std::string& signature,
+        PositionResearchSignatureEvidence& evidence)
+    {
+        evidence = PositionResearchSignatureEvidence{};
+        evidence.signature = signature;
+
+        for (const PeSectionAnalysis& section : sections)
+        {
+            if (!section.readable || section.endVa <= section.beginVa)
+                continue;
+
+            std::uintptr_t cursor = section.beginVa;
+            while (cursor < section.endVa)
+            {
+                std::uintptr_t readableEnd = 0;
+                MEMORY_BASIC_INFORMATION mbi{};
+                if (!QueryReadableSpan(cursor, readableEnd, mbi))
+                {
+                    cursor += 0x1000;
+                    continue;
+                }
+
+                const std::uintptr_t spanEnd = (std::min)(readableEnd, section.endVa);
+                if (spanEnd <= cursor)
+                    break;
+                const std::size_t span = static_cast<std::size_t>(spanEnd - cursor);
+                std::vector<unsigned char> bytes(span, 0);
+                if (SafeReadBytes(reinterpret_cast<void*>(cursor), bytes.data(), bytes.size()))
+                {
+                    const unsigned char* begin =
+                        reinterpret_cast<const unsigned char*>(signature.data());
+                    const unsigned char* end = begin + signature.size();
+                    const auto found = std::search(bytes.begin(), bytes.end(), begin, end);
+                    if (found != bytes.end())
+                    {
+                        evidence.sectionName = section.name;
+                        evidence.stringVa = cursor +
+                            static_cast<std::uintptr_t>(std::distance(bytes.begin(), found));
+                        evidence.stringRva = evidence.stringVa - snapshot.atonpTrackerBase;
+                        break;
+                    }
+                }
+                cursor = spanEnd;
+            }
+            if (evidence.stringVa)
+                break;
+        }
+
+        if (!evidence.stringVa)
+            return false;
+
+        // Record raw RIP-relative references as diagnostics only. This is not a
+        // disassembler and does not promote a reference to a callable function.
+        for (const PeSectionAnalysis& section : sections)
+        {
+            if (!section.executable || section.endVa <= section.beginVa)
+                continue;
+            const std::size_t sectionBytes =
+                static_cast<std::size_t>(section.endVa - section.beginVa);
+            std::vector<unsigned char> bytes(sectionBytes, 0);
+            if (!SafeReadBytes(
+                    reinterpret_cast<void*>(section.beginVa),
+                    bytes.data(),
+                    bytes.size()))
+                continue;
+
+            for (std::size_t i = 0; i + 7 <= bytes.size(); ++i)
+            {
+                const unsigned char rex = bytes[i];
+                const unsigned char opcode = bytes[i + 1];
+                const unsigned char modrm = bytes[i + 2];
+                if (rex < 0x40 || rex > 0x4F)
+                    continue;
+                if (opcode != 0x8D && opcode != 0x8B)
+                    continue;
+                if ((modrm & 0xC7u) != 0x05u)
+                    continue;
+
+                std::int32_t displacement = 0;
+                std::memcpy(&displacement, bytes.data() + i + 3, sizeof(displacement));
+                const std::uintptr_t instruction = section.beginVa + i;
+                const std::uintptr_t target = static_cast<std::uintptr_t>(
+                    static_cast<std::intptr_t>(instruction + 7) + displacement);
+                if (target == evidence.stringVa)
+                {
+                    evidence.rawRipReferences.push_back(instruction);
+                    if (evidence.rawRipReferences.size() >= 16)
+                        return true;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    std::string PositionResearchOffsetText(long long offset)
+    {
+        std::ostringstream out;
+        if (offset < 0)
+            out << '-';
+        else
+            out << '+';
+        out << HexValue(static_cast<std::uintptr_t>(offset < 0 ? -offset : offset));
+        return out.str();
+    }
+
+    std::string PositionResearchJoinOffsets(const std::vector<long long>& offsets)
+    {
+        if (offsets.empty())
+            return "none";
+        std::ostringstream out;
+        for (std::size_t i = 0; i < offsets.size(); ++i)
+        {
+            if (i)
+                out << ',';
+            out << PositionResearchOffsetText(offsets[i]);
+        }
+        return out.str();
+    }
+
+    void AppendPositionResearchNeighborhood(
+        std::ostringstream& out,
+        const PositionResearchRow& row,
+        const PositionResearchCandidate& candidate)
+    {
+        out << "    quantity_i32_offsets_from_average="
+            << PositionResearchJoinOffsets(candidate.quantityI32Offsets) << "\r\n"
+            << "    quantity_i64_offsets_from_average="
+            << PositionResearchJoinOffsets(candidate.quantityI64Offsets) << "\r\n"
+            << "    displayed_open_pl_offsets_from_average="
+            << PositionResearchJoinOffsets(candidate.openPlOffsets) << "\r\n";
+
+        out << "    small_integer_fields_near_average:\r\n";
+        std::size_t smallIntegerCount = 0;
+        for (long long delta = -0x100; delta <= 0x180; delta += 4)
+        {
+            const std::uintptr_t address = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(candidate.averageAddress) + delta);
+            std::int32_t value = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(address), value))
+                continue;
+            if (value <= 0 || value > 64)
+                continue;
+            ++smallIntegerCount;
+            out << "      offset=" << PositionResearchOffsetText(delta)
+                << " value=" << value << "\r\n";
+        }
+        if (!smallIntegerCount)
+            out << "      none\r\n";
+
+        out << "    nearby_pointer_strings:\r\n";
+        std::size_t pointerStringCount = 0;
+        for (long long delta = -0x180; delta <= 0x180; delta += 8)
+        {
+            const std::uintptr_t fieldAddress = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(candidate.averageAddress) + delta);
+            std::uintptr_t pointerValue = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(fieldAddress), pointerValue) || !pointerValue)
+                continue;
+
+            std::wstring directWide = ReadShortUtf16Candidate(pointerValue);
+            std::string directAscii = ReadShortAsciiCandidate(pointerValue);
+            std::uintptr_t indirect = 0;
+            std::wstring indirectWide;
+            std::string indirectAscii;
+            std::uintptr_t indirect2 = 0;
+            std::wstring indirect2Wide;
+            std::string indirect2Ascii;
+
+            if (SafeReadValue(reinterpret_cast<void*>(pointerValue), indirect) && indirect)
+            {
+                indirectWide = ReadShortUtf16Candidate(indirect);
+                indirectAscii = ReadShortAsciiCandidate(indirect);
+                if (SafeReadValue(reinterpret_cast<void*>(indirect), indirect2) && indirect2)
+                {
+                    indirect2Wide = ReadShortUtf16Candidate(indirect2);
+                    indirect2Ascii = ReadShortAsciiCandidate(indirect2);
+                }
+            }
+
+            if (directWide.empty() && directAscii.empty() &&
+                indirectWide.empty() && indirectAscii.empty() &&
+                indirect2Wide.empty() && indirect2Ascii.empty())
+                continue;
+
+            ++pointerStringCount;
+            out << "      offset=" << PositionResearchOffsetText(delta)
+                << " raw=" << HexValue(pointerValue);
+            if (!directWide.empty())
+                out << " direct_utf16=" << V153EscapeField(directWide)
+                    << " direct_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(directWide));
+            if (!directAscii.empty())
+            {
+                const std::wstring wide(directAscii.begin(), directAscii.end());
+                out << " direct_ascii=" << V153EscapeFieldUtf8(directAscii)
+                    << " direct_ascii_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(wide));
+            }
+            if (!indirectWide.empty())
+                out << " indirect_utf16=" << V153EscapeField(indirectWide)
+                    << " indirect_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(indirectWide));
+            if (!indirectAscii.empty())
+            {
+                const std::wstring wide(indirectAscii.begin(), indirectAscii.end());
+                out << " indirect_ascii=" << V153EscapeFieldUtf8(indirectAscii)
+                    << " indirect_ascii_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(wide));
+            }
+            if (!indirect2Wide.empty())
+                out << " indirect2_utf16=" << V153EscapeField(indirect2Wide)
+                    << " indirect2_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(indirect2Wide));
+            if (!indirect2Ascii.empty())
+            {
+                const std::wstring wide(indirect2Ascii.begin(), indirect2Ascii.end());
+                out << " indirect2_ascii=" << V153EscapeFieldUtf8(indirect2Ascii)
+                    << " indirect2_ascii_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(wide));
+            }
+            out << "\r\n";
+        }
+        if (!pointerStringCount)
+            out << "      none\r\n";
+
+        out << "    nearby_double_fields:\r\n";
+        std::size_t doubleCount = 0;
+        for (long long delta = -0x100; delta <= 0x180; delta += 8)
+        {
+            const std::uintptr_t address = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(candidate.averageAddress) + delta);
+            double value = 0.0;
+            if (!SafeReadValue(reinterpret_cast<void*>(address), value) ||
+                !std::isfinite(value) ||
+                std::fabs(value) > 1.0e12 ||
+                (std::fabs(value) < 1.0e-12 && value != 0.0))
+                continue;
+
+            ++doubleCount;
+            out << "      offset=" << PositionResearchOffsetText(delta)
+                << " value=" << std::setprecision(17) << value;
+            const double averageTolerance =
+                (std::max)(0.00051, std::fabs(row.averagePrice) * 1.0e-8);
+            if (std::fabs(value - row.averagePrice) <= averageTolerance)
+                out << " tag=AVERAGE_PRICE_MATCH";
+            if (row.openPlOk)
+            {
+                const double pnlTolerance =
+                    (std::max)(0.011, std::fabs(row.displayedOpenPl) * 1.0e-7);
+                if (std::fabs(value - row.displayedOpenPl) <= pnlTolerance)
+                    out << " tag=DISPLAYED_OPEN_PL_MATCH";
+            }
+            out << "\r\n";
+        }
+        if (!doubleCount)
+            out << "      none\r\n";
+    }
+
     bool WritePositionCurrencyDirectResearch(
         const Snapshot& snapshot,
         std::string& summaryJson)
     {
         V153GridReadLockGuard lock;
         CreateDirectoryW(kOutputDirectory, nullptr);
-        const std::wstring reportPath = ReportPath(L"MCST_Position_Currency_Direct", snapshot.processId);
+        const std::wstring reportPath =
+            ReportPath(L"MCST_Position_Currency_Dynamic", snapshot.processId);
         constexpr DWORD kResearchAtonpTimestamp = 0x6A5694FBu;
         constexpr DWORD kResearchAtonpImageSize = 3534848u;
 
@@ -8005,18 +8672,18 @@ DWORD sehCode = 0;
             snapshot.atonpTrackerSize != kResearchAtonpImageSize)
         {
             std::ostringstream mismatch;
-            mismatch << "MCST POSITION CURRENCY DIRECT RESEARCH\r\n"
-                     << "======================================\r\n"
-                     << "research_build=1.114-R2\r\n"
+            mismatch << "MCST POSITION CURRENCY DYNAMIC RESEARCH\r\n"
+                     << "=======================================\r\n"
+                     << "research_build=1.114-R3\r\n"
                      << "status=BLOCKED_FINGERPRINT_MISMATCH\r\n"
                      << "expected_atonptracker_pe_timestamp=" << HexValue(kResearchAtonpTimestamp) << "\r\n"
                      << "expected_atonptracker_image_size=" << kResearchAtonpImageSize << "\r\n"
                      << "actual_atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
                      << "actual_atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
-                     << "reason=R2 record offsets are research-only and are not reused on a different ATOnPTracker build.\r\n";
+                     << "reason=R3 memory-correlation research is fingerprint-scoped and is not reused on a different ATOnPTracker build.\r\n";
             const bool mismatchWritten = WriteUtf8File(reportPath, mismatch.str());
             std::ostringstream mismatchSummary;
-            mismatchSummary << "{\"capture\":\"position_currency_direct_research\",\"version\":157,"
+            mismatchSummary << "{\"capture\":\"position_currency_dynamic_research\",\"version\":158,"
                             << "\"blocked\":true,\"reason\":\"fingerprint_mismatch\","
                             << "\"report_written\":" << (mismatchWritten ? "true" : "false") << ','
                             << "\"report_path\":" << JsonString(reportPath) << '}';
@@ -8024,10 +8691,12 @@ DWORD sehCode = 0;
             return false;
         }
 
-        TrackerCompatibilityProfile trackerProfile = ResolveExternalTrackerCompatibilityProfile(snapshot);
+        TrackerCompatibilityProfile trackerProfile =
+            ResolveExternalTrackerCompatibilityProfile(snapshot);
         if (!trackerProfile.matched)
         {
-            TrackerCompatibilityProfile embedded = EmbeddedLegacyTrackerCompatibilityProfile(snapshot);
+            TrackerCompatibilityProfile embedded =
+                EmbeddedLegacyTrackerCompatibilityProfile(snapshot);
             if (embedded.matched)
                 trackerProfile = embedded;
         }
@@ -8037,58 +8706,163 @@ DWORD sehCode = 0;
             ? FindTabViewObject(snapshot, tabViewDiagnostic, &trackerProfile)
             : 0;
         std::string flexGridRttiDiagnostic;
-        const std::vector<RttiVtableRecord> flexGridRttiVtables = trackerProfile.matched
-            ? ResolveRttiVtables(snapshot, ".?AVCFlexGridImpl@implementation@UILayer@@", flexGridRttiDiagnostic)
+        const std::vector<RttiVtableRecord> flexGridRttiVtables =
+            trackerProfile.matched
+            ? ResolveRttiVtables(
+                snapshot,
+                ".?AVCFlexGridImpl@implementation@UILayer@@",
+                flexGridRttiDiagnostic)
             : std::vector<RttiVtableRecord>{};
 
         V153GridSectionResult positions = ReadV153GridSection(
-            snapshot, flexGridRttiVtables, tabView, trackerProfile, "open_positions",
-            trackerProfile.openPositionsPageOffset, 1, 8, 1000, 1000, 3);
+            snapshot,
+            flexGridRttiVtables,
+            tabView,
+            trackerProfile,
+            "open_positions",
+            trackerProfile.openPositionsPageOffset,
+            1,
+            8,
+            1000,
+            1000,
+            3);
 
-        ExtractorAttempt positionProbe = BuildExtractorProbe(snapshot, "position_currency_direct", kExtractOpenPositionsRva);
+        ExtractorAttempt positionProbe =
+            BuildExtractorProbe(snapshot, "position_currency_dynamic", kExtractOpenPositionsRva);
         const std::uintptr_t tradeInfo = positionProbe.tradeInfo;
         std::uintptr_t root98 = 0;
-        std::uintptr_t recordsRoot = 0;
-        bool root98Ok = tradeInfo && SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x98), root98) && root98;
-        bool recordsRootOk = root98Ok && SafeReadValue(reinterpret_cast<void*>(root98 + 0x10E0), recordsRoot) && recordsRoot;
-
-        std::uintptr_t recordsRegionEnd = 0;
-        MEMORY_BASIC_INFORMATION recordsMbi{};
-        bool recordsReadable = recordsRootOk && QueryReadableSpan(recordsRoot, recordsRegionEnd, recordsMbi);
-        constexpr std::size_t kMaximumRecordScanBytes = 8u * 1024u * 1024u;
-        std::size_t recordsBytesToScan = recordsReadable
-            ? std::min<std::size_t>(kMaximumRecordScanBytes, static_cast<std::size_t>(recordsRegionEnd - recordsRoot))
-            : 0;
-        std::vector<unsigned char> recordBytes(recordsBytesToScan, 0);
-        if (recordsBytesToScan && !SafeReadBytes(reinterpret_cast<void*>(recordsRoot), recordBytes.data(), recordsBytesToScan))
+        std::uintptr_t root88 = 0;
+        if (tradeInfo)
         {
-            recordBytes.clear();
-            recordsBytesToScan = 0;
+            SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x98), root98);
+            SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x88), root88);
         }
 
-        std::ostringstream out;
-        out << "MCST POSITION CURRENCY DIRECT RESEARCH\r\n"
-            << "======================================\r\n"
-            << "research_build=1.114-R2\r\n"
-            << "bridge_version=" << kBridgeVersion << "\r\n"
-            << "bridge_protocol=" << mcbridge::kProtocolVersion << "\r\n"
-            << "read_only=yes\r\n"
-            << "unknown_functions_called=no\r\n"
-            << "purpose=correlate visible Open Positions rows with native-currency and P/L-currency fields\r\n"
-            << "process_id=" << snapshot.processId << "\r\n"
-            << "atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
-            << "atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
-            << "tracker_profile=" << V153EscapeField(trackerProfile.name) << "\r\n"
-            << "tracker_profile_mode=" << V153EscapeField(trackerProfile.mode) << "\r\n"
-            << "open_positions_grid_ok=" << (positions.ok ? "yes" : "no") << "\r\n"
-            << "open_positions_grid_diagnostic=" << V153EscapeField(positions.diagnostic) << "\r\n"
-            << "ITC_TradeInfo=" << HexValue(tradeInfo) << "\r\n"
-            << "positions_root_98=" << HexValue(root98) << "\r\n"
-            << "positions_records_10E0=" << HexValue(recordsRoot) << "\r\n"
-            << "records_scan_bytes=" << recordsBytesToScan << "\r\n\r\n";
+        std::uintptr_t pageObject = 0;
+        std::uintptr_t gridObject = 0;
+        if (tabView && trackerProfile.matched)
+        {
+            SafeReadValue(
+                reinterpret_cast<void*>(tabView + trackerProfile.openPositionsPageOffset),
+                pageObject);
+            if (pageObject)
+            {
+                SafeReadValue(
+                    reinterpret_cast<void*>(pageObject + trackerProfile.gridMemberOffset),
+                    gridObject);
+            }
+        }
 
-        out << "STATIC EXTRACTOR EVIDENCE\r\n"
-            << "-------------------------\r\n";
+        std::vector<PositionResearchRow> parsedRows;
+        parsedRows.reserve(positions.rows.size());
+        for (std::size_t rowIndex = 0; rowIndex < positions.rows.size(); ++rowIndex)
+        {
+            const auto& row = positions.rows[rowIndex];
+            if (row.size() < 8)
+                continue;
+
+            PositionResearchRow parsed;
+            parsed.rowIndex = rowIndex;
+            parsed.fields = &row;
+            double quantity = 0.0;
+            parsed.quantityOk =
+                TryParsePositionResearchNumber(row[4], quantity);
+            parsed.averageOk =
+                TryParsePositionResearchNumber(row[5], parsed.averagePrice);
+            parsed.openPlOk =
+                TryParsePositionResearchNumber(row[6], parsed.displayedOpenPl);
+            if (parsed.quantityOk)
+            {
+                const long long signedQuantity =
+                    static_cast<long long>(std::llround(quantity));
+                parsed.quantityAbs =
+                    signedQuantity < 0 ? -signedQuantity : signedQuantity;
+            }
+            if (parsed.quantityOk && parsed.averageOk && parsed.quantityAbs > 0)
+                parsedRows.push_back(parsed);
+        }
+
+        std::vector<std::pair<std::uintptr_t, std::string>> seeds;
+        if (tradeInfo) seeds.push_back({ tradeInfo, "ITC_TradeInfo" });
+        if (root98) seeds.push_back({ root98, "ITC_TradeInfo+0x98" });
+        if (root88) seeds.push_back({ root88, "ITC_TradeInfo+0x88" });
+        if (tabView) seeds.push_back({ tabView, "CATPTTabView" });
+        if (pageObject) seeds.push_back({ pageObject, "OpenPositionsPage" });
+        if (gridObject) seeds.push_back({ gridObject, "OpenPositionsGrid" });
+
+        std::vector<PositionResearchRegion> graphRegions;
+        std::size_t pointerNodesScanned = 0;
+        DiscoverPositionResearchRegions(seeds, graphRegions, pointerNodesScanned);
+
+        std::vector<std::vector<PositionResearchCandidate>> rowCandidates(
+            positions.rows.size());
+        std::vector<std::set<std::uintptr_t>> seenAverageAddresses(
+            positions.rows.size());
+
+        const auto scanStart = std::chrono::steady_clock::now();
+        const auto deadline = scanStart + std::chrono::seconds(75);
+
+        PositionResearchScanStats graphStats;
+        ScanPositionResearchRegions(
+            graphRegions,
+            parsedRows,
+            rowCandidates,
+            seenAverageAddresses,
+            256ull * 1024ull * 1024ull,
+            deadline,
+            graphStats);
+
+        std::size_t rowsWithGraphCandidates = 0;
+        for (const PositionResearchRow& row : parsedRows)
+        {
+            if (!rowCandidates[row.rowIndex].empty())
+                ++rowsWithGraphCandidates;
+        }
+
+        std::map<std::uintptr_t, std::size_t> graphRegionIndex;
+        for (std::size_t i = 0; i < graphRegions.size(); ++i)
+            graphRegionIndex[graphRegions[i].base] = i;
+
+        PositionResearchScanStats fallbackStats;
+        std::vector<PositionResearchRegion> fallbackRegions;
+        if (rowsWithGraphCandidates < parsedRows.size() &&
+            std::chrono::steady_clock::now() < deadline)
+        {
+            fallbackRegions =
+                EnumerateFallbackPositionResearchRegions(graphRegionIndex);
+            ScanPositionResearchRegions(
+                fallbackRegions,
+                parsedRows,
+                rowCandidates,
+                seenAverageAddresses,
+                768ull * 1024ull * 1024ull,
+                deadline,
+                fallbackStats);
+        }
+
+        for (const PositionResearchRow& row : parsedRows)
+        {
+            auto& candidates = rowCandidates[row.rowIndex];
+            std::stable_sort(
+                candidates.begin(),
+                candidates.end(),
+                [](const PositionResearchCandidate& a, const PositionResearchCandidate& b)
+                {
+                    if (a.score != b.score)
+                        return a.score > b.score;
+                    if (a.openPlOffsets.size() != b.openPlOffsets.size())
+                        return a.openPlOffsets.size() > b.openPlOffsets.size();
+                    return a.averageAddress < b.averageAddress;
+                });
+            if (candidates.size() > 8)
+                candidates.resize(8);
+        }
+
+        std::vector<PeSectionAnalysis> sections;
+        std::string peSectionDiagnostic;
+        const bool sectionsParsed =
+            ParsePeSections(snapshot, sections, peSectionDiagnostic);
+
         const char* methodSignatures[] =
         {
             "ATOnPTracker::COpenPositionInfoExtractor::AveragePrice",
@@ -8099,49 +8873,98 @@ DWORD sehCode = 0;
             "ATOnPTracker::COpenPositionInfoExtractor::CurrencyLetterRPL",
             "ATOnPTracker::COpenPositionInfoExtractor::PriceScaleCode"
         };
-        std::vector<unsigned char> moduleBytes;
-        if (snapshot.atonpTrackerBase && snapshot.atonpTrackerSize)
-        {
-            moduleBytes.assign(snapshot.atonpTrackerSize, 0);
-            if (!SafeReadBytes(reinterpret_cast<void*>(snapshot.atonpTrackerBase), moduleBytes.data(), moduleBytes.size()))
-                moduleBytes.clear();
-        }
+        std::vector<PositionResearchSignatureEvidence> signatureEvidence;
         for (const char* signature : methodSignatures)
         {
-            std::uintptr_t signatureRva = 0;
-            if (!moduleBytes.empty())
-            {
-                const unsigned char* begin = reinterpret_cast<const unsigned char*>(signature);
-                const unsigned char* end = begin + std::strlen(signature);
-                const auto found = std::search(moduleBytes.begin(), moduleBytes.end(), begin, end);
-                if (found != moduleBytes.end())
-                    signatureRva = static_cast<std::uintptr_t>(std::distance(moduleBytes.begin(), found));
-            }
-            out << signature << " diagnostic_string_rva=" << HexValue(signatureRva) << "\r\n";
+            PositionResearchSignatureEvidence evidence;
+            if (sectionsParsed)
+                FindAsciiSignatureInPeSections(
+                    snapshot, sections, signature, evidence);
+            else
+                evidence.signature = signature;
+            signatureEvidence.push_back(evidence);
         }
-        out << "NOTE: diagnostic string RVAs prove the named extractor methods are present in this module build; they are not callable function RVAs.\r\n\r\n";
 
-        out << "ROW CORRELATION\r\n"
-            << "---------------\r\n"
-            << "Expected record hypothesis from static analysis: qty@+0x60, average_price@+0x68, open_pl@+0x70, currency candidate beginning @+0x78.\r\n"
-            << "The +0x78 and later fields are research candidates only until live rows confirm their semantics.\r\n\r\n";
+        std::ostringstream out;
+        out << "MCST POSITION CURRENCY DYNAMIC RESEARCH\r\n"
+            << "=======================================\r\n"
+            << "research_build=1.114-R3\r\n"
+            << "bridge_version=" << kBridgeVersion << "\r\n"
+            << "bridge_protocol=" << mcbridge::kProtocolVersion << "\r\n"
+            << "read_only=yes\r\n"
+            << "unknown_functions_called=no\r\n"
+            << "purpose=dynamically locate live Open Positions data without relying on the R2 +0x10E0 record-root assumption\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
+            << "atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
+            << "tracker_profile=" << V153EscapeField(trackerProfile.name) << "\r\n"
+            << "tracker_profile_mode=" << V153EscapeField(trackerProfile.mode) << "\r\n"
+            << "open_positions_grid_ok=" << (positions.ok ? "yes" : "no") << "\r\n"
+            << "open_positions_grid_diagnostic=" << V153EscapeField(positions.diagnostic) << "\r\n"
+            << "ITC_TradeInfo=" << HexValue(tradeInfo) << "\r\n"
+            << "positions_root_98=" << HexValue(root98) << "\r\n"
+            << "positions_root_88=" << HexValue(root88) << "\r\n"
+            << "open_positions_page_object=" << HexValue(pageObject) << "\r\n"
+            << "open_positions_grid_object=" << HexValue(gridObject) << "\r\n"
+            << "parsed_reference_rows=" << parsedRows.size() << "\r\n"
+            << "pointer_graph_nodes_scanned=" << pointerNodesScanned << "\r\n"
+            << "pointer_graph_regions_discovered=" << graphRegions.size() << "\r\n"
+            << "fallback_regions_enumerated=" << fallbackRegions.size() << "\r\n"
+            << "graph_scan_regions_considered=" << graphStats.regionsConsidered << "\r\n"
+            << "graph_scan_regions_read=" << graphStats.regionsRead << "\r\n"
+            << "graph_scan_bytes_read=" << graphStats.bytesRead << "\r\n"
+            << "graph_scan_values_checked=" << graphStats.valuesChecked << "\r\n"
+            << "fallback_scan_regions_considered=" << fallbackStats.regionsConsidered << "\r\n"
+            << "fallback_scan_regions_read=" << fallbackStats.regionsRead << "\r\n"
+            << "fallback_scan_bytes_read=" << fallbackStats.bytesRead << "\r\n"
+            << "fallback_scan_values_checked=" << fallbackStats.valuesChecked << "\r\n"
+            << "scan_runtime_limit_reached="
+            << ((graphStats.runtimeLimitReached || fallbackStats.runtimeLimitReached) ? "yes" : "no") << "\r\n"
+            << "scan_byte_limit_reached="
+            << ((graphStats.byteLimitReached || fallbackStats.byteLimitReached) ? "yes" : "no") << "\r\n\r\n";
+
+        out << "STATIC EXTRACTOR EVIDENCE\r\n"
+            << "-------------------------\r\n"
+            << "pe_section_parse=" << (sectionsParsed ? "ok" : "failed")
+            << " diagnostic=" << V153EscapeFieldUtf8(peSectionDiagnostic) << "\r\n";
+        for (const PositionResearchSignatureEvidence& evidence : signatureEvidence)
+        {
+            out << evidence.signature
+                << " diagnostic_string_rva=" << HexValue(evidence.stringRva)
+                << " section=" << (evidence.sectionName.empty() ? "NOT_FOUND" : evidence.sectionName)
+                << " raw_rip_reference_count=" << evidence.rawRipReferences.size();
+            if (!evidence.rawRipReferences.empty())
+            {
+                out << " raw_rip_reference_rvas=";
+                for (std::size_t i = 0; i < evidence.rawRipReferences.size(); ++i)
+                {
+                    if (i) out << ',';
+                    out << HexValue(evidence.rawRipReferences[i] - snapshot.atonpTrackerBase);
+                }
+            }
+            out << "\r\n";
+        }
+        out << "NOTE: diagnostic strings and raw RIP references prove static presence only. "
+               "R3 does not call these unknown internal extractor functions.\r\n\r\n";
+
+        out << "DYNAMIC ROW CORRELATION\r\n"
+            << "-----------------------\r\n"
+            << "R3 searches readable private/mapped data regions for the visible Average Price values, "
+               "then requires the visible Quantity nearby before keeping a candidate. "
+               "A nearby displayed Open P/L match raises confidence but is not required.\r\n"
+            << "No fixed record base, +0x60/+0x68/+0x70 layout, or +0x10E0 container pointer is assumed.\r\n\r\n";
 
         std::size_t rowsWithCandidates = 0;
         std::size_t totalCandidates = 0;
+        std::map<long long, std::size_t> quantityI32OffsetFrequency;
+        std::map<long long, std::size_t> quantityI64OffsetFrequency;
+        std::map<long long, std::size_t> openPlOffsetFrequency;
+
         for (std::size_t rowIndex = 0; rowIndex < positions.rows.size(); ++rowIndex)
         {
             const auto& row = positions.rows[rowIndex];
             if (row.size() < 8)
                 continue;
-
-            double quantityValue = 0.0;
-            double averagePrice = 0.0;
-            double displayedOpenPl = 0.0;
-            const bool quantityOk = TryParsePositionResearchNumber(row[4], quantityValue);
-            const bool averageOk = TryParsePositionResearchNumber(row[5], averagePrice);
-            const bool openPlOk = TryParsePositionResearchNumber(row[6], displayedOpenPl);
-            const long long expectedQuantity = quantityOk ? static_cast<long long>(std::llround(quantityValue)) : 0;
-            const long long expectedQuantityAbs = expectedQuantity < 0 ? -expectedQuantity : expectedQuantity;
 
             out << "ROW " << rowIndex << "\r\n"
                 << "  profile=" << V153EscapeField(row[0]) << "\r\n"
@@ -8151,48 +8974,11 @@ DWORD sehCode = 0;
                 << "  quantity_text=" << V153EscapeField(row[4]) << "\r\n"
                 << "  average_price_text=" << V153EscapeField(row[5]) << "\r\n"
                 << "  open_pl_text=" << V153EscapeField(row[6]) << "\r\n"
-                << "  open_pl_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(row[6])) << "\r\n"
+                << "  open_pl_currency_hint="
+                << V153EscapeField(PositionResearchCurrencyHint(row[6])) << "\r\n"
                 << "  last_update=" << V153EscapeField(row[7]) << "\r\n";
 
-            if (!quantityOk || !averageOk || recordBytes.empty())
-            {
-                out << "  candidate_count=0\r\n"
-                    << "  candidate_status=not_scanned; missing parsed quantity/average price or records region\r\n\r\n";
-                continue;
-            }
-
-            const double averageTolerance = std::max(0.00051, std::fabs(averagePrice) * 1.0e-8);
-            const double pnlTolerance = std::max(0.011, std::fabs(displayedOpenPl) * 1.0e-7);
-            std::vector<std::uintptr_t> candidates;
-            const std::size_t firstAligned = (8 - (recordsRoot & 7u)) & 7u;
-            for (std::size_t offset = firstAligned; offset + sizeof(double) <= recordBytes.size(); offset += 8)
-            {
-                double candidateAverage = 0.0;
-                std::memcpy(&candidateAverage, recordBytes.data() + offset, sizeof(candidateAverage));
-                if (!std::isfinite(candidateAverage) || std::fabs(candidateAverage - averagePrice) > averageTolerance)
-                    continue;
-                const std::uintptr_t averageAddress = recordsRoot + offset;
-                if (averageAddress < recordsRoot + 0x68)
-                    continue;
-                const std::uintptr_t recordBase = averageAddress - 0x68;
-                if (recordBase < recordsRoot || recordBase + 0xB0 > recordsRoot + recordBytes.size())
-                    continue;
-
-                std::int32_t internalQuantity = 0;
-                double internalAverage = 0.0;
-                double internalOpenPl = 0.0;
-                if (!SafeReadValue(reinterpret_cast<void*>(recordBase + 0x60), internalQuantity) ||
-                    !SafeReadValue(reinterpret_cast<void*>(recordBase + 0x68), internalAverage) ||
-                    !SafeReadValue(reinterpret_cast<void*>(recordBase + 0x70), internalOpenPl))
-                    continue;
-                const long long internalQuantityAbs = internalQuantity < 0 ? -static_cast<long long>(internalQuantity) : static_cast<long long>(internalQuantity);
-                if (internalQuantityAbs != expectedQuantityAbs)
-                    continue;
-                candidates.push_back(recordBase);
-                if (candidates.size() >= 32)
-                    break;
-            }
-
+            const auto& candidates = rowCandidates[rowIndex];
             out << "  candidate_count=" << candidates.size() << "\r\n";
             if (!candidates.empty())
             {
@@ -8200,92 +8986,114 @@ DWORD sehCode = 0;
                 totalCandidates += candidates.size();
             }
 
-            for (std::size_t candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex)
+            const PositionResearchRow* parsed = nullptr;
+            for (const PositionResearchRow& candidateRow : parsedRows)
             {
-                const std::uintptr_t recordBase = candidates[candidateIndex];
-                std::int32_t internalQuantity = 0;
-                double internalAverage = 0.0;
-                double internalOpenPl = 0.0;
-                SafeReadValue(reinterpret_cast<void*>(recordBase + 0x60), internalQuantity);
-                SafeReadValue(reinterpret_cast<void*>(recordBase + 0x68), internalAverage);
-                SafeReadValue(reinterpret_cast<void*>(recordBase + 0x70), internalOpenPl);
-                const bool pnlMatchesDisplay = openPlOk && std::isfinite(internalOpenPl) && std::fabs(internalOpenPl - displayedOpenPl) <= pnlTolerance;
-
-                out << "  CANDIDATE " << candidateIndex << " base=" << HexValue(recordBase)
-                    << " offset_from_records_root=" << HexValue(recordBase - recordsRoot) << "\r\n"
-                    << "    internal_qty=" << internalQuantity << "\r\n"
-                    << "    internal_average_price=" << std::setprecision(17) << internalAverage << "\r\n"
-                    << "    internal_open_pl=" << std::setprecision(17) << internalOpenPl << "\r\n"
-                    << "    internal_open_pl_matches_display=" << (pnlMatchesDisplay ? "yes" : "no") << "\r\n";
-
-                const std::size_t candidateOffsets[] = { 0x78, 0x80, 0x88, 0x90, 0x98, 0xA0, 0xA8 };
-                for (std::size_t fieldOffset : candidateOffsets)
+                if (candidateRow.rowIndex == rowIndex)
                 {
-                    std::uint64_t raw = 0;
-                    SafeReadValue(reinterpret_cast<void*>(recordBase + fieldOffset), raw);
-                    std::wstring directWide = ReadShortUtf16Candidate(static_cast<std::uintptr_t>(raw));
-                    std::string directAscii = ReadShortAsciiCandidate(static_cast<std::uintptr_t>(raw));
-                    std::uintptr_t indirect = 0;
-                    std::wstring indirectWide;
-                    std::string indirectAscii;
-                    if (raw && SafeReadValue(reinterpret_cast<void*>(static_cast<std::uintptr_t>(raw)), indirect))
-                    {
-                        indirectWide = ReadShortUtf16Candidate(indirect);
-                        indirectAscii = ReadShortAsciiCandidate(indirect);
-                    }
-                    out << "    field_" << HexValue(fieldOffset)
-                        << " raw=" << HexValue(static_cast<std::uintptr_t>(raw))
-                        << " raw_decimal=" << raw;
-                    if (!directWide.empty()) out << " direct_utf16=" << V153EscapeField(directWide);
-                    if (!directAscii.empty()) out << " direct_ascii=" << V153EscapeFieldUtf8(directAscii);
-                    if (!indirectWide.empty()) out << " indirect_utf16=" << V153EscapeField(indirectWide);
-                    if (!indirectAscii.empty()) out << " indirect_ascii=" << V153EscapeFieldUtf8(indirectAscii);
-                    out << "\r\n";
+                    parsed = &candidateRow;
+                    break;
                 }
+            }
 
-                out << "    nearby_short_string_pointers:\r\n";
-                std::size_t nearbyStrings = 0;
-                for (std::size_t fieldOffset = 0; fieldOffset <= 0xD0; fieldOffset += sizeof(std::uintptr_t))
-                {
-                    std::uintptr_t pointerValue = 0;
-                    if (!SafeReadValue(reinterpret_cast<void*>(recordBase + fieldOffset), pointerValue) || !pointerValue)
-                        continue;
-                    const std::wstring wide = ReadShortUtf16Candidate(pointerValue);
-                    const std::string ascii = ReadShortAsciiCandidate(pointerValue);
-                    if (wide.empty() && ascii.empty())
-                        continue;
-                    ++nearbyStrings;
-                    out << "      +" << HexValue(fieldOffset) << " -> " << HexValue(pointerValue);
-                    if (!wide.empty()) out << " utf16=" << V153EscapeField(wide);
-                    if (!ascii.empty()) out << " ascii=" << V153EscapeFieldUtf8(ascii);
-                    out << "\r\n";
-                }
-                if (nearbyStrings == 0)
-                    out << "      none\r\n";
+            if (!parsed)
+            {
+                out << "  candidate_status=reference row could not be parsed safely\r\n\r\n";
+                continue;
+            }
+
+            for (std::size_t candidateIndex = 0;
+                 candidateIndex < candidates.size();
+                 ++candidateIndex)
+            {
+                const PositionResearchCandidate& candidate =
+                    candidates[candidateIndex];
+                out << "  CANDIDATE " << candidateIndex
+                    << " score=" << candidate.score
+                    << " average_address=" << HexValue(candidate.averageAddress)
+                    << " region_base=" << HexValue(candidate.regionBase)
+                    << " region_size=" << candidate.regionSize
+                    << " region_source=" << V153EscapeFieldUtf8(candidate.regionSource)
+                    << "\r\n";
+
+                for (long long offset : candidate.quantityI32Offsets)
+                    ++quantityI32OffsetFrequency[offset];
+                for (long long offset : candidate.quantityI64Offsets)
+                    ++quantityI64OffsetFrequency[offset];
+                for (long long offset : candidate.openPlOffsets)
+                    ++openPlOffsetFrequency[offset];
+
+                AppendPositionResearchNeighborhood(out, *parsed, candidate);
+            }
+
+            if (candidates.empty())
+            {
+                out << "  candidate_status=no Quantity+AveragePrice co-location found within R3 scan limits\r\n";
             }
             out << "\r\n";
         }
 
+        auto appendFrequency = [&](const char* label, const std::map<long long, std::size_t>& frequencies)
+        {
+            out << label << "\r\n";
+            if (frequencies.empty())
+            {
+                out << "  none\r\n";
+                return;
+            }
+            std::vector<std::pair<long long, std::size_t>> ordered(
+                frequencies.begin(), frequencies.end());
+            std::stable_sort(
+                ordered.begin(),
+                ordered.end(),
+                [](const auto& a, const auto& b)
+                {
+                    if (a.second != b.second)
+                        return a.second > b.second;
+                    return a.first < b.first;
+                });
+            const std::size_t count = (std::min)(ordered.size(), static_cast<std::size_t>(16));
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                out << "  offset=" << PositionResearchOffsetText(ordered[i].first)
+                    << " candidate_occurrences=" << ordered[i].second << "\r\n";
+            }
+        };
+
+        out << "CROSS-ROW RELATIVE OFFSET EVIDENCE\r\n"
+            << "----------------------------------\r\n";
+        appendFrequency("quantity_i32_offsets:", quantityI32OffsetFrequency);
+        appendFrequency("quantity_i64_offsets:", quantityI64OffsetFrequency);
+        appendFrequency("displayed_open_pl_offsets:", openPlOffsetFrequency);
+        out << "\r\n";
+
         out << "SUMMARY\r\n"
             << "-------\r\n"
             << "visible_rows=" << positions.rows.size() << "\r\n"
-            << "rows_with_record_candidates=" << rowsWithCandidates << "\r\n"
-            << "total_record_candidates=" << totalCandidates << "\r\n"
-            << "research_interpretation=Do not promote any field to production until at least two different instrument currencies and their P/L currencies correlate consistently.\r\n";
+            << "parsed_reference_rows=" << parsedRows.size() << "\r\n"
+            << "rows_with_dynamic_candidates=" << rowsWithCandidates << "\r\n"
+            << "total_retained_candidates=" << totalCandidates << "\r\n"
+            << "research_interpretation=Promote native-currency or P/L-currency fields only after repeated live captures show stable row correlation across at least two instrument currencies. "
+               "UNKNOWN remains the required production result when that proof is absent.\r\n";
 
         const bool written = WriteUtf8File(reportPath, out.str());
         std::ostringstream summary;
-        summary << "{\"capture\":\"position_currency_direct_research\",\"version\":157,"
+        summary << "{\"capture\":\"position_currency_dynamic_research\",\"version\":158,"
                 << "\"read_only\":true,\"unknown_functions_called\":false,"
                 << "\"visible_rows\":" << positions.rows.size() << ','
-                << "\"rows_with_record_candidates\":" << rowsWithCandidates << ','
-                << "\"total_record_candidates\":" << totalCandidates << ','
+                << "\"parsed_reference_rows\":" << parsedRows.size() << ','
+                << "\"rows_with_dynamic_candidates\":" << rowsWithCandidates << ','
+                << "\"total_retained_candidates\":" << totalCandidates << ','
+                << "\"graph_scan_bytes\":" << graphStats.bytesRead << ','
+                << "\"fallback_scan_bytes\":" << fallbackStats.bytesRead << ','
                 << "\"report_written\":" << (written ? "true" : "false") << ','
                 << "\"report_path\":" << JsonString(reportPath) << '}';
         summaryJson = summary.str();
+
+        // A completed research capture is useful even if no candidate was found;
+        // the report then records scan coverage and the negative result.
         return written && positions.ok && !positions.rows.empty();
     }
-
 
 
     void AppendV153Section(std::ostringstream& out, const V153GridSectionResult& section, unsigned int columnCount)

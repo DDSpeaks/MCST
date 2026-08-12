@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R2'
-$currentBridgeBuild = 157
+$currentVersion = '1.114-R3'
+$currentBridgeBuild = 158
 $minimumProductionBridgeBuild = 156
 $currentProtocolVersion = 2
 
@@ -153,9 +153,16 @@ if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
 if ($bridgeSource -notmatch 'WritePositionCurrencyDirectResearch' -or
-    $bridgeSource -notmatch 'positions_records_10E0' -or
+    $bridgeSource -notmatch 'DiscoverPositionResearchRegions' -or
+    $bridgeSource -notmatch 'EnumerateFallbackPositionResearchRegions' -or
+    $bridgeSource -notmatch 'FindAsciiSignatureInPeSections' -or
+    $bridgeSource -notmatch 'MCST_Position_Currency_Dynamic' -or
     $bridgeSource -notmatch 'unknown_functions_called=no') {
-    throw 'Focused Position Currency direct research implementation is missing.'
+    throw 'Position Currency R3 dynamic research implementation is missing.'
+}
+if ($bridgeSource -match 'positions_records_10E0=' -or
+    $bridgeSource -match 'recordBase \+ 0x68') {
+    throw 'R3 must not retain the rejected fixed +0x10E0/fixed-record correlation implementation.'
 }
 if ($bridgeSource -match 'required CATPTTabView or ATOnPTracker module anchor was not found') {
     throw 'Ambiguous legacy Tracker read diagnostic is still present.'
@@ -246,9 +253,9 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Position Currency Direct Research" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Position Currency Dynamic Research" -or
     $releaseNotes -notmatch "Internal build:\s+V$currentBridgeBuild") {
     throw "Research notes do not identify MCST $currentVersion and Tracker Bridge V$currentBridgeBuild."
 }
 
-Write-Host "MCST $currentVersion Position Currency direct-research tree validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion Position Currency dynamic-research tree validation passed." -ForegroundColor Green

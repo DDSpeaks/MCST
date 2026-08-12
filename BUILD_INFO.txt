@@ -3,8 +3,8 @@
 
 MCST-Watchdog
 -------------
-Version:             1.114-R2
-Build kind:          Position Currency Research
+Version:             1.114-R3
+Build kind:          Position Currency Dynamic Research
 Base production:     1.114
 Configuration:       Release x64
 Runtime linkage:     Static /MT
@@ -14,43 +14,40 @@ Debug configuration: Not included
 MCST Tracker Bridge
 -------------------
 Product version:     1.0
-Internal build:      V157
+Internal build:      V158
 Protocol:            V2
 DLL:                 MCST-TrackerBridge.dll
-Bridge change:       V157 adds focused direct position-currency research command
+Bridge change:       V158 replaces the rejected fixed +0x10E0 record-root research assumption
+                     with dynamic read-only memory correlation for Position Currency research.
 
 Research action
 ---------------
 Developer control:   Position CCY
-Bridge command:      CapturePositionCurrencyDirectResearch (command 50)
+Bridge command:      CapturePositionCurrencyDirectResearch (command 50, retained for protocol compatibility)
 Reference output:    C:\Temp\MCST_Position_Currency_Reference_<pid>.txt
-Research output:     C:\Temp\MCST_Position_Currency_Direct_<pid>.txt
+Research output:     C:\Temp\MCST_Position_Currency_Dynamic_<pid>.txt
 Read-only:            Yes
-Research fingerprint:  ATOnPTracker 0x6A5694FB / 3534848
+Unknown MC calls:     No
 Process-memory write: No
 UI input simulation:  No
+Research fingerprint: ATOnPTracker 0x6A5694FB / 3534848
+
+R3 research method
+------------------
+1. Read visible Open Positions rows through the verified production Tracker reader.
+2. Discover readable private/mapped data regions from Tracker object-graph roots.
+3. Search for visible Average Price values.
+4. Retain a candidate only when visible Quantity is found nearby.
+5. Treat a nearby displayed Open P/L value as additional confidence, not as a requirement.
+6. Inspect small integer fields and readable string pointers around each retained candidate.
+7. Scan ATOnPTracker PE sections separately for CurrencyCode/CurrencyLetter/CurrencyLetterRPL
+   diagnostic strings and raw RIP-relative references.
+8. Fall back to bounded process-wide readable data-region scanning when root-reachable regions
+   do not correlate all visible rows.
+9. Never call the unknown internal extractor methods.
 
 Compatibility
 -------------
-Database:             C:\MCExtras\MCST-Compatibility.ini
-Schema version:       2
-AutoTrading module:   Charting.dll
-Tracker module:       ATOnPTracker.dll
-Unknown-build policy: reject
-
-Build environment
------------------
-IDE:                 Visual Studio 2022
-Toolset:             MSVC v143
-Language:            C++17
-Target:              Windows x64
-
-Runtime installation
---------------------
-Watchdog EXE:        C:\MCExtras\MCST-Watchdog.exe
-Bridge DLL:          C:\MCExtras\MCST-TrackerBridge.dll
-
-Validation
-----------
-Static tree check:   Tools\Validate-Release.ps1
-Windows build:       Rebuild Solution / Release x64
+Production Tracker snapshot minimum Bridge build: V156
+Position Currency R3 research minimum Bridge build: V158
+Bridge protocol: V2 unchanged

@@ -69,7 +69,7 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114 production Tracker snapshots require Bridge V156 or newer. The 1.114-R2 Position Currency research action specifically requires the V157 DLL included in this package.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114 production Tracker snapshots require Bridge V156 or newer. The 1.114-R3 Position Currency research action specifically requires the V158 DLL included in this package.
 
 ## First Watchdog start
 

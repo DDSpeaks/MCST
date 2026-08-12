@@ -2,7 +2,7 @@
 
 inline constexpr wchar_t kTrackerBridgeProductVersion[] = L"1.0";
 inline constexpr int kTrackerBridgeInternalBuildVersion = 156;
-inline constexpr int kPositionCurrencyResearchBridgeVersion = 157;
+inline constexpr int kPositionCurrencyResearchBridgeVersion = 158;
 
 #include <cstddef>
 #include <cstdint>
@@ -62,7 +62,7 @@ bool WriteTrackerStatusRawPayload(
     std::wstring& diagnostic);
 
 /**
- * @brief Requests the existing passive Tracker research bundle from Bridge V157.
+ * @brief Requests the existing passive Tracker research bundle from Bridge V158.
  *
  * The bundle is written by the Bridge inside the MultiCharts process to its
  * normal research-output location. This does not change Bridge Protocol V2.
@@ -76,9 +76,9 @@ bool CaptureTrackerResearchBundle(
  * @brief Captures the focused Open Positions currency research report used by the
  *        Position Currency research workflow.
  *
- * Bridge V157 correlates the visible Open Positions rows with the previously
- * mapped Open Positions record storage and inspects the native-currency and
- * P/L-currency candidates without modifying MultiCharts state. Protocol V2 is
+ * Bridge V158 dynamically correlates visible Open Positions rows with readable
+ * Tracker-related data memory by Quantity and Average Price, then inspects
+ * native-currency and P/L-currency candidates without modifying MultiCharts state. Protocol V2 is
  * retained; command 50 is additive and research-only.
  */
 bool CapturePositionCurrencyResearch(

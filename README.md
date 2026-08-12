@@ -1,8 +1,8 @@
 ﻿# MCST
 
-## Research package: 1.114-R2 Position Currency Research
+## Research package: 1.114-R3 Position Currency Research
 
-This source package is a temporary **research build based on MCST-Watchdog 1.114 production**. It upgrades the Developer Mode `Position CCY` capture to correlate visible Open Positions rows with the previously mapped internal position-record storage and to inspect separate native-currency and P/L-currency candidates. It deliberately suppresses cross-position totals until currency normalization is verified. See `Docs/POSITION_CURRENCY_RESEARCH.md`.
+This source package is a temporary **research build based on MCST-Watchdog 1.114 production**. It upgrades the Developer Mode `Position CCY` capture to correlate visible Open Positions rows with the readable Tracker-related data memory and to inspect separate native-currency and P/L-currency candidates. It deliberately suppresses cross-position totals until currency normalization is verified. See `Docs/POSITION_CURRENCY_RESEARCH.md`.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
@@ -10,12 +10,12 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 - MCST-Watchdog: **1.114**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V157**
+- Tracker Bridge internal build: **V158**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. Internal build V157 extends the V156 Tracker compatibility implementation with the additive, research-only `CapturePositionCurrencyDirectResearch` command while keeping Bridge Protocol V2 unchanged. MCST-Watchdog 1.114 production snapshots require Tracker Bridge V156 or newer. This R2 research package includes V157 because the focused currency research command is new.
+The Tracker Bridge product version, internal build, and protocol version are separate identifiers. Internal build V158 preserves the V156 production Tracker compatibility implementation and the V157 additive research command, but replaces R2's rejected fixed `+0x10E0` storage assumption with bounded dynamic read-only memory correlation. Bridge Protocol V2 is unchanged. MCST-Watchdog 1.114 production snapshots require Tracker Bridge V156 or newer; the R3 `Position CCY` action requires V158.
 
 ## Runtime installation
 

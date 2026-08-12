@@ -493,6 +493,6 @@ bool CapturePositionCurrencyResearch(
         return false;
     }
 
-    diagnostic = L"Position Currency direct research capture completed; " + requestDiagnostic;
+    diagnostic = L"Position Currency dynamic research capture completed; " + requestDiagnostic;
     return true;
 }

@@ -1,5 +1,19 @@
 ﻿# Changelog
 
+## 1.114-R3 (research)
+
+- Replaced R2's null `ITC_TradeInfo -> +0x98 -> +0x10E0` record-root dependency with dynamic read-only row correlation.
+- Bumped MCST Tracker Bridge internal build from V157 to V158; public product version remains 1.0 and Bridge Protocol remains V2.
+- Kept protocol command 50 unchanged while changing its implementation to R3 dynamic correlation.
+- Added bounded pointer-graph discovery starting from Tracker roots, Open Positions page, and grid objects.
+- Added bounded fallback scanning of readable private/mapped process data regions when root-reachable regions do not correlate all rows.
+- Candidate discovery now starts from the visible Average Price and requires the visible Quantity nearby; displayed Open P/L is additional confidence evidence.
+- Added per-candidate small-integer, pointer-string, indirect-string, and nearby-double diagnostics to help identify native and P/L currency fields.
+- Added cross-row relative-offset frequency reporting so stable layouts can be distinguished from one-row coincidences.
+- Replaced full-image diagnostic-string scanning with PE section-by-section scanning for `CurrencyCode`, `CurrencyLetter`, `CurrencyLetterRPL`, and related Open Positions getter names.
+- Added raw RIP-relative reference diagnostics for the discovered extractor-name strings without calling any unknown MultiCharts internal function.
+- Preserved the fail-closed fingerprint gate and research-safe suppression of multi-currency aggregate totals.
+
 ## 1.114-R2 (research)
 
 - Upgraded Developer Mode `Position CCY` from the broad R1 structure probe to focused row/record correlation.

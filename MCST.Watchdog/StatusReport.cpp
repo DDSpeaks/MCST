@@ -365,7 +365,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R2 Research\n"
+        << L"Watchdog version       1.114-R3 Research\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"

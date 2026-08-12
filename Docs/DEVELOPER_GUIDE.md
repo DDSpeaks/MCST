@@ -3,7 +3,7 @@
 
 ## Position Currency research build
 
-MCST-Watchdog 1.114-R2 upgrades the `Position CCY` Developer action. It writes a fresh raw Tracker status snapshot and then requests Bridge V157 command 50, `CapturePositionCurrencyDirectResearch`. The Bridge reads the visible Open Positions rows, resolves the previously mapped `positions_records_10E0` storage, correlates quantity and Average Price against candidate records, and inspects the candidate currency/P&L fields. The action is read-only and does not call unknown MultiCharts functions.
+MCST-Watchdog 1.114-R3 upgrades the `Position CCY` Developer action. It writes a fresh raw Tracker status snapshot and then requests Bridge V158 command 50, `CapturePositionCurrencyDirectResearch`. The Bridge reads the visible Open Positions rows, discovers readable Tracker-related data regions, searches for Average Price values, requires the matching Quantity nearby, and then inspects candidate currency/P&L fields. It no longer depends on R2's `+0x10E0` record-root hypothesis. The action is read-only and does not call unknown MultiCharts functions.
 
 Use at least two simultaneously open positions with different native currencies when practical. See `POSITION_CURRENCY_RESEARCH.md` for the capture files and analysis workflow.
 
@@ -32,11 +32,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V157
+Internal build:  V158
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility-profile consumption and fingerprint metadata. V157 preserves that production behavior and adds the focused Position Currency research command without changing Protocol V2.
+V156 added Tracker compatibility-profile consumption and fingerprint metadata. V157 introduced the Position Currency research command. V158 preserves Protocol V2 and production behavior while replacing only that research command implementation with R3 dynamic correlation.
 
 ### MCST.TrackerBridge
 
