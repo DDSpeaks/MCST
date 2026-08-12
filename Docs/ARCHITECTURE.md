@@ -1,4 +1,4 @@
-# MCST Architecture
+﻿# MCST Architecture
 
 ## Purpose
 
@@ -50,11 +50,11 @@ The Bridge runs inside MultiCharts and provides a stable Tracker snapshot bounda
 
 ```text
 Product version: 1.0
-Internal build:  V156
+Internal build:  V157
 Protocol:        V2
 ```
 
-The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 adds profile-driven Tracker compatibility handling while keeping the wire protocol at V2.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling. V157 keeps that production behavior and adds a focused, read-only Position Currency research command while preserving Bridge Protocol V2.
 
 ### MCST-Watchdog
 

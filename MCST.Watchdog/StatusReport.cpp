@@ -7,6 +7,9 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <cerrno>
+#include <cwchar>
 
 namespace
 {
@@ -114,22 +117,246 @@ namespace
             << std::left << std::setw(22) << L"Uptime" << status.uptime << L'\n';
     }
 
-    void AppendRows(std::wostringstream& out, const TrackerBridgeSection& section)
+    std::wstring SingleLineCell(std::wstring value)
+    {
+        for (wchar_t& ch : value)
+        {
+            if (ch == L'\r' || ch == L'\n' || ch == L'\t')
+                ch = L' ';
+        }
+        return value;
+    }
+
+    std::wstring PadCell(const std::wstring& value, std::size_t width, bool rightAlign)
+    {
+        const std::wstring clean = SingleLineCell(value);
+        if (clean.size() >= width)
+            return clean;
+        const std::wstring padding(width - clean.size(), L' ');
+        return rightAlign ? padding + clean : clean + padding;
+    }
+
+    std::vector<std::size_t> CalculateColumnWidths(
+        const std::vector<std::vector<std::wstring>>& rows,
+        std::size_t columnCount,
+        const std::vector<std::wstring>* headers = nullptr,
+        bool lastColumnFlexible = false)
+    {
+        std::vector<std::size_t> widths(columnCount, 0);
+        if (headers)
+        {
+            for (std::size_t column = 0; column < columnCount && column < headers->size(); ++column)
+                widths[column] = (std::max)(widths[column], SingleLineCell((*headers)[column]).size());
+        }
+
+        for (const auto& row : rows)
+        {
+            for (std::size_t column = 0; column < columnCount && column < row.size(); ++column)
+            {
+                if (lastColumnFlexible && column + 1 == columnCount)
+                    continue;
+                widths[column] = (std::max)(widths[column], SingleLineCell(row[column]).size());
+            }
+        }
+        return widths;
+    }
+
+    void AppendAlignedRow(
+        std::wostringstream& out,
+        const std::vector<std::wstring>& row,
+        const std::vector<std::size_t>& widths,
+        const std::vector<bool>& rightAligned,
+        bool lastColumnFlexible)
+    {
+        const std::size_t columnCount = widths.size();
+        for (std::size_t column = 0; column < columnCount; ++column)
+        {
+            if (column != 0)
+                out << L" | ";
+
+            const std::wstring value = column < row.size() ? row[column] : L"";
+            if (lastColumnFlexible && column + 1 == columnCount)
+                out << SingleLineCell(value);
+            else
+                out << PadCell(value, widths[column], column < rightAligned.size() && rightAligned[column]);
+        }
+        out << L'\n';
+    }
+
+    std::size_t FixedTableWidth(const std::vector<std::size_t>& widths, bool lastColumnFlexible)
+    {
+        if (widths.empty())
+            return 0;
+        std::size_t width = 0;
+        for (std::size_t column = 0; column < widths.size(); ++column)
+        {
+            if (lastColumnFlexible && column + 1 == widths.size())
+                break;
+            width += widths[column];
+            if (column + 1 < widths.size())
+                width += 3; // " | "
+        }
+        return width;
+    }
+
+    void AppendAlignedSectionRows(
+        std::wostringstream& out,
+        const TrackerBridgeSection& section,
+        bool lastColumnFlexible)
     {
         if (section.rows.empty())
         {
             out << L"(no rows)\n";
             return;
         }
+
+        const std::size_t columnCount = section.expectedColumns > 0
+            ? section.expectedColumns
+            : section.rows.front().size();
+        const std::vector<std::size_t> widths = CalculateColumnWidths(
+            section.rows, columnCount, nullptr, lastColumnFlexible);
+        const std::vector<bool> alignments(columnCount, false);
+
         for (const auto& row : section.rows)
+            AppendAlignedRow(out, row, widths, alignments, lastColumnFlexible);
+    }
+
+    bool ParseLocalizedNumber(const std::wstring& raw, double& value)
+    {
+        std::wstring cleaned;
+        cleaned.reserve(raw.size());
+        for (const wchar_t ch : raw)
         {
-            for (std::size_t i = 0; i < row.size(); ++i)
-            {
-                if (i != 0) out << L" | ";
-                out << row[i];
-            }
-            out << L'\n';
+            if ((ch >= L'0' && ch <= L'9') || ch == L'+' || ch == L'-' || ch == L',' || ch == L'.')
+                cleaned.push_back(ch);
         }
+        if (cleaned.empty())
+            return false;
+
+        const std::size_t lastComma = cleaned.find_last_of(L',');
+        const std::size_t lastDot = cleaned.find_last_of(L'.');
+        const bool hasComma = lastComma != std::wstring::npos;
+        const bool hasDot = lastDot != std::wstring::npos;
+
+        wchar_t decimalSeparator = 0;
+        if (hasComma && hasDot)
+            decimalSeparator = lastComma > lastDot ? L',' : L'.';
+        else if (hasComma)
+            decimalSeparator = L',';
+        else if (hasDot)
+            decimalSeparator = L'.';
+
+        std::wstring normalized;
+        normalized.reserve(cleaned.size());
+        for (std::size_t index = 0; index < cleaned.size(); ++index)
+        {
+            const wchar_t ch = cleaned[index];
+            if (ch == L',' || ch == L'.')
+            {
+                if (ch == decimalSeparator)
+                    normalized.push_back(L'.');
+                continue;
+            }
+            normalized.push_back(ch);
+        }
+
+        wchar_t* end = nullptr;
+        errno = 0;
+        const double parsed = std::wcstod(normalized.c_str(), &end);
+        if (errno == ERANGE || end == normalized.c_str() || *end != L'\0')
+            return false;
+        value = parsed;
+        return true;
+    }
+
+    std::wstring FormatReportNumber(double value, bool showPlusForPositive = false)
+    {
+        const bool negative = value < 0.0;
+        const double magnitude = std::fabs(value);
+        std::wostringstream raw;
+        raw << std::fixed << std::setprecision(2) << magnitude;
+        std::wstring text = raw.str();
+
+        const std::size_t decimalPoint = text.find(L'.');
+        std::wstring integerPart = decimalPoint == std::wstring::npos ? text : text.substr(0, decimalPoint);
+        const std::wstring decimalPart = decimalPoint == std::wstring::npos ? L"00" : text.substr(decimalPoint + 1);
+
+        std::wstring grouped;
+        for (std::size_t index = 0; index < integerPart.size(); ++index)
+        {
+            if (index != 0 && (integerPart.size() - index) % 3 == 0)
+                grouped.push_back(L' ');
+            grouped.push_back(integerPart[index]);
+        }
+
+        std::wstring result;
+        if (negative)
+            result.push_back(L'-');
+        else if (showPlusForPositive && magnitude > 0.0000001)
+            result.push_back(L'+');
+        result += grouped;
+        result += L',';
+        result += decimalPart;
+        return result;
+    }
+
+    void AppendOpenPositionsTable(std::wostringstream& out, const TrackerBridgeSection& section)
+    {
+        if (section.rows.empty())
+        {
+            out << L"(no rows)\n";
+            return;
+        }
+
+        const std::vector<std::wstring> headers = {
+            L"Profile", L"Account", L"Symbol", L"Side", L"Qty", L"Average Price",
+            L"Native Value", L"Open P/L", L"Last Update"
+        };
+        std::vector<std::vector<std::wstring>> rows;
+        rows.reserve(section.rows.size());
+
+        for (const auto& source : section.rows)
+        {
+            std::vector<std::wstring> row(9);
+            row[0] = source.size() > 0 ? source[0] : L"";
+            row[1] = source.size() > 1 ? source[1] : L"";
+            row[2] = source.size() > 2 ? source[2] : L"";
+            row[3] = source.size() > 3 ? source[3] : L"";
+            row[4] = source.size() > 4 ? source[4] : L"";
+            row[5] = source.size() > 5 ? source[5] : L"";
+            row[7] = source.size() > 6 ? source[6] : L"";
+            row[8] = source.size() > 7 ? source[7] : L"";
+
+            double quantity = 0.0;
+            double averagePrice = 0.0;
+            const bool quantityOk = ParseLocalizedNumber(row[4], quantity);
+            const bool averagePriceOk = ParseLocalizedNumber(row[5], averagePrice);
+
+            if (quantityOk && averagePriceOk)
+            {
+                const double nativeValue = std::fabs(quantity) * averagePrice;
+                row[6] = FormatReportNumber(nativeValue);
+            }
+            else
+            {
+                row[6] = L"n/a";
+            }
+
+            rows.push_back(std::move(row));
+        }
+
+        const std::vector<std::size_t> widths =
+            CalculateColumnWidths(rows, headers.size(), &headers, false);
+        const std::vector<bool> rightAligned = {
+            false, false, false, false, true, true, true, true, false
+        };
+
+        AppendAlignedRow(out, headers, widths, std::vector<bool>(headers.size(), false), false);
+        out << std::wstring(FixedTableWidth(widths, false), L'-') << L'\n';
+        for (const auto& row : rows)
+            AppendAlignedRow(out, row, widths, rightAligned, false);
+        out << std::wstring(FixedTableWidth(widths, false), L'-') << L'\n';
+        out << L"TOTALS NOT CALCULATED - position and P/L currency normalization is under research.\n";
     }
 }
 
@@ -138,7 +365,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.113\n"
+        << L"Watchdog version       1.114-R2 Research\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -177,11 +404,11 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
         out << L"\nLATEST ERROR\n------------\n" << status.lastError << L'\n';
 
     out << L"\nACCOUNTS\n--------\n";
-    AppendRows(out, snapshot.accounts);
+    AppendAlignedSectionRows(out, snapshot.accounts, false);
     out << L"\nOPEN POSITIONS\n--------------\n";
-    AppendRows(out, snapshot.openPositions);
+    AppendOpenPositionsTable(out, snapshot.openPositions);
     out << L"\nRECENT LOGS\n-----------\n";
-    AppendRows(out, snapshot.recentLogs);
+    AppendAlignedSectionRows(out, snapshot.recentLogs, true);
     return out.str();
 }
 

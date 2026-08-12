@@ -8,12 +8,12 @@ MCST Tracker Bridge is the MultiCharts-side runtime component that provides Orde
 Public product name: MCST Tracker Bridge
 Product version:     1.0
 DLL file:            MCST-TrackerBridge.dll
-Internal build:      V156
+Internal build:      V157
 Bridge protocol:     V2
 Runtime location:    C:\MCExtras\MCST-TrackerBridge.dll
 ```
 
-The internal V156 identifier describes this Bridge implementation. It is separate from the public product version and separate from the exact MultiCharts module fingerprints used by the compatibility framework. MCST-Watchdog 1.113 requires V156 or newer for production Tracker snapshots.
+The internal V157 identifier describes this Bridge implementation. It is separate from the public product version and separate from the exact MultiCharts module fingerprints used by the compatibility framework. Production Tracker snapshots still require V156 or newer; V157 adds the focused, read-only Position Currency research command used by MCST-Watchdog 1.114-R2.
 
 ## How the Bridge is loaded
 
@@ -68,4 +68,4 @@ This design allows a newly verified `Profile.*` section to be activated with a f
 
 ## Protocol stability
 
-Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Internal layout discovery and profile selection belong inside the Bridge and do not require a wire-protocol revision when the existing payload format can carry backward-compatible metadata.
+Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. V157 adds command 50 as an additive research operation; the message header and production snapshot payload remain unchanged. Internal layout discovery and profile selection stay inside the Bridge.

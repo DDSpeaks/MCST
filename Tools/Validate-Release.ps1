@@ -1,8 +1,9 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.113'
-$currentBridgeBuild = 156
+$currentVersion = '1.114-R2'
+$currentBridgeBuild = 157
+$minimumProductionBridgeBuild = 156
 $currentProtocolVersion = 2
 
 $required = @(
@@ -32,6 +33,7 @@ $required = @(
     'Docs\DEVELOPER_GUIDE.md',
     'Docs\USER_GUIDE.md',
     'Docs\COMPATIBILITY.md',
+    'Docs\POSITION_CURRENCY_RESEARCH.md',
     'MCST.TrackerBridgeHost\README.md',
     'Tools\UniversalApplicationMapper\README.md'
 )
@@ -84,9 +86,40 @@ if ($watchdogMain -match [regex]::Escape('std::wstring message = diagnostic;')) 
     throw 'Tracker Capture still contains the local message variable that shadows WindowProc message.'
 }
 if ($watchdogMain -notmatch 'Tracker Capture' -or
+    $watchdogMain -notmatch 'Position CCY' -or
     $watchdogMain -notmatch 'Open Compat' -or
     $watchdogMain -notmatch 'Reload Compat') {
-    throw 'Required Tracker compatibility Developer controls are missing.'
+    throw 'Required Tracker compatibility and Position Currency Developer controls are missing.'
+}
+if ($watchdogMain -notmatch 'MCST_Position_Currency_Reference_' -or
+    $watchdogMain -notmatch 'CapturePositionCurrencyResearch') {
+    throw 'Position Currency research reference/capture workflow is missing from Watchdog.'
+}
+if ($watchdogMain -notmatch 'configRevision' -or
+    $watchdogMain -notmatch 'staleConfigurationResult' -or
+    $watchdogMain -notmatch 'CollectStatus\(configSnapshot, configRevision, forceAutoTradingRefresh\)') {
+    throw 'Configuration-generation reload protection is missing from the Watchdog refresh path.'
+}
+
+$appConfigSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AppConfig.cpp') -Raw
+if ($appConfigSource -notmatch 'RefreshIniProfileCache' -or
+    $appConfigSource -notmatch 'WritePrivateProfileStringW\(nullptr, nullptr, nullptr, path\.c_str\(\)\)') {
+    throw 'INI profile cache refresh support is missing from AppConfig.'
+}
+
+$statusReportSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\StatusReport.cpp') -Raw
+if ($statusReportSource -notmatch 'AppendAlignedSectionRows' -or
+    $statusReportSource -notmatch 'AppendOpenPositionsTable' -or
+    $statusReportSource -notmatch 'Native Value' -or
+    $statusReportSource -notmatch 'TOTALS NOT CALCULATED - position and P/L currency normalization is under research' -or
+    $statusReportSource -notmatch 'row\[7\] = source\.size\(\) > 6 \? source\[6\]' -or
+    $statusReportSource -notmatch 'row\[8\] = source\.size\(\) > 7 \? source\[7\]' -or
+    $statusReportSource -notmatch 'std::fabs\(quantity\) \* averagePrice' -or
+    $statusReportSource -notmatch 'AppendAlignedSectionRows\(out, snapshot\.recentLogs, true\)') {
+    throw 'Research-safe aligned Tracker report formatting or Open Positions field mapping is missing.'
+}
+if ($statusReportSource -match 'totalPositionValue' -or $statusReportSource -match 'totalOpenPl') {
+    throw 'Research build must not aggregate unnormalized multi-currency Open Positions totals.'
 }
 
 $watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
@@ -119,6 +152,11 @@ if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).pa
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
+if ($bridgeSource -notmatch 'WritePositionCurrencyDirectResearch' -or
+    $bridgeSource -notmatch 'positions_records_10E0' -or
+    $bridgeSource -notmatch 'unknown_functions_called=no') {
+    throw 'Focused Position Currency direct research implementation is missing.'
+}
 if ($bridgeSource -match 'required CATPTTabView or ATOnPTracker module anchor was not found') {
     throw 'Ambiguous legacy Tracker read diagnostic is still present.'
 }
@@ -149,18 +187,28 @@ if ($bridgeRc -notmatch "internal bridge build V$currentBridgeBuild" -or
 }
 
 $readerHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
-if ($readerHeader -notmatch "kTrackerBridgeInternalBuildVersion = $currentBridgeBuild") {
-    throw "TrackerBridgeReader header is not aligned with internal build V$currentBridgeBuild."
+if ($readerHeader -notmatch "kTrackerBridgeInternalBuildVersion = $minimumProductionBridgeBuild") {
+    throw "TrackerBridgeReader production minimum is not V$minimumProductionBridgeBuild."
+}
+if ($readerHeader -notmatch "kPositionCurrencyResearchBridgeVersion = $currentBridgeBuild") {
+    throw "Position Currency research Bridge requirement is not V$currentBridgeBuild."
 }
 
 $readerSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
 if ($readerSource -notmatch 'snapshot\.bridgeVersion < kTrackerBridgeInternalBuildVersion') {
     throw 'Watchdog-side Tracker reader does not enforce the required Bridge internal build.'
 }
+if ($readerSource -notmatch 'CapturePositionCurrencyResearch' -or
+    $readerSource -notmatch 'CapturePositionCurrencyDirectResearch') {
+    throw 'Position Currency direct-research Bridge wrapper is missing.'
+}
 
 $protocolHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
 if ($protocolHeader -notmatch "kProtocolVersion = $currentProtocolVersion") {
     throw "Bridge protocol is not V$currentProtocolVersion."
+}
+if ($protocolHeader -notmatch 'CapturePositionCurrencyDirectResearch = 50') {
+    throw 'Bridge Protocol V2 additive Position Currency research command 50 is missing.'
 }
 
 $versionDetector = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsVersionDetector.cpp') -Raw
@@ -184,6 +232,7 @@ $publicCurrentDocs = @(
     'Docs\DEVELOPER_GUIDE.md',
     'Docs\ARCHITECTURE.md',
     'Docs\COMPATIBILITY.md',
+    'Docs\POSITION_CURRENCY_RESEARCH.md',
     'MCST.TrackerBridgeHost\README.md'
 )
 foreach ($doc in $publicCurrentDocs) {
@@ -196,9 +245,10 @@ foreach ($doc in $publicCurrentDocs) {
 }
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
-if ($releaseNotes -notmatch "MCST 1\.112 Production Release" -or
-    $releaseNotes -notmatch "Internal build:\s+V156") {
-    throw 'Release notes do not identify MCST 1.113 and Tracker Bridge V156.'
+$escapedCurrentVersion = [regex]::Escape($currentVersion)
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Position Currency Direct Research" -or
+    $releaseNotes -notmatch "Internal build:\s+V$currentBridgeBuild") {
+    throw "Research notes do not identify MCST $currentVersion and Tracker Bridge V$currentBridgeBuild."
 }
 
-Write-Host "MCST $currentVersion production release tree validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion Position Currency direct-research tree validation passed." -ForegroundColor Green

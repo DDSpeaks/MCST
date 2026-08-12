@@ -1,9 +1,11 @@
-﻿MCST Production Build Information
-=================================
+﻿MCST Research Build Information
+===============================
 
 MCST-Watchdog
 -------------
-Version:             1.113
+Version:             1.114-R2
+Build kind:          Position Currency Research
+Base production:     1.114
 Configuration:       Release x64
 Runtime linkage:     Static /MT
 Optimization:        /O2 with production-safe project settings
@@ -12,16 +14,28 @@ Debug configuration: Not included
 MCST Tracker Bridge
 -------------------
 Product version:     1.0
-Internal build:      V156
+Internal build:      V157
 Protocol:            V2
 DLL:                 MCST-TrackerBridge.dll
+Bridge change:       V157 adds focused direct position-currency research command
+
+Research action
+---------------
+Developer control:   Position CCY
+Bridge command:      CapturePositionCurrencyDirectResearch (command 50)
+Reference output:    C:\Temp\MCST_Position_Currency_Reference_<pid>.txt
+Research output:     C:\Temp\MCST_Position_Currency_Direct_<pid>.txt
+Read-only:            Yes
+Research fingerprint:  ATOnPTracker 0x6A5694FB / 3534848
+Process-memory write: No
+UI input simulation:  No
 
 Compatibility
 -------------
-Database:            C:\MCExtras\MCST-Compatibility.ini
-Schema version:      2
-AutoTrading module:  Charting.dll
-Tracker module:      ATOnPTracker.dll
+Database:             C:\MCExtras\MCST-Compatibility.ini
+Schema version:       2
+AutoTrading module:   Charting.dll
+Tracker module:       ATOnPTracker.dll
 Unknown-build policy: reject
 
 Build environment
@@ -36,7 +50,7 @@ Runtime installation
 Watchdog EXE:        C:\MCExtras\MCST-Watchdog.exe
 Bridge DLL:          C:\MCExtras\MCST-TrackerBridge.dll
 
-Release validation
-------------------
+Validation
+----------
 Static tree check:   Tools\Validate-Release.ps1
 Windows build:       Rebuild Solution / Release x64

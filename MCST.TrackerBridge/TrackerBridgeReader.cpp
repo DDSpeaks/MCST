@@ -453,3 +453,46 @@ bool CaptureTrackerResearchBundle(
     return true;
 }
 
+
+
+bool CapturePositionCurrencyResearch(
+    std::wstring& responseSummary,
+    std::wstring& diagnostic,
+    unsigned long connectTimeoutMilliseconds)
+{
+    responseSummary.clear();
+    diagnostic.clear();
+
+    MCBridgeClient client;
+    std::wstring connectDiagnostic;
+    if (!client.Connect(connectTimeoutMilliseconds, connectDiagnostic))
+    {
+        diagnostic = L"MCTrackerBridge connection failed: " + connectDiagnostic;
+        return false;
+    }
+
+    mcbridge::Status responseStatus{};
+    std::string payload;
+    std::wstring requestDiagnostic;
+    if (!client.Request(
+            mcbridge::Command::CapturePositionCurrencyDirectResearch,
+            {},
+            responseStatus,
+            payload,
+            requestDiagnostic))
+    {
+        diagnostic = L"Position Currency research request failed: " + requestDiagnostic;
+        return false;
+    }
+
+    responseSummary = Utf8ToWide(payload);
+    if (responseStatus != mcbridge::Status::Ok)
+    {
+        diagnostic = L"Position Currency research capture failed; Bridge status=" +
+            std::to_wstring(static_cast<unsigned int>(responseStatus)) + L"; " + requestDiagnostic;
+        return false;
+    }
+
+    diagnostic = L"Position Currency direct research capture completed; " + requestDiagnostic;
+    return true;
+}

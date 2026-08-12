@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 156;
+    constexpr int kBridgeVersion = 157;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -7862,6 +7862,432 @@ DWORD sehCode = 0;
     }
 
 
+    bool TryParsePositionResearchNumber(const std::wstring& source, double& value)
+    {
+        std::wstring compact;
+        compact.reserve(source.size());
+        for (wchar_t ch : source)
+        {
+            if ((ch >= L'0' && ch <= L'9') || ch == L'-' || ch == L'+' || ch == L'.' || ch == L',')
+                compact.push_back(ch);
+        }
+        if (compact.empty())
+            return false;
+
+        const std::size_t dot = compact.find_last_of(L'.');
+        const std::size_t comma = compact.find_last_of(L',');
+        std::size_t decimal = std::wstring::npos;
+        if (dot != std::wstring::npos && comma != std::wstring::npos)
+            decimal = std::max(dot, comma);
+        else if (dot != std::wstring::npos)
+            decimal = dot;
+        else if (comma != std::wstring::npos)
+            decimal = comma;
+
+        std::wstring normalized;
+        normalized.reserve(compact.size());
+        for (std::size_t i = 0; i < compact.size(); ++i)
+        {
+            const wchar_t ch = compact[i];
+            if (ch == L'.' || ch == L',')
+            {
+                if (i == decimal)
+                    normalized.push_back(L'.');
+                continue;
+            }
+            normalized.push_back(ch);
+        }
+
+        wchar_t* end = nullptr;
+        errno = 0;
+        const double parsed = std::wcstod(normalized.c_str(), &end);
+        if (errno == ERANGE || end == normalized.c_str() || *end != L'\0' || !std::isfinite(parsed))
+            return false;
+        value = parsed;
+        return true;
+    }
+
+    std::wstring PositionResearchCurrencyHint(const std::wstring& source)
+    {
+        std::wstring upper = source;
+        std::transform(upper.begin(), upper.end(), upper.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towupper(ch)); });
+        static const wchar_t* codes[] =
+        {
+            L"EUR", L"USD", L"SEK", L"DKK", L"NOK", L"GBP", L"CHF", L"JPY", L"CAD", L"AUD", L"NZD", L"HKD", L"SGD"
+        };
+        for (const wchar_t* code : codes)
+        {
+            if (upper.find(code) != std::wstring::npos)
+                return code;
+        }
+        if (source.find(L'\x20AC') != std::wstring::npos)
+            return L"EUR";
+        if (source.find(L'$') != std::wstring::npos)
+            return L"DOLLAR_SYMBOL_AMBIGUOUS";
+        if (source.find(L'\x00A3') != std::wstring::npos)
+            return L"GBP";
+        return L"UNKNOWN";
+    }
+
+    std::wstring ReadShortUtf16Candidate(std::uintptr_t address)
+    {
+        if (!address)
+            return L"";
+        std::uintptr_t end = 0;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!QueryReadableSpan(address, end, mbi))
+            return L"";
+
+        constexpr std::size_t kMaxCharacters = 32;
+        const std::size_t availableCharacters = std::min<std::size_t>(
+            kMaxCharacters,
+            static_cast<std::size_t>((end - address) / sizeof(wchar_t)));
+        if (availableCharacters == 0)
+            return L"";
+
+        wchar_t buffer[kMaxCharacters + 1]{};
+        if (!SafeReadBytes(reinterpret_cast<const void*>(address), buffer, availableCharacters * sizeof(wchar_t)))
+            return L"";
+        std::size_t length = 0;
+        for (; length < availableCharacters; ++length)
+        {
+            const wchar_t ch = buffer[length];
+            if (ch == L'\0')
+                break;
+            if (!(iswalnum(ch) || iswspace(ch) || ch == L'/' || ch == L'-' || ch == L'_' || ch == L'$' || ch == L'\x20AC' || ch == L'\x00A3'))
+                return L"";
+        }
+        if (length == 0 || length == availableCharacters)
+            return L"";
+        return std::wstring(buffer, length);
+    }
+
+    std::string ReadShortAsciiCandidate(std::uintptr_t address)
+    {
+        if (!address)
+            return {};
+        std::uintptr_t end = 0;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!QueryReadableSpan(address, end, mbi))
+            return {};
+        constexpr std::size_t kMaxCharacters = 32;
+        const std::size_t availableCharacters = std::min<std::size_t>(kMaxCharacters, static_cast<std::size_t>(end - address));
+        if (availableCharacters == 0)
+            return {};
+        char buffer[kMaxCharacters + 1]{};
+        if (!SafeReadBytes(reinterpret_cast<const void*>(address), buffer, availableCharacters))
+            return {};
+        std::size_t length = 0;
+        for (; length < availableCharacters; ++length)
+        {
+            const unsigned char ch = static_cast<unsigned char>(buffer[length]);
+            if (ch == 0)
+                break;
+            if (ch < 32 || ch > 126)
+                return {};
+        }
+        if (length == 0 || length == availableCharacters)
+            return {};
+        return std::string(buffer, length);
+    }
+
+    bool WritePositionCurrencyDirectResearch(
+        const Snapshot& snapshot,
+        std::string& summaryJson)
+    {
+        V153GridReadLockGuard lock;
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::wstring reportPath = ReportPath(L"MCST_Position_Currency_Direct", snapshot.processId);
+        constexpr DWORD kResearchAtonpTimestamp = 0x6A5694FBu;
+        constexpr DWORD kResearchAtonpImageSize = 3534848u;
+
+        if (snapshot.atonpTrackerPeTimestamp != kResearchAtonpTimestamp ||
+            snapshot.atonpTrackerSize != kResearchAtonpImageSize)
+        {
+            std::ostringstream mismatch;
+            mismatch << "MCST POSITION CURRENCY DIRECT RESEARCH\r\n"
+                     << "======================================\r\n"
+                     << "research_build=1.114-R2\r\n"
+                     << "status=BLOCKED_FINGERPRINT_MISMATCH\r\n"
+                     << "expected_atonptracker_pe_timestamp=" << HexValue(kResearchAtonpTimestamp) << "\r\n"
+                     << "expected_atonptracker_image_size=" << kResearchAtonpImageSize << "\r\n"
+                     << "actual_atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
+                     << "actual_atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
+                     << "reason=R2 record offsets are research-only and are not reused on a different ATOnPTracker build.\r\n";
+            const bool mismatchWritten = WriteUtf8File(reportPath, mismatch.str());
+            std::ostringstream mismatchSummary;
+            mismatchSummary << "{\"capture\":\"position_currency_direct_research\",\"version\":157,"
+                            << "\"blocked\":true,\"reason\":\"fingerprint_mismatch\","
+                            << "\"report_written\":" << (mismatchWritten ? "true" : "false") << ','
+                            << "\"report_path\":" << JsonString(reportPath) << '}';
+            summaryJson = mismatchSummary.str();
+            return false;
+        }
+
+        TrackerCompatibilityProfile trackerProfile = ResolveExternalTrackerCompatibilityProfile(snapshot);
+        if (!trackerProfile.matched)
+        {
+            TrackerCompatibilityProfile embedded = EmbeddedLegacyTrackerCompatibilityProfile(snapshot);
+            if (embedded.matched)
+                trackerProfile = embedded;
+        }
+
+        std::string tabViewDiagnostic;
+        const std::uintptr_t tabView = trackerProfile.matched
+            ? FindTabViewObject(snapshot, tabViewDiagnostic, &trackerProfile)
+            : 0;
+        std::string flexGridRttiDiagnostic;
+        const std::vector<RttiVtableRecord> flexGridRttiVtables = trackerProfile.matched
+            ? ResolveRttiVtables(snapshot, ".?AVCFlexGridImpl@implementation@UILayer@@", flexGridRttiDiagnostic)
+            : std::vector<RttiVtableRecord>{};
+
+        V153GridSectionResult positions = ReadV153GridSection(
+            snapshot, flexGridRttiVtables, tabView, trackerProfile, "open_positions",
+            trackerProfile.openPositionsPageOffset, 1, 8, 1000, 1000, 3);
+
+        ExtractorAttempt positionProbe = BuildExtractorProbe(snapshot, "position_currency_direct", kExtractOpenPositionsRva);
+        const std::uintptr_t tradeInfo = positionProbe.tradeInfo;
+        std::uintptr_t root98 = 0;
+        std::uintptr_t recordsRoot = 0;
+        bool root98Ok = tradeInfo && SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x98), root98) && root98;
+        bool recordsRootOk = root98Ok && SafeReadValue(reinterpret_cast<void*>(root98 + 0x10E0), recordsRoot) && recordsRoot;
+
+        std::uintptr_t recordsRegionEnd = 0;
+        MEMORY_BASIC_INFORMATION recordsMbi{};
+        bool recordsReadable = recordsRootOk && QueryReadableSpan(recordsRoot, recordsRegionEnd, recordsMbi);
+        constexpr std::size_t kMaximumRecordScanBytes = 8u * 1024u * 1024u;
+        std::size_t recordsBytesToScan = recordsReadable
+            ? std::min<std::size_t>(kMaximumRecordScanBytes, static_cast<std::size_t>(recordsRegionEnd - recordsRoot))
+            : 0;
+        std::vector<unsigned char> recordBytes(recordsBytesToScan, 0);
+        if (recordsBytesToScan && !SafeReadBytes(reinterpret_cast<void*>(recordsRoot), recordBytes.data(), recordsBytesToScan))
+        {
+            recordBytes.clear();
+            recordsBytesToScan = 0;
+        }
+
+        std::ostringstream out;
+        out << "MCST POSITION CURRENCY DIRECT RESEARCH\r\n"
+            << "======================================\r\n"
+            << "research_build=1.114-R2\r\n"
+            << "bridge_version=" << kBridgeVersion << "\r\n"
+            << "bridge_protocol=" << mcbridge::kProtocolVersion << "\r\n"
+            << "read_only=yes\r\n"
+            << "unknown_functions_called=no\r\n"
+            << "purpose=correlate visible Open Positions rows with native-currency and P/L-currency fields\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
+            << "atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
+            << "tracker_profile=" << V153EscapeField(trackerProfile.name) << "\r\n"
+            << "tracker_profile_mode=" << V153EscapeField(trackerProfile.mode) << "\r\n"
+            << "open_positions_grid_ok=" << (positions.ok ? "yes" : "no") << "\r\n"
+            << "open_positions_grid_diagnostic=" << V153EscapeField(positions.diagnostic) << "\r\n"
+            << "ITC_TradeInfo=" << HexValue(tradeInfo) << "\r\n"
+            << "positions_root_98=" << HexValue(root98) << "\r\n"
+            << "positions_records_10E0=" << HexValue(recordsRoot) << "\r\n"
+            << "records_scan_bytes=" << recordsBytesToScan << "\r\n\r\n";
+
+        out << "STATIC EXTRACTOR EVIDENCE\r\n"
+            << "-------------------------\r\n";
+        const char* methodSignatures[] =
+        {
+            "ATOnPTracker::COpenPositionInfoExtractor::AveragePrice",
+            "ATOnPTracker::COpenPositionInfoExtractor::OpenPL",
+            "ATOnPTracker::COpenPositionInfoExtractor::RealizedPL",
+            "ATOnPTracker::COpenPositionInfoExtractor::CurrencyCode",
+            "ATOnPTracker::COpenPositionInfoExtractor::CurrencyLetter",
+            "ATOnPTracker::COpenPositionInfoExtractor::CurrencyLetterRPL",
+            "ATOnPTracker::COpenPositionInfoExtractor::PriceScaleCode"
+        };
+        std::vector<unsigned char> moduleBytes;
+        if (snapshot.atonpTrackerBase && snapshot.atonpTrackerSize)
+        {
+            moduleBytes.assign(snapshot.atonpTrackerSize, 0);
+            if (!SafeReadBytes(reinterpret_cast<void*>(snapshot.atonpTrackerBase), moduleBytes.data(), moduleBytes.size()))
+                moduleBytes.clear();
+        }
+        for (const char* signature : methodSignatures)
+        {
+            std::uintptr_t signatureRva = 0;
+            if (!moduleBytes.empty())
+            {
+                const unsigned char* begin = reinterpret_cast<const unsigned char*>(signature);
+                const unsigned char* end = begin + std::strlen(signature);
+                const auto found = std::search(moduleBytes.begin(), moduleBytes.end(), begin, end);
+                if (found != moduleBytes.end())
+                    signatureRva = static_cast<std::uintptr_t>(std::distance(moduleBytes.begin(), found));
+            }
+            out << signature << " diagnostic_string_rva=" << HexValue(signatureRva) << "\r\n";
+        }
+        out << "NOTE: diagnostic string RVAs prove the named extractor methods are present in this module build; they are not callable function RVAs.\r\n\r\n";
+
+        out << "ROW CORRELATION\r\n"
+            << "---------------\r\n"
+            << "Expected record hypothesis from static analysis: qty@+0x60, average_price@+0x68, open_pl@+0x70, currency candidate beginning @+0x78.\r\n"
+            << "The +0x78 and later fields are research candidates only until live rows confirm their semantics.\r\n\r\n";
+
+        std::size_t rowsWithCandidates = 0;
+        std::size_t totalCandidates = 0;
+        for (std::size_t rowIndex = 0; rowIndex < positions.rows.size(); ++rowIndex)
+        {
+            const auto& row = positions.rows[rowIndex];
+            if (row.size() < 8)
+                continue;
+
+            double quantityValue = 0.0;
+            double averagePrice = 0.0;
+            double displayedOpenPl = 0.0;
+            const bool quantityOk = TryParsePositionResearchNumber(row[4], quantityValue);
+            const bool averageOk = TryParsePositionResearchNumber(row[5], averagePrice);
+            const bool openPlOk = TryParsePositionResearchNumber(row[6], displayedOpenPl);
+            const long long expectedQuantity = quantityOk ? static_cast<long long>(std::llround(quantityValue)) : 0;
+            const long long expectedQuantityAbs = expectedQuantity < 0 ? -expectedQuantity : expectedQuantity;
+
+            out << "ROW " << rowIndex << "\r\n"
+                << "  profile=" << V153EscapeField(row[0]) << "\r\n"
+                << "  account=" << V153EscapeField(row[1]) << "\r\n"
+                << "  symbol=" << V153EscapeField(row[2]) << "\r\n"
+                << "  side=" << V153EscapeField(row[3]) << "\r\n"
+                << "  quantity_text=" << V153EscapeField(row[4]) << "\r\n"
+                << "  average_price_text=" << V153EscapeField(row[5]) << "\r\n"
+                << "  open_pl_text=" << V153EscapeField(row[6]) << "\r\n"
+                << "  open_pl_currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(row[6])) << "\r\n"
+                << "  last_update=" << V153EscapeField(row[7]) << "\r\n";
+
+            if (!quantityOk || !averageOk || recordBytes.empty())
+            {
+                out << "  candidate_count=0\r\n"
+                    << "  candidate_status=not_scanned; missing parsed quantity/average price or records region\r\n\r\n";
+                continue;
+            }
+
+            const double averageTolerance = std::max(0.00051, std::fabs(averagePrice) * 1.0e-8);
+            const double pnlTolerance = std::max(0.011, std::fabs(displayedOpenPl) * 1.0e-7);
+            std::vector<std::uintptr_t> candidates;
+            const std::size_t firstAligned = (8 - (recordsRoot & 7u)) & 7u;
+            for (std::size_t offset = firstAligned; offset + sizeof(double) <= recordBytes.size(); offset += 8)
+            {
+                double candidateAverage = 0.0;
+                std::memcpy(&candidateAverage, recordBytes.data() + offset, sizeof(candidateAverage));
+                if (!std::isfinite(candidateAverage) || std::fabs(candidateAverage - averagePrice) > averageTolerance)
+                    continue;
+                const std::uintptr_t averageAddress = recordsRoot + offset;
+                if (averageAddress < recordsRoot + 0x68)
+                    continue;
+                const std::uintptr_t recordBase = averageAddress - 0x68;
+                if (recordBase < recordsRoot || recordBase + 0xB0 > recordsRoot + recordBytes.size())
+                    continue;
+
+                std::int32_t internalQuantity = 0;
+                double internalAverage = 0.0;
+                double internalOpenPl = 0.0;
+                if (!SafeReadValue(reinterpret_cast<void*>(recordBase + 0x60), internalQuantity) ||
+                    !SafeReadValue(reinterpret_cast<void*>(recordBase + 0x68), internalAverage) ||
+                    !SafeReadValue(reinterpret_cast<void*>(recordBase + 0x70), internalOpenPl))
+                    continue;
+                const long long internalQuantityAbs = internalQuantity < 0 ? -static_cast<long long>(internalQuantity) : static_cast<long long>(internalQuantity);
+                if (internalQuantityAbs != expectedQuantityAbs)
+                    continue;
+                candidates.push_back(recordBase);
+                if (candidates.size() >= 32)
+                    break;
+            }
+
+            out << "  candidate_count=" << candidates.size() << "\r\n";
+            if (!candidates.empty())
+            {
+                ++rowsWithCandidates;
+                totalCandidates += candidates.size();
+            }
+
+            for (std::size_t candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex)
+            {
+                const std::uintptr_t recordBase = candidates[candidateIndex];
+                std::int32_t internalQuantity = 0;
+                double internalAverage = 0.0;
+                double internalOpenPl = 0.0;
+                SafeReadValue(reinterpret_cast<void*>(recordBase + 0x60), internalQuantity);
+                SafeReadValue(reinterpret_cast<void*>(recordBase + 0x68), internalAverage);
+                SafeReadValue(reinterpret_cast<void*>(recordBase + 0x70), internalOpenPl);
+                const bool pnlMatchesDisplay = openPlOk && std::isfinite(internalOpenPl) && std::fabs(internalOpenPl - displayedOpenPl) <= pnlTolerance;
+
+                out << "  CANDIDATE " << candidateIndex << " base=" << HexValue(recordBase)
+                    << " offset_from_records_root=" << HexValue(recordBase - recordsRoot) << "\r\n"
+                    << "    internal_qty=" << internalQuantity << "\r\n"
+                    << "    internal_average_price=" << std::setprecision(17) << internalAverage << "\r\n"
+                    << "    internal_open_pl=" << std::setprecision(17) << internalOpenPl << "\r\n"
+                    << "    internal_open_pl_matches_display=" << (pnlMatchesDisplay ? "yes" : "no") << "\r\n";
+
+                const std::size_t candidateOffsets[] = { 0x78, 0x80, 0x88, 0x90, 0x98, 0xA0, 0xA8 };
+                for (std::size_t fieldOffset : candidateOffsets)
+                {
+                    std::uint64_t raw = 0;
+                    SafeReadValue(reinterpret_cast<void*>(recordBase + fieldOffset), raw);
+                    std::wstring directWide = ReadShortUtf16Candidate(static_cast<std::uintptr_t>(raw));
+                    std::string directAscii = ReadShortAsciiCandidate(static_cast<std::uintptr_t>(raw));
+                    std::uintptr_t indirect = 0;
+                    std::wstring indirectWide;
+                    std::string indirectAscii;
+                    if (raw && SafeReadValue(reinterpret_cast<void*>(static_cast<std::uintptr_t>(raw)), indirect))
+                    {
+                        indirectWide = ReadShortUtf16Candidate(indirect);
+                        indirectAscii = ReadShortAsciiCandidate(indirect);
+                    }
+                    out << "    field_" << HexValue(fieldOffset)
+                        << " raw=" << HexValue(static_cast<std::uintptr_t>(raw))
+                        << " raw_decimal=" << raw;
+                    if (!directWide.empty()) out << " direct_utf16=" << V153EscapeField(directWide);
+                    if (!directAscii.empty()) out << " direct_ascii=" << V153EscapeFieldUtf8(directAscii);
+                    if (!indirectWide.empty()) out << " indirect_utf16=" << V153EscapeField(indirectWide);
+                    if (!indirectAscii.empty()) out << " indirect_ascii=" << V153EscapeFieldUtf8(indirectAscii);
+                    out << "\r\n";
+                }
+
+                out << "    nearby_short_string_pointers:\r\n";
+                std::size_t nearbyStrings = 0;
+                for (std::size_t fieldOffset = 0; fieldOffset <= 0xD0; fieldOffset += sizeof(std::uintptr_t))
+                {
+                    std::uintptr_t pointerValue = 0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(recordBase + fieldOffset), pointerValue) || !pointerValue)
+                        continue;
+                    const std::wstring wide = ReadShortUtf16Candidate(pointerValue);
+                    const std::string ascii = ReadShortAsciiCandidate(pointerValue);
+                    if (wide.empty() && ascii.empty())
+                        continue;
+                    ++nearbyStrings;
+                    out << "      +" << HexValue(fieldOffset) << " -> " << HexValue(pointerValue);
+                    if (!wide.empty()) out << " utf16=" << V153EscapeField(wide);
+                    if (!ascii.empty()) out << " ascii=" << V153EscapeFieldUtf8(ascii);
+                    out << "\r\n";
+                }
+                if (nearbyStrings == 0)
+                    out << "      none\r\n";
+            }
+            out << "\r\n";
+        }
+
+        out << "SUMMARY\r\n"
+            << "-------\r\n"
+            << "visible_rows=" << positions.rows.size() << "\r\n"
+            << "rows_with_record_candidates=" << rowsWithCandidates << "\r\n"
+            << "total_record_candidates=" << totalCandidates << "\r\n"
+            << "research_interpretation=Do not promote any field to production until at least two different instrument currencies and their P/L currencies correlate consistently.\r\n";
+
+        const bool written = WriteUtf8File(reportPath, out.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"position_currency_direct_research\",\"version\":157,"
+                << "\"read_only\":true,\"unknown_functions_called\":false,"
+                << "\"visible_rows\":" << positions.rows.size() << ','
+                << "\"rows_with_record_candidates\":" << rowsWithCandidates << ','
+                << "\"total_record_candidates\":" << totalCandidates << ','
+                << "\"report_written\":" << (written ? "true" : "false") << ','
+                << "\"report_path\":" << JsonString(reportPath) << '}';
+        summaryJson = summary.str();
+        return written && positions.ok && !positions.rows.empty();
+    }
+
+
+
     void AppendV153Section(std::ostringstream& out, const V153GridSectionResult& section, unsigned int columnCount)
     {
         out << "SECTION\t" << section.name
@@ -8154,6 +8580,14 @@ DWORD sehCode = 0;
                 (command == mcbridge::Command::CaptureFlexGridTextReaderLogs ? "logs" : "all"));
             std::string summary;
             const bool written = WriteFlexGridTextReader(snapshot, summary, pageName);
+            responsePayload = summary;
+            return written ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
+        }
+
+        case mcbridge::Command::CapturePositionCurrencyDirectResearch:
+        {
+            std::string summary;
+            const bool written = WritePositionCurrencyDirectResearch(snapshot, summary);
             responsePayload = summary;
             return written ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }

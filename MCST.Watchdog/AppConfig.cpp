@@ -273,6 +273,14 @@ std::wstring GetConfigPath()
     return (std::filesystem::path(GetApplicationDirectory()) / L"MCST-Watchdog.ini").wstring();
 }
 
+static void RefreshIniProfileCache(const std::wstring& path)
+{
+    // Windows profile APIs maintain process-level compatibility caching.
+    // A null-section/key/value write tells the profile subsystem to flush and
+    // refresh its view of this INI file before a manual Reload Settings read.
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+}
+
 std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
 {
     std::vector<std::wstring> changes;
@@ -284,7 +292,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.113");
+    WriteValue(path, L"General", L"version", L"1.114-R2");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -386,8 +394,13 @@ void EnsureDefaultConfigFile(const std::wstring& path)
 AppConfig LoadAppConfig()
 {
     const std::wstring path = GetConfigPath();
+    RefreshIniProfileCache(path);
+
     AppConfig config;
     config.normalizationMessages = NormalizeConfigFile(path);
+    // Normalization may have written missing/default values. Flush once more so
+    // every subsequent read in this load observes the same on-disk generation.
+    RefreshIniProfileCache(path);
 
     config.refreshSeconds = ReadInt(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600);
     config.developerModeEnabled = ReadBool(path, L"Developer", L"enabled", false);

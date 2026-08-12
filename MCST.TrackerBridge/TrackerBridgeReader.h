@@ -2,6 +2,7 @@
 
 inline constexpr wchar_t kTrackerBridgeProductVersion[] = L"1.0";
 inline constexpr int kTrackerBridgeInternalBuildVersion = 156;
+inline constexpr int kPositionCurrencyResearchBridgeVersion = 157;
 
 #include <cstddef>
 #include <cstdint>
@@ -47,7 +48,7 @@ struct TrackerStatusSnapshot
     std::string rawPayload;
 };
 
-// Requests one production snapshot from MCTrackerBridge V156.
+// Requests one production snapshot from MCTrackerBridge V156 or newer.
 // The Bridge response contains Accounts, Open Positions and at most ten newest
 // Logs rows. A parsed partial response is returned even when one section failed.
 bool ReadTrackerStatusSnapshot(
@@ -61,12 +62,26 @@ bool WriteTrackerStatusRawPayload(
     std::wstring& diagnostic);
 
 /**
- * @brief Requests the existing passive Tracker research bundle from Bridge V156.
+ * @brief Requests the existing passive Tracker research bundle from Bridge V157.
  *
  * The bundle is written by the Bridge inside the MultiCharts process to its
  * normal research-output location. This does not change Bridge Protocol V2.
  */
 bool CaptureTrackerResearchBundle(
+    std::wstring& responseSummary,
+    std::wstring& diagnostic,
+    unsigned long connectTimeoutMilliseconds = 5000);
+
+/**
+ * @brief Captures the focused Open Positions currency research report used by the
+ *        Position Currency research workflow.
+ *
+ * Bridge V157 correlates the visible Open Positions rows with the previously
+ * mapped Open Positions record storage and inspects the native-currency and
+ * P/L-currency candidates without modifying MultiCharts state. Protocol V2 is
+ * retained; command 50 is additive and research-only.
+ */
+bool CapturePositionCurrencyResearch(
     std::wstring& responseSummary,
     std::wstring& diagnostic,
     unsigned long connectTimeoutMilliseconds = 5000);

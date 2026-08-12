@@ -53,7 +53,8 @@ namespace mcbridge
         CaptureV152CoordinateMapOpenPositions = 46,
         CaptureV152CoordinateMapLogs = 47,
         CaptureV152CoordinateMapAll = 48,
-        GetStatusReportSnapshot = 49
+        GetStatusReportSnapshot = 49,
+        CapturePositionCurrencyDirectResearch = 50
     };
 
     enum class Status : std::uint32_t

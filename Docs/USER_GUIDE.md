@@ -1,4 +1,4 @@
-# MCST-Watchdog User Guide
+﻿# MCST-Watchdog User Guide
 
 ## Purpose
 
@@ -23,7 +23,7 @@ MCST intentionally uses a **self-documenting INI** model. Missing known settings
 
 User-specific addresses, account identifiers, usernames, passwords, and App Passwords are never invented. Generated sections such as `[DetectedMultiCharts]` are diagnostic output and should not be treated as user settings.
 
-Use **Open Settings** on the Dashboard to open the INI file in the system's associated text editor. Use **Reload Settings** after manual configuration changes.
+Use **Open Settings** on the Dashboard to open the INI file in the system's associated text editor. Use **Reload Settings** after manual configuration changes. Reload Settings refreshes the Windows INI profile view and starts a configuration-generation-safe refresh, so values such as the AutoTrading minimum take effect without restarting the Watchdog. A background result created before the reload is discarded rather than being allowed to restore old settings on the Dashboard.
 
 ## Email Password / App Password
 
@@ -87,7 +87,7 @@ Matching is case-insensitive and keywords are separated with `|`. The Log Alert 
 
 ## Status Reports and Heartbeats
 
-Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs.
+Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs. Tracker tables use calculated column widths so values remain vertically aligned. The final Recent Logs message field may extend freely after its aligned starting position. Open Positions also includes a derived `Position Value` field and a final `TOTALS` row for total Position Value and total Open P/L.
 
 Heartbeat messages are routine proof-of-life messages and use the report recipient rather than the alert recipient.
 

@@ -28,6 +28,7 @@
 #include <cmath>
 #include <deque>
 #include <ctime>
+#include <cstdint>
 #include <cwchar>
 #include <filesystem>
 #include <iomanip>
@@ -64,6 +65,7 @@ namespace
     constexpr int kButtonTrackerResearch = 1015;
     constexpr int kButtonOpenCompatibility = 1016;
     constexpr int kButtonReloadCompatibility = 1017;
+    constexpr int kButtonPositionCurrencyResearch = 1018;
     constexpr int kMenuConfigure = 3001;
     constexpr int kMenuAction1 = 3002;
     constexpr int kMenuAction2 = 3003;
@@ -91,6 +93,7 @@ namespace
 
     struct RefreshResult
     {
+        std::uint64_t configRevision = 0;
         mcst::WatchdogSystemStatus status;
         TrackerStatusSnapshot snapshot;
         BrokerAuthenticationDetection brokerAuthentication;
@@ -104,6 +107,7 @@ namespace
         mcst::WatchdogSystemStatus status;
         TrackerStatusSnapshot snapshot;
         std::mutex mutex;
+        std::uint64_t configRevision = 1;
         bool refreshRunning = false;
         std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
         std::deque<mcst::ActivityItem> activity;
@@ -134,6 +138,7 @@ namespace
     HWND g_autoTradingCaptureButton = nullptr;
     HWND g_autoTradingFinishButton = nullptr;
     HWND g_trackerResearchButton = nullptr;
+    HWND g_positionCurrencyResearchButton = nullptr;
     HWND g_openCompatibilityButton = nullptr;
     HWND g_reloadCompatibilityButton = nullptr;
     HWND g_reloadSettingsButton = nullptr;
@@ -295,12 +300,14 @@ namespace
             const RECT captureRect = CalculateDeveloperToolbarButtonRect(developerLayout, 1);
             const RECT finishRect = CalculateDeveloperToolbarButtonRect(developerLayout, 2);
             const RECT trackerRect = CalculateDeveloperToolbarButtonRect(developerLayout, 3);
-            const RECT openCompatRect = CalculateDeveloperToolbarButtonRect(developerLayout, 4);
-            const RECT reloadCompatRect = CalculateDeveloperToolbarButtonRect(developerLayout, 5);
+            const RECT positionCurrencyRect = CalculateDeveloperToolbarButtonRect(developerLayout, 4);
+            const RECT openCompatRect = CalculateDeveloperToolbarButtonRect(developerLayout, 5);
+            const RECT reloadCompatRect = CalculateDeveloperToolbarButtonRect(developerLayout, 6);
             if (g_autoTradingDiagnosticsButton) MoveWindow(g_autoTradingDiagnosticsButton, startRect.left, startRect.top, startRect.right - startRect.left, startRect.bottom - startRect.top, TRUE);
             if (g_autoTradingCaptureButton) MoveWindow(g_autoTradingCaptureButton, captureRect.left, captureRect.top, captureRect.right - captureRect.left, captureRect.bottom - captureRect.top, TRUE);
             if (g_autoTradingFinishButton) MoveWindow(g_autoTradingFinishButton, finishRect.left, finishRect.top, finishRect.right - finishRect.left, finishRect.bottom - finishRect.top, TRUE);
             if (g_trackerResearchButton) MoveWindow(g_trackerResearchButton, trackerRect.left, trackerRect.top, trackerRect.right - trackerRect.left, trackerRect.bottom - trackerRect.top, TRUE);
+            if (g_positionCurrencyResearchButton) MoveWindow(g_positionCurrencyResearchButton, positionCurrencyRect.left, positionCurrencyRect.top, positionCurrencyRect.right - positionCurrencyRect.left, positionCurrencyRect.bottom - positionCurrencyRect.top, TRUE);
             if (g_openCompatibilityButton) MoveWindow(g_openCompatibilityButton, openCompatRect.left, openCompatRect.top, openCompatRect.right - openCompatRect.left, openCompatRect.bottom - openCompatRect.top, TRUE);
             if (g_reloadCompatibilityButton) MoveWindow(g_reloadCompatibilityButton, reloadCompatRect.left, reloadCompatRect.top, reloadCompatRect.right - reloadCompatRect.left, reloadCompatRect.bottom - reloadCompatRect.top, TRUE);
         }
@@ -322,7 +329,7 @@ namespace
         if (g_settingsButton) ShowWindow(g_settingsButton, SW_HIDE);
         if (g_testEmailButton) ShowWindow(g_testEmailButton, SW_HIDE);
         for (HWND control : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton,
-                              g_trackerResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton })
+                              g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton })
         {
             if (control)
                 ShowWindow(control, showResearch);
@@ -664,30 +671,31 @@ namespace
         }
     }
 
-    RefreshResult CollectStatus(bool forceAutoTradingRefresh)
+    RefreshResult CollectStatus(const AppConfig& config, std::uint64_t configRevision, bool forceAutoTradingRefresh)
     {
         RefreshResult result;
+        result.configRevision = configRevision;
         {
             std::lock_guard<std::mutex> lock(g_app.mutex);
             result.status.activity = g_app.status.activity;
+            result.status.lastReport = g_app.lastReport;
+            result.status.lastAlert = g_app.lastAlert;
         }
         result.status.lastSnapshot = L"Never";
-        result.status.lastReport = g_app.lastReport;
-        result.status.lastAlert = g_app.lastAlert;
-        result.status.autoTradingMinimum = g_app.config.autoTradingMinimum;
+        result.status.autoTradingMinimum = config.autoTradingMinimum;
 
         std::wstring diagnostic;
         bool readOk = false;
-        for (int attempt = 1; attempt <= g_app.config.snapshotRetryCount; ++attempt)
+        for (int attempt = 1; attempt <= config.snapshotRetryCount; ++attempt)
         {
             diagnostic.clear();
-            if (ReadTrackerStatusSnapshot(result.snapshot, diagnostic, static_cast<unsigned long>(g_app.config.bridgeTimeoutMilliseconds)))
+            if (ReadTrackerStatusSnapshot(result.snapshot, diagnostic, static_cast<unsigned long>(config.bridgeTimeoutMilliseconds)))
             {
                 readOk = true;
                 break;
             }
-            if (attempt < g_app.config.snapshotRetryCount)
-                Sleep(static_cast<DWORD>(g_app.config.snapshotRetryDelayMilliseconds));
+            if (attempt < config.snapshotRetryCount)
+                Sleep(static_cast<DWORD>(config.snapshotRetryDelayMilliseconds));
         }
 
         const auto now = std::chrono::system_clock::now();
@@ -734,7 +742,7 @@ namespace
                 result.status.recentLogs = { mcst::HealthState::Critical, L"Read failed", result.snapshot.recentLogs.diagnostic };
 
             std::wstring rawDiagnostic;
-            WriteTrackerStatusRawPayload(result.snapshot, g_app.config.rawSnapshotPath, rawDiagnostic);
+            WriteTrackerStatusRawPayload(result.snapshot, config.rawSnapshotPath, rawDiagnostic);
             if (trackerOk)
                 AddActivity(result.status, mcst::HealthState::Healthy, L"Tracker snapshot read successfully");
             else if (trackerPartial)
@@ -751,19 +759,19 @@ namespace
             AddActivity(result.status, mcst::HealthState::Critical, L"Tracker snapshot failed");
         }
 
-        if (g_app.config.autoTradingMonitoringEnabled)
+        if (config.autoTradingMonitoringEnabled)
         {
-            const AutoTradingReadResult autoTrading = ReadAutoTradingStatus(g_app.config.autoTradingCheckMinutes, forceAutoTradingRefresh);
+            const AutoTradingReadResult autoTrading = ReadAutoTradingStatus(config.autoTradingCheckMinutes, forceAutoTradingRefresh);
             if (autoTrading.succeeded)
             {
                 result.status.lastAutoTradingRead = FormatLocalTime(autoTrading.lastSuccessfulRead);
                 result.status.autoTradingActive = autoTrading.activeStrategies;
-                const bool belowMinimum = autoTrading.activeStrategies < g_app.config.autoTradingMinimum;
+                const bool belowMinimum = autoTrading.activeStrategies < config.autoTradingMinimum;
                 result.status.multiChartsCompatibilityProfile = autoTrading.compatibilityProfile;
                 result.status.autoTrading = {
                     belowMinimum ? mcst::HealthState::Critical : mcst::HealthState::Healthy,
                     std::to_wstring(autoTrading.activeStrategies) + L" Active",
-                    L"Minimum required " + std::to_wstring(g_app.config.autoTradingMinimum) +
+                    L"Minimum required " + std::to_wstring(config.autoTradingMinimum) +
                         L" - Objects found " + std::to_wstring(autoTrading.strategyObjectsFound) +
                         (result.status.multiChartsVersion.empty() ? L"" : L" - MC " + result.status.multiChartsVersion) +
                         (autoTrading.compatibilityProfile.empty() ? L"" : L" - " + autoTrading.compatibilityProfile)
@@ -783,7 +791,7 @@ namespace
                 result.status.autoTrading = {
                     mcst::HealthState::Unknown,
                     L"Read unavailable",
-                    L"Minimum required " + std::to_wstring(g_app.config.autoTradingMinimum) + L" - " + autoTrading.diagnostic
+                    L"Minimum required " + std::to_wstring(config.autoTradingMinimum) + L" - " + autoTrading.diagnostic
                 };
                 if (!autoTrading.fromCache)
                     AddActivity(result.status, mcst::HealthState::Attention, L"AutoTrading read unavailable");
@@ -802,36 +810,36 @@ namespace
 
         result.status.broker = { mcst::HealthState::Unknown, L"Waiting", L"Broker events are evaluated from Recent Logs" };
         result.status.statusReports = {
-            g_app.config.statusReportsEnabled ? mcst::HealthState::Healthy : mcst::HealthState::Unknown,
-            g_app.config.statusReportsEnabled ? L"Scheduled" : L"Disabled",
-            g_app.config.statusReportsEnabled
-                ? (L"Every " + std::to_wstring(g_app.config.statusReportIntervalMinutes) + L" min to " + g_app.config.reportEmailTo)
+            config.statusReportsEnabled ? mcst::HealthState::Healthy : mcst::HealthState::Unknown,
+            config.statusReportsEnabled ? L"Scheduled" : L"Disabled",
+            config.statusReportsEnabled
+                ? (L"Every " + std::to_wstring(config.statusReportIntervalMinutes) + L" min to " + config.reportEmailTo)
                 : L"Manual report remains available"
         };
         {
-            EmailSender sender(g_app.config);
+            EmailSender sender(config);
             std::wstring emailReason;
-            const bool configured = sender.IsConfigured(&emailReason, g_app.config.alertEmailTo);
-            const bool explicitlyDisabled = g_app.config.emailEnabledSettingPresent && !g_app.config.emailEnabled;
+            const bool configured = sender.IsConfigured(&emailReason, config.alertEmailTo);
+            const bool explicitlyDisabled = config.emailEnabledSettingPresent && !config.emailEnabled;
             result.status.email = {
                 configured ? mcst::HealthState::Healthy : (explicitlyDisabled ? mcst::HealthState::Unknown : mcst::HealthState::Attention),
                 configured ? L"Ready" : (explicitlyDisabled ? L"Disabled" : L"Not configured"),
-                configured ? g_app.config.alertEmailTo : emailReason
+                configured ? config.alertEmailTo : emailReason
             };
         }
         {
-            EmailSender sender(g_app.config);
+            EmailSender sender(config);
             std::wstring emailReason;
-            const bool emailConfigured = sender.IsConfigured(&emailReason, g_app.config.reportEmailTo);
-            const bool explicitlyDisabled = g_app.config.heartbeatEnabledSettingPresent && !g_app.config.heartbeatEnabled;
-            const bool operational = g_app.config.heartbeatEnabled && emailConfigured;
+            const bool emailConfigured = sender.IsConfigured(&emailReason, config.reportEmailTo);
+            const bool explicitlyDisabled = config.heartbeatEnabledSettingPresent && !config.heartbeatEnabled;
+            const bool operational = config.heartbeatEnabled && emailConfigured;
             result.status.heartbeat = {
                 operational ? mcst::HealthState::Healthy
                             : (explicitlyDisabled ? mcst::HealthState::Unknown : mcst::HealthState::Attention),
                 operational ? L"Running"
                             : (explicitlyDisabled ? L"Disabled" : L"Not configured"),
                 operational
-                    ? (L"Email every " + std::to_wstring(g_app.config.heartbeatIntervalMinutes) + L" min to " + g_app.config.reportEmailTo)
+                    ? (L"Email every " + std::to_wstring(config.heartbeatIntervalMinutes) + L" min to " + config.reportEmailTo)
                     : (explicitlyDisabled ? L"Explicitly disabled in INI" : emailReason)
             };
         }
@@ -841,17 +849,17 @@ namespace
         result.status.overall = Worst(result.status.overall, result.status.trackerSnapshot.state);
         result.status.overall = Worst(result.status.overall, result.status.recentLogs.state);
         result.status.overall = Worst(result.status.overall, result.status.autoTrading.state);
-        if (g_app.config.statusReportsEnabled)
+        if (config.statusReportsEnabled)
             result.status.overall = Worst(result.status.overall, result.status.statusReports.state);
-        if (!(g_app.config.emailEnabledSettingPresent && !g_app.config.emailEnabled))
+        if (!(config.emailEnabledSettingPresent && !config.emailEnabled))
             result.status.overall = Worst(result.status.overall, result.status.email.state);
-        if (g_app.config.heartbeatEnabled)
+        if (config.heartbeatEnabled)
             result.status.overall = Worst(result.status.overall, result.status.heartbeat.state);
 
         // Browser authentication is sampled on the refresh worker thread. The
         // resulting signal is applied by BrokerMonitor on the UI thread, where
         // it overrides weaker historical Recent Logs when a broker login page is visible.
-        result.brokerAuthentication = DetectBrokerAuthentication(g_app.config);
+        result.brokerAuthentication = DetectBrokerAuthentication(config);
 
         ReadProcessResources(result.status);
         result.diagnostic = diagnostic;
@@ -860,15 +868,20 @@ namespace
 
     void StartRefresh(HWND hwnd, bool forceAutoTradingRefresh = false)
     {
+        AppConfig configSnapshot;
+        std::uint64_t configRevision = 0;
         {
             std::lock_guard<std::mutex> lock(g_app.mutex);
             if (g_app.refreshRunning)
                 return;
             g_app.refreshRunning = true;
+            configSnapshot = g_app.config;
+            configRevision = g_app.configRevision;
         }
 
-        std::thread([hwnd, forceAutoTradingRefresh]() {
-            auto result = std::make_unique<RefreshResult>(CollectStatus(forceAutoTradingRefresh));
+        std::thread([hwnd, forceAutoTradingRefresh, configSnapshot = std::move(configSnapshot), configRevision]() {
+            auto result = std::make_unique<RefreshResult>(
+                CollectStatus(configSnapshot, configRevision, forceAutoTradingRefresh));
             PostMessageW(hwnd, WM_APP_REFRESH_COMPLETE, 0, reinterpret_cast<LPARAM>(result.release()));
         }).detach();
     }
@@ -1026,9 +1039,14 @@ namespace
 
     void ReloadAfterPanelSave(HWND hwnd, const wchar_t* activity)
     {
-    g_app.config = LoadAppConfig();
+        AppConfig reloadedConfig = LoadAppConfig();
+        {
+            std::lock_guard<std::mutex> lock(g_app.mutex);
+            g_app.config = std::move(reloadedConfig);
+            ++g_app.configRevision;
+            AddActivity(g_app.status, mcst::HealthState::Healthy, activity);
+        }
         g_app.schedule.PreserveOnReload(std::chrono::system_clock::now());
-        AddActivity(g_app.status, mcst::HealthState::Healthy, activity);
         UpdateDeveloperControlVisibility(hwnd);
         StartRefresh(hwnd, true);
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -1166,7 +1184,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.113", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R2", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1271,6 +1289,7 @@ namespace
             g_autoTradingCaptureButton = CreateWindowW(L"BUTTON", L"AT Capture", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 176, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingCapture)), nullptr, nullptr);
             g_autoTradingFinishButton = CreateWindowW(L"BUTTON", L"AT Finish", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 372, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingFinish)), nullptr, nullptr);
             g_trackerResearchButton = CreateWindowW(L"BUTTON", L"Tracker Capture", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 520, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTrackerResearch)), nullptr, nullptr);
+            g_positionCurrencyResearchButton = CreateWindowW(L"BUTTON", L"Position CCY", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonPositionCurrencyResearch)), nullptr, nullptr);
             g_openCompatibilityButton = CreateWindowW(L"BUTTON", L"Open Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenCompatibility)), nullptr, nullptr);
             g_reloadCompatibilityButton = CreateWindowW(L"BUTTON", L"Reload Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 816, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadCompatibility)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
@@ -1279,9 +1298,9 @@ namespace
             g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 314, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
             g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 348, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
             g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 382, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
-            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
+            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-            for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton })
+            for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_developerButtonFont), TRUE);
             UpdateDeveloperControlVisibility(hwnd);
             SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
@@ -1383,10 +1402,16 @@ namespace
             case kButtonSettings:
                 if (ShowStatusReportSettings(hwnd))
                 {
-                g_app.config = LoadAppConfig();
+                    AppConfig reloadedConfig = LoadAppConfig();
+                    {
+                        std::lock_guard<std::mutex> lock(g_app.mutex);
+                        g_app.config = std::move(reloadedConfig);
+                        ++g_app.configRevision;
+                        AddActivity(g_app.status, mcst::HealthState::Healthy, L"Status Report settings saved and reloaded");
+                    }
                     g_app.schedule.PreserveOnReload(std::chrono::system_clock::now());
-                    AddActivity(g_app.status, mcst::HealthState::Healthy, L"Status Report settings saved and reloaded");
                     UpdateDeveloperControlVisibility(hwnd);
+                    StartRefresh(hwnd, true);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 return 0;
@@ -1403,14 +1428,20 @@ namespace
             }
             case kButtonReloadSettings:
             {
-            g_app.config = LoadAppConfig();
+                AppConfig reloadedConfig = LoadAppConfig();
                 {
                     std::lock_guard<std::mutex> lock(g_app.mutex);
+                    g_app.config = std::move(reloadedConfig);
+                    ++g_app.configRevision;
                     for (const auto& normalizationMessage : g_app.config.normalizationMessages)
                         AddActivity(g_app.status, mcst::HealthState::Attention, L"INI normalized: " + normalizationMessage);
                 }
                 g_app.schedule.PreserveOnReload(std::chrono::system_clock::now());
-                g_app.autoTradingAlerts.Reset();
+                // Preserve AutoTrading alert state across an INI reload. The next
+                // forced refresh evaluates the new minimum against the previous
+                // below/healthy state, avoiding duplicate critical alerts while still
+                // producing a real transition when the edited threshold crosses the
+                // current active-strategy count.
                 // Preserve the last confirmed Broker state across an INI reload.
                 // A settings reload is not broker evidence and must not force UNKNOWN.
                 g_app.logAlertEngine.Reset();
@@ -1433,7 +1464,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.113", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R2 Research", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1499,6 +1530,96 @@ namespace
                     ShellExecuteW(hwnd, L"open", L"C:\\Temp", nullptr, nullptr, SW_SHOWNORMAL);
                 return 0;
             }
+            case kButtonPositionCurrencyResearch:
+            {
+                // Capture a fresh production snapshot first. Its raw payload is the
+                // ground-truth row reference that lets the offline analysis correlate
+                // symbol/profile/account values with the passive memory probe.
+                TrackerStatusSnapshot referenceSnapshot;
+                std::wstring referenceDiagnostic;
+                const unsigned long timeoutMilliseconds =
+                    static_cast<unsigned long>(g_app.config.bridgeTimeoutMilliseconds);
+
+                SetWindowTextW(g_positionCurrencyResearchButton, L"Capturing...");
+                EnableWindow(g_positionCurrencyResearchButton, FALSE);
+
+                const bool referenceRead = ReadTrackerStatusSnapshot(
+                    referenceSnapshot, referenceDiagnostic, timeoutMilliseconds);
+
+                bool referenceWritten = false;
+                std::wstring referencePath;
+                std::wstring referenceWriteDiagnostic;
+                if (referenceRead && referenceSnapshot.openPositions.present &&
+                    referenceSnapshot.openPositions.ok &&
+                    !referenceSnapshot.openPositions.rows.empty())
+                {
+                    std::wostringstream path;
+                    path << L"C:\\Temp\\MCST_Position_Currency_Reference_"
+                         << referenceSnapshot.processId << L".txt";
+                    referencePath = path.str();
+                    referenceWritten = WriteTrackerStatusRawPayload(
+                        referenceSnapshot, referencePath, referenceWriteDiagnostic);
+                }
+
+                std::wstring summary;
+                std::wstring captureDiagnostic;
+                bool captureOk = false;
+                if (referenceWritten && referenceSnapshot.bridgeVersion >= kPositionCurrencyResearchBridgeVersion)
+                {
+                    captureOk = CapturePositionCurrencyResearch(
+                        summary, captureDiagnostic, timeoutMilliseconds);
+                }
+
+                EnableWindow(g_positionCurrencyResearchButton, TRUE);
+                SetWindowTextW(g_positionCurrencyResearchButton, L"Position CCY");
+
+                std::wstring dialogMessage;
+                if (!referenceRead)
+                {
+                    dialogMessage = L"Could not read a fresh Tracker reference snapshot.\r\n\r\n" + referenceDiagnostic;
+                }
+                else if (referenceSnapshot.bridgeVersion < kPositionCurrencyResearchBridgeVersion)
+                {
+                    dialogMessage = L"Position CCY R2 requires MCST Tracker Bridge V" +
+                        std::to_wstring(kPositionCurrencyResearchBridgeVersion) +
+                        L" or newer. The currently loaded Bridge is V" +
+                        std::to_wstring(referenceSnapshot.bridgeVersion) +
+                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V157 build from this package and restart MultiCharts.";
+                }
+                else if (!referenceSnapshot.openPositions.present || !referenceSnapshot.openPositions.ok)
+                {
+                    dialogMessage = L"Open Positions is not readable, so Position Currency research cannot be correlated safely.\r\n\r\n" +
+                        referenceSnapshot.openPositions.diagnostic;
+                }
+                else if (referenceSnapshot.openPositions.rows.empty())
+                {
+                    dialogMessage = L"No open positions were found. Keep positions from at least two currencies open and run Position CCY again.";
+                }
+                else if (!referenceWritten)
+                {
+                    dialogMessage = L"The Tracker reference snapshot was read, but the research reference file could not be written.\r\n\r\n" +
+                        referenceWriteDiagnostic;
+                }
+                else
+                {
+                    dialogMessage = captureDiagnostic + L"\r\n\r\nReference rows:\r\n" + referencePath;
+                    if (!summary.empty())
+                        dialogMessage += L"\r\n\r\nBridge capture:\r\n" + summary;
+                    dialogMessage +=
+                        L"\r\n\r\nResearch files are under C:\\Temp. "
+                        L"The primary R2 result is MCST_Position_Currency_Direct_<pid>.txt. "
+                        L"It correlates visible Open Positions rows with the mapped position-record storage and inspects separate native-currency and P/L-currency candidates.";
+                }
+
+                MessageBoxW(
+                    hwnd,
+                    dialogMessage.c_str(),
+                    referenceWritten && captureOk ? L"Position Currency research" : L"Position Currency research error",
+                    referenceWritten && captureOk ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
+                if (referenceWritten && captureOk)
+                    ShellExecuteW(hwnd, L"open", L"C:\\Temp", nullptr, nullptr, SW_SHOWNORMAL);
+                return 0;
+            }
             case kButtonOpenCompatibility:
             {
                 std::wstring ensureDiagnostic;
@@ -1531,6 +1652,22 @@ namespace
             std::unique_ptr<RefreshResult> result(reinterpret_cast<RefreshResult*>(lParam));
             if (result)
             {
+                bool staleConfigurationResult = false;
+                {
+                    std::lock_guard<std::mutex> lock(g_app.mutex);
+                    staleConfigurationResult = result->configRevision != g_app.configRevision;
+                    if (staleConfigurationResult)
+                        g_app.refreshRunning = false;
+                }
+                if (staleConfigurationResult)
+                {
+                    // A settings reload happened while this worker was running. Never let
+                    // the old configuration overwrite the Dashboard or AutoTrading minimum.
+                    // Start one forced read using the newly loaded configuration instead.
+                    StartRefresh(hwnd, true);
+                    return 0;
+                }
+
                 std::lock_guard<std::mutex> lock(g_app.mutex);
                 const auto previousActivity = g_app.status.activity;
                 const int active = result->status.autoTradingActive;
@@ -1738,7 +1875,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.113 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R2 research process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -1808,7 +1945,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.113 - Production Release",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R2 - Position Currency Research",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

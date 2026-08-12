@@ -1,75 +1,62 @@
-﻿# MCST 1.113 Production Release
+﻿# MCST 1.114-R2 Position Currency Direct Research
 
-MCST-Watchdog 1.113 extends the MultiCharts Internal Compatibility Framework to the production Tracker snapshot path and adds the tooling needed to bring a verified profile for a new MultiCharts Tracker build into service without recompiling MCST.
+MCST-Watchdog 1.114-R2 is a temporary research build based on the 1.114 production source. R2 focuses on the two currency contexts present in Open Positions: the instrument/native currency used by Average Price and the potentially different currency used by Open P/L.
 
-The release also corrects the Tracker Bridge Host compatibility-database path construction used by the new framework and removes a Watchdog variable-shadowing warning. These are build-quality fixes; Bridge Protocol V2 and the Tracker compatibility behavior are unchanged.
+## New focused Position CCY capture
 
-## Tracker compatibility profiles
-
-MCST Tracker Bridge now uses the shared `MCST-Compatibility.ini` database for build-dependent `ATOnPTracker.dll` layout data.
-
-A verified Tracker profile is selected only when its exact `ATOnPTracker.dll` PE timestamp and image size match the running module and the required Tracker layout fields are complete and valid.
-
-Unknown builds fail safely. The production Tracker reader does not substitute guessed values for a new module fingerprint.
-
-## Automatic Tracker candidate record
-
-When a new `ATOnPTracker.dll` fingerprint has no complete verified Tracker profile, the Bridge can create a disabled `Candidate.ATOnPTracker-*` section containing the detected fingerprint and empty research fields.
-
-Candidate sections are never selected by production code. Their purpose is to provide a self-documenting starting point for Developer Mode research.
-
-## New detected MultiCharts diagnostics
-
-`[DetectedMultiCharts]` now records both compatibility domains when available:
-
-```ini
-charting_pe_timestamp=...
-charting_image_size=...
-atonptracker_pe_timestamp=...
-atonptracker_image_size=...
-autotrading_compatibility_profile=...
-tracker_compatibility_profile=...
-```
-
-The human-readable MultiCharts version remains diagnostic information; exact module fingerprints authorize build-dependent internal values.
-
-## Developer compatibility toolbar
-
-The compact Developer Mode toolbar now provides six actions:
+Developer Mode keeps the compact `Position CCY` action. It first writes a fresh Tracker row reference to:
 
 ```text
-AT Start | AT Capture | AT Finish | Tracker Capture | Open Compat | Reload Compat
+C:\Temp\MCST_Position_Currency_Reference_<pid>.txt
 ```
 
-`Tracker Capture` requests the existing passive Tracker research bundle. `Open Compat` opens the shared compatibility database. `Reload Compat` forces Watchdog to re-evaluate AutoTrading compatibility and requests a new Tracker snapshot; the Bridge resolves Tracker profile data on each snapshot request.
+It then invokes the new additive Bridge Protocol V2 command 50:
 
-## Clearer Tracker diagnostics
+```text
+CapturePositionCurrencyDirectResearch
+```
 
-Tracker failures now distinguish conditions such as:
+Bridge V157 reads the visible Open Positions rows, resolves the previously mapped `ITC_TradeInfo -> +0x98 -> +0x10E0` record-storage candidate, correlates rows using quantity and Average Price, and writes:
 
-- `ATOnPTracker.dll` not loaded;
-- no verified Tracker profile for the detected fingerprint;
-- incomplete matching profile;
-- CATPTTabView object not found for the selected profile;
-- profile layout read failure;
-- verified FlexGrid identity mismatch.
+```text
+C:\Temp\MCST_Position_Currency_Direct_<pid>.txt
+```
 
-This makes a compatibility/read failure distinguishable from an actual critical message found in Recent Logs.
+The direct report inspects the current record hypothesis (`Qty +0x60`, `Average Price +0x68`, `Open P/L +0x70`, currency candidate beginning at `+0x78`) and follows readable short-string pointers. These offsets remain research candidates until live multi-currency captures confirm them.
 
-## Tracker Snapshot status
+## Fail-closed fingerprint gate
 
-The Tracker Snapshot health row now evaluates Accounts, Open Positions, and Recent Logs together. A partially readable snapshot is shown as a warning rather than being logged as a fully successful Tracker read.
+The direct record hypothesis is enabled only for the researched `ATOnPTracker.dll` fingerprint `0x6A5694FB / 3534848`. A different module build is blocked rather than scanned with stale offsets.
+
+## Two-currency objective
+
+R2 no longer assumes that Average Price and Open P/L share a currency. The report keeps them separate and records an Open P/L currency hint only when the visible text identifies it unambiguously. This prevents double conversion later if MultiCharts already reports P/L in the account/report currency.
+
+## Static extractor evidence
+
+The loaded `ATOnPTracker.dll` contains diagnostic names for `COpenPositionInfoExtractor::AveragePrice`, `OpenPL`, `RealizedPL`, `CurrencyCode`, `CurrencyLetter`, and `CurrencyLetterRPL`. R2 records the diagnostic-string RVAs but deliberately does not call unknown internal functions.
+
+## Multi-currency totals safety
+
+The research build retains the 1.114-R1 safety rule:
+
+- per-position `abs(Qty) * Average Price` is labeled `Native Value`;
+- aggregate Position Value is disabled;
+- aggregate Open P/L is disabled;
+- the report states that totals are not calculated while currency normalization is under research.
 
 ## Bridge identity
 
 ```text
-MCST Tracker Bridge product version: 1.0
-Internal build:                     V156
-Bridge protocol:                    V2
+Product version: 1.0
+Internal build:   V157
+Protocol:         V2
 ```
 
-The Bridge implementation changed because it now consumes Tracker compatibility profiles and publishes Tracker fingerprint/profile metadata. The wire protocol remains V2. Watchdog 1.113 rejects an older Tracker Bridge internal build for production snapshots so the new compatibility safeguards cannot be bypassed by a stale loaded DLL.
+V157 is a real Bridge change: it adds command 50 for focused Position Currency research. The production snapshot boundary and protocol header remain unchanged. Production Tracker snapshots continue to require V156 or newer.
 
-## Documentation
+## Recommended capture conditions
 
-README, Installation Guide, User Guide, Developer Guide, Architecture, Compatibility Guide, Coding Standard, build information, changelog, Tracker Bridge README, and release validation have been updated for the generalized compatibility workflow.
+Run `Position CCY` while Open Positions contains at least two instruments with different native currencies. Three currencies are preferable. If possible, include a row where Open P/L is visibly in a different currency from Average Price.
+
+See `Docs/POSITION_CURRENCY_RESEARCH.md` for the exact workflow.
