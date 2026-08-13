@@ -50,11 +50,11 @@ The Bridge runs inside MultiCharts and provides a stable Tracker snapshot bounda
 
 ```text
 Product version: 1.0
-Internal build:  V158
+Internal build:  V171
 Protocol:        V2
 ```
 
-The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling. V157 introduced the additive Position Currency research command, and V158 keeps the same Protocol V2 command while replacing the rejected fixed-root R2 implementation with bounded dynamic read-only correlation.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling. V157 introduced the additive Position Currency research command, and V171 keeps the same Protocol V2 command while implementing fingerprint-scoped, bounded, read-only verification of the R15 position interface.
 
 ### MCST-Watchdog
 

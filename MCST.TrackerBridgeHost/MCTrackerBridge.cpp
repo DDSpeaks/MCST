@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 158;
+    constexpr int kBridgeVersion = 171;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -8080,7 +8080,8 @@ DWORD sehCode = 0;
     void DiscoverPositionResearchRegions(
         const std::vector<std::pair<std::uintptr_t, std::string>>& seeds,
         std::vector<PositionResearchRegion>& regions,
-        std::size_t& pointerNodesScanned)
+        std::size_t& pointerNodesScanned,
+        const std::chrono::steady_clock::time_point& deadline)
     {
         regions.clear();
         pointerNodesScanned = 0;
@@ -8111,8 +8112,13 @@ DWORD sehCode = 0;
         constexpr std::size_t kMaximumNodes = 4096;
         constexpr std::size_t kMaximumBytesPerNode = 64u * 1024u;
         constexpr std::size_t kMaximumChildrenPerNode = 128;
+        unsigned char* nodeBuffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kMaximumBytesPerNode, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!nodeBuffer)
+            return;
 
-        while (!pending.empty() && pointerNodesScanned < kMaximumNodes)
+        while (!pending.empty() && pointerNodesScanned < kMaximumNodes &&
+               std::chrono::steady_clock::now() < deadline)
         {
             Pending node = pending.front();
             pending.pop_front();
@@ -8129,16 +8135,15 @@ DWORD sehCode = 0;
             if (bytesToInspect < sizeof(std::uintptr_t))
                 continue;
 
-            std::vector<unsigned char> bytes(bytesToInspect, 0);
-            if (!SafeReadBytes(reinterpret_cast<void*>(node.address), bytes.data(), bytes.size()))
+            if (!SafeReadBytes(reinterpret_cast<void*>(node.address), nodeBuffer, bytesToInspect))
                 continue;
 
             ++pointerNodesScanned;
             std::size_t children = 0;
-            for (std::size_t offset = 0; offset + sizeof(std::uintptr_t) <= bytes.size(); offset += sizeof(std::uintptr_t))
+            for (std::size_t offset = 0; offset + sizeof(std::uintptr_t) <= bytesToInspect; offset += sizeof(std::uintptr_t))
             {
                 std::uintptr_t value = 0;
-                std::memcpy(&value, bytes.data() + offset, sizeof(value));
+                std::memcpy(&value, nodeBuffer + offset, sizeof(value));
                 if (!value || value < 0x10000)
                     continue;
 
@@ -8159,6 +8164,7 @@ DWORD sehCode = 0;
                 }
             }
         }
+        VirtualFree(nodeBuffer, 0, MEM_RELEASE);
     }
 
     std::vector<PositionResearchRegion> EnumerateFallbackPositionResearchRegions(
@@ -8287,6 +8293,10 @@ DWORD sehCode = 0;
         constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
         constexpr std::size_t kMaximumRegionBytes = 128u * 1024u * 1024u;
         constexpr std::size_t kMaximumCandidatesPerRow = 32;
+        unsigned char* scanBuffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kChunkBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!scanBuffer)
+            return;
 
         for (const PositionResearchRegion& region : regions)
         {
@@ -8329,24 +8339,23 @@ DWORD sehCode = 0;
                     break;
 
                 const std::uintptr_t chunkAddress = region.base + regionOffset;
-                std::vector<unsigned char> bytes(bytesToRead, 0);
-                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), bytes.data(), bytes.size()))
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), scanBuffer, bytesToRead))
                 {
                     regionOffset += bytesToRead;
                     continue;
                 }
 
                 regionReadAny = true;
-                stats.bytesRead += bytes.size();
+                stats.bytesRead += bytesToRead;
 
                 const std::size_t firstAligned =
                     static_cast<std::size_t>((8u - (chunkAddress & 7u)) & 7u);
                 for (std::size_t offset = firstAligned;
-                     offset + sizeof(double) <= bytes.size();
+                     offset + sizeof(double) <= bytesToRead;
                      offset += 8)
                 {
                     double value = 0.0;
-                    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+                    std::memcpy(&value, scanBuffer + offset, sizeof(value));
                     ++stats.valuesChecked;
                     if (!std::isfinite(value))
                         continue;
@@ -8390,6 +8399,7 @@ DWORD sehCode = 0;
             if (stats.runtimeLimitReached || stats.byteLimitReached)
                 break;
         }
+        VirtualFree(scanBuffer, 0, MEM_RELEASE);
     }
 
     struct PositionResearchSignatureEvidence
@@ -8399,6 +8409,22 @@ DWORD sehCode = 0;
         std::uintptr_t stringVa = 0;
         std::uintptr_t stringRva = 0;
         std::vector<std::uintptr_t> rawRipReferences;
+    };
+
+    struct R13CodePatternEvidence
+    {
+        std::uintptr_t instructionVa = 0;
+        std::uintptr_t targetVa = 0;
+        long long fieldOffset = 0;
+        std::string kind;
+    };
+
+    struct R13StaticCodeWindow
+    {
+        std::uintptr_t referenceVa = 0;
+        std::uintptr_t beginVa = 0;
+        std::vector<unsigned char> bytes;
+        std::vector<R13CodePatternEvidence> patterns;
     };
 
     bool FindAsciiSignatureInPeSections(
@@ -8499,6 +8525,822 @@ DWORD sehCode = 0;
         return true;
     }
 
+    bool R13ReadStaticCodeWindow(
+        const std::vector<PeSectionAnalysis>& sections,
+        std::uintptr_t referenceVa,
+        R13StaticCodeWindow& window)
+    {
+        window = R13StaticCodeWindow{};
+        window.referenceVa = referenceVa;
+        const PeSectionAnalysis* executable = nullptr;
+        for (const PeSectionAnalysis& section : sections)
+        {
+            if (section.executable && referenceVa >= section.beginVa &&
+                referenceVa < section.endVa)
+            {
+                executable = &section;
+                break;
+            }
+        }
+        if (!executable)
+            return false;
+
+        window.beginVa = (std::max)(
+            executable->beginVa,
+            referenceVa > 0x180 ? referenceVa - 0x180 : executable->beginVa);
+        const std::uintptr_t endVa = (std::min)(
+            executable->endVa, referenceVa + 0x280);
+        if (endVa <= window.beginVa)
+            return false;
+        window.bytes.resize(static_cast<std::size_t>(endVa - window.beginVa));
+        if (!SafeReadBytes(
+                reinterpret_cast<void*>(window.beginVa),
+                window.bytes.data(), window.bytes.size()))
+        {
+            window.bytes.clear();
+            return false;
+        }
+
+        auto addField = [&](std::size_t offset, std::size_t displacementAt,
+                            bool displacement32, const char* kind)
+        {
+            long long displacement = 0;
+            if (displacement32)
+            {
+                std::int32_t value = 0;
+                std::memcpy(&value, window.bytes.data() + displacementAt, sizeof(value));
+                displacement = value;
+            }
+            else
+            {
+                displacement = static_cast<std::int8_t>(window.bytes[displacementAt]);
+            }
+            R13CodePatternEvidence item;
+            item.instructionVa = window.beginVa + offset;
+            item.fieldOffset = displacement;
+            item.kind = kind;
+            window.patterns.push_back(item);
+        };
+        auto addTarget = [&](std::size_t offset, std::size_t displacementAt,
+                             std::size_t instructionLength, const char* kind)
+        {
+            std::int32_t displacement = 0;
+            std::memcpy(&displacement, window.bytes.data() + displacementAt, sizeof(displacement));
+            R13CodePatternEvidence item;
+            item.instructionVa = window.beginVa + offset;
+            item.targetVa = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(item.instructionVa + instructionLength) + displacement);
+            item.kind = kind;
+            window.patterns.push_back(item);
+        };
+
+        // These are deliberately conservative byte-pattern candidates, not a claim
+        // of complete instruction decoding. The raw bytes remain the primary evidence.
+        for (std::size_t i = 0; i < window.bytes.size(); ++i)
+        {
+            const std::size_t remaining = window.bytes.size() - i;
+            const unsigned char* p = window.bytes.data() + i;
+            if (remaining >= 5 && (p[0] == 0xE8 || p[0] == 0xE9))
+                addTarget(i, i + 1, 5, p[0] == 0xE8 ? "relative_call_candidate" : "relative_jump_candidate");
+
+            if (remaining >= 4 && p[0] == 0x48 &&
+                (p[1] == 0x8B || p[1] == 0x8D) && (p[2] & 0xC7u) == 0x41u)
+                addField(i, i + 3, false, p[1] == 0x8B ? "this_qword_load_candidate" : "this_address_candidate");
+            if (remaining >= 7 && p[0] == 0x48 &&
+                (p[1] == 0x8B || p[1] == 0x8D) && (p[2] & 0xC7u) == 0x81u)
+                addField(i, i + 3, true, p[1] == 0x8B ? "this_qword_load_candidate" : "this_address_candidate");
+            if (remaining >= 3 && p[0] == 0x8B && (p[1] & 0xC7u) == 0x41u)
+                addField(i, i + 2, false, "this_dword_load_candidate");
+            if (remaining >= 6 && p[0] == 0x8B && (p[1] & 0xC7u) == 0x81u)
+                addField(i, i + 2, true, "this_dword_load_candidate");
+            if (remaining >= 4 && p[0] == 0x0F &&
+                (p[1] == 0xB6 || p[1] == 0xB7) && (p[2] & 0xC7u) == 0x41u)
+                addField(i, i + 3, false, p[1] == 0xB6 ? "this_byte_load_candidate" : "this_word_load_candidate");
+            if (remaining >= 7 && p[0] == 0x0F &&
+                (p[1] == 0xB6 || p[1] == 0xB7) && (p[2] & 0xC7u) == 0x81u)
+                addField(i, i + 3, true, p[1] == 0xB6 ? "this_byte_load_candidate" : "this_word_load_candidate");
+            if (remaining >= 5 && (p[0] == 0xF2 || p[0] == 0xF3) &&
+                p[1] == 0x0F && p[2] == 0x10 && (p[3] & 0xC7u) == 0x41u)
+                addField(i, i + 4, false, p[0] == 0xF2 ? "this_scalar_double_load_candidate" : "this_scalar_float_load_candidate");
+            if (remaining >= 8 && (p[0] == 0xF2 || p[0] == 0xF3) &&
+                p[1] == 0x0F && p[2] == 0x10 && (p[3] & 0xC7u) == 0x81u)
+                addField(i, i + 4, true, p[0] == 0xF2 ? "this_scalar_double_load_candidate" : "this_scalar_float_load_candidate");
+
+            if (remaining >= 7 && p[0] >= 0x40 && p[0] <= 0x4F &&
+                (p[1] == 0x8B || p[1] == 0x8D) && (p[2] & 0xC7u) == 0x05u)
+                addTarget(i, i + 3, 7, "rip_relative_target_candidate");
+        }
+        return true;
+    }
+
+    struct R15DispatchSlotEvidence
+    {
+        std::string methodName;
+        std::size_t expectedSlotOffset = 0;
+        std::vector<std::pair<std::uintptr_t, std::size_t>> virtualCalls;
+        bool expectedSlotFound = false;
+    };
+
+    enum class R15AbiClassification
+    {
+        Rejected,
+        Unknown,
+        Plausible,
+        Compatible
+    };
+
+    const char* R15AbiClassificationText(R15AbiClassification value)
+    {
+        switch (value)
+        {
+        case R15AbiClassification::Rejected: return "REJECTED";
+        case R15AbiClassification::Plausible: return "PLAUSIBLE";
+        case R15AbiClassification::Compatible: return "COMPATIBLE";
+        default: return "UNKNOWN";
+        }
+    }
+
+    struct R15TargetCodeEvidence
+    {
+        std::uintptr_t originalTargetVa = 0;
+        std::uintptr_t effectiveTargetVa = 0;
+        std::size_t thunkDepth = 0;
+        std::string moduleName;
+        std::uintptr_t moduleBase = 0;
+        std::uintptr_t targetRva = 0;
+        bool boundaryFound = false;
+        std::uintptr_t functionBeginVa = 0;
+        std::uintptr_t functionEndVa = 0;
+        std::uintptr_t unwindInfoVa = 0;
+        std::uintptr_t windowBeginVa = 0;
+        std::vector<unsigned char> bytes;
+        bool rdxObserved = false;
+        bool directOutputWrite = false;
+        bool rdxForwardedOrSaved = false;
+        bool callObserved = false;
+        bool trivialThisGetter = false;
+        bool earlyLeafReturnWithoutRdx = false;
+        R15AbiClassification classification = R15AbiClassification::Unknown;
+        std::string diagnostic;
+    };
+
+    struct R15InterfaceSlotEvidence
+    {
+        std::size_t slotOffset = 0;
+        std::string semanticName;
+        std::uintptr_t targetVa = 0;
+        std::string targetModule;
+        std::uintptr_t targetModuleBase = 0;
+        std::uintptr_t targetRva = 0;
+        bool executable = false;
+        R15AbiClassification abiClassification = R15AbiClassification::Unknown;
+    };
+
+    struct R15InterfaceCandidate
+    {
+        std::uintptr_t referenceFieldVa = 0;
+        std::uintptr_t interfaceVa = 0;
+        std::uintptr_t vtableVa = 0;
+        std::uintptr_t vtableModuleBase = 0;
+        std::uintptr_t vtableRva = 0;
+        std::uintptr_t regionBase = 0;
+        std::size_t regionSize = 0;
+        std::string regionSource;
+        std::string vtableModule;
+        std::vector<R15InterfaceSlotEvidence> slots;
+        std::set<std::uintptr_t> interfaceInstances;
+        std::vector<std::pair<std::uintptr_t, std::uintptr_t>> referenceSamples;
+        std::size_t referenceCount = 0;
+        std::size_t uniqueTargets = 0;
+        std::size_t compatibleSlots = 0;
+        std::size_t plausibleSlots = 0;
+        std::size_t unknownSlots = 0;
+        std::size_t rejectedSlots = 0;
+        bool abiCandidate = false;
+        int score = 0;
+    };
+
+    struct R15InterfaceSearchStats
+    {
+        std::size_t regionsConsidered = 0;
+        std::size_t regionsRead = 0;
+        std::uint64_t bytesRead = 0;
+        std::uint64_t alignedValuesChecked = 0;
+        std::size_t pointerShapedValues = 0;
+        std::size_t objectPointersRead = 0;
+        std::size_t vtablesInKnownModules = 0;
+        std::size_t uniqueVtablesExamined = 0;
+        std::size_t fullDispatchVtables = 0;
+        std::size_t duplicateVtableReferences = 0;
+        std::size_t uniqueTargetsAnalyzed = 0;
+        std::size_t compatibleTargets = 0;
+        std::size_t plausibleTargets = 0;
+        std::size_t unknownTargets = 0;
+        std::size_t rejectedTargets = 0;
+        bool allocationFailed = false;
+        bool byteLimitReached = false;
+        bool runtimeLimitReached = false;
+        bool uniqueVtableLimitReached = false;
+        bool targetAnalysisLimitReached = false;
+    };
+
+    const std::pair<std::size_t, const char*> kR15DispatchSlots[] =
+    {
+        { 0x48, "AveragePrice" },
+        { 0x58, "OpenPL" },
+        { 0x60, "PriceScaleCode" },
+        { 0x70, "CurrencyCode_or_CurrencyLetter" },
+        { 0x88, "CurrencyLetterRPL" },
+        { 0x90, "RealizedPL" }
+    };
+
+    R15DispatchSlotEvidence R15AnalyzeDispatchCalls(
+        const std::string& methodName,
+        std::size_t expectedSlotOffset,
+        const std::vector<R13StaticCodeWindow>& windows)
+    {
+        R15DispatchSlotEvidence result;
+        result.methodName = methodName;
+        result.expectedSlotOffset = expectedSlotOffset;
+        std::set<std::pair<std::uintptr_t, std::size_t>> unique;
+        for (const R13StaticCodeWindow& window : windows)
+        {
+            for (std::size_t i = 0; i < window.bytes.size(); ++i)
+            {
+                const std::size_t remaining = window.bytes.size() - i;
+                const unsigned char* p = window.bytes.data() + i;
+                std::size_t slotOffset = static_cast<std::size_t>(-1);
+                if (remaining >= 3 && p[0] == 0xFF && p[1] == 0x50)
+                    slotOffset = p[2];
+                else if (remaining >= 6 && p[0] == 0xFF && p[1] == 0x90)
+                {
+                    std::uint32_t displacement = 0;
+                    std::memcpy(&displacement, p + 2, sizeof(displacement));
+                    slotOffset = displacement;
+                }
+                else if (remaining >= 4 && p[0] >= 0x40 && p[0] <= 0x4F &&
+                         p[1] == 0x8B && (p[2] & 0xC7u) == 0x40u)
+                {
+                    // mov register,[rax+disp8], followed later by call register
+                    slotOffset = p[3];
+                }
+                else if (remaining >= 7 && p[0] >= 0x40 && p[0] <= 0x4F &&
+                         p[1] == 0x8B && (p[2] & 0xC7u) == 0x80u)
+                {
+                    // mov register,[rax+disp32], followed later by call register
+                    std::uint32_t displacement = 0;
+                    std::memcpy(&displacement, p + 3, sizeof(displacement));
+                    slotOffset = displacement;
+                }
+                if (slotOffset == static_cast<std::size_t>(-1) || slotOffset > 0x400)
+                    continue;
+                const auto item = std::make_pair(window.beginVa + i, slotOffset);
+                if (unique.insert(item).second)
+                    result.virtualCalls.push_back(item);
+                if (slotOffset == expectedSlotOffset)
+                    result.expectedSlotFound = true;
+            }
+        }
+        return result;
+    }
+
+    const ModuleRecord* R15ModuleForAddress(
+        const Snapshot& snapshot,
+        std::uintptr_t address,
+        std::size_t bytes = 1)
+    {
+        if (!bytes)
+            return nullptr;
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            const std::uintptr_t end = module.base + module.size;
+            const std::uintptr_t requestedEnd = address + bytes;
+            if (end >= module.base && requestedEnd >= address &&
+                address >= module.base && requestedEnd <= end)
+                return &module;
+        }
+        return nullptr;
+    }
+
+    std::string R15ModuleDisplayName(const ModuleRecord* module)
+    {
+        if (!module)
+            return "unknown";
+        const std::wstring display = module->name.empty()
+            ? BaseName(module->path) : module->name;
+        return WideToUtf8(display);
+    }
+
+    std::string R15SummarizeRegionSource(const std::string& source)
+    {
+        constexpr std::size_t kMaximumCharacters = 384;
+        if (source.size() <= kMaximumCharacters)
+            return source;
+        const std::size_t pathCount = static_cast<std::size_t>(
+            1 + std::count(source.begin(), source.end(), '|'));
+        std::ostringstream out;
+        out << source.substr(0, kMaximumCharacters)
+            << "...[truncated paths=" << pathCount
+            << " original_chars=" << source.size() << ']';
+        return out.str();
+    }
+
+    bool R15ResolveRuntimeBoundary(
+        std::uintptr_t targetVa,
+        R15TargetCodeEvidence& evidence)
+    {
+        DWORD64 imageBase = 0;
+        PRUNTIME_FUNCTION runtimeFunction = RtlLookupFunctionEntry(
+            static_cast<DWORD64>(targetVa), &imageBase, nullptr);
+        if (!runtimeFunction || !imageBase)
+            return false;
+        const std::uintptr_t beginVa = static_cast<std::uintptr_t>(
+            imageBase + runtimeFunction->BeginAddress);
+        const std::uintptr_t endVa = static_cast<std::uintptr_t>(
+            imageBase + runtimeFunction->EndAddress);
+        if (endVa <= beginVa || targetVa < beginVa || targetVa >= endVa)
+            return false;
+        evidence.boundaryFound = true;
+        evidence.functionBeginVa = beginVa;
+        evidence.functionEndVa = endVa;
+        evidence.unwindInfoVa = static_cast<std::uintptr_t>(
+            imageBase + runtimeFunction->UnwindData);
+        return true;
+    }
+
+    std::uintptr_t R15ResolveDirectThunk(
+        std::uintptr_t originalTargetVa,
+        std::size_t& depth)
+    {
+        depth = 0;
+        std::uintptr_t current = originalTargetVa;
+        std::set<std::uintptr_t> visited;
+        for (std::size_t hop = 0; hop < 4 && visited.insert(current).second; ++hop)
+        {
+            unsigned char bytes[16]{};
+            if (!SafeReadBytes(reinterpret_cast<void*>(current), bytes, sizeof(bytes)))
+                break;
+            std::uintptr_t next = 0;
+            if (bytes[0] == 0xE9)
+            {
+                std::int32_t displacement = 0;
+                std::memcpy(&displacement, bytes + 1, sizeof(displacement));
+                next = static_cast<std::uintptr_t>(
+                    static_cast<std::intptr_t>(current + 5) + displacement);
+            }
+            else if (bytes[0] == 0xEB)
+            {
+                const std::int8_t displacement = static_cast<std::int8_t>(bytes[1]);
+                next = static_cast<std::uintptr_t>(
+                    static_cast<std::intptr_t>(current + 2) + displacement);
+            }
+            else if (bytes[0] == 0xFF && bytes[1] == 0x25)
+            {
+                std::int32_t displacement = 0;
+                std::memcpy(&displacement, bytes + 2, sizeof(displacement));
+                const std::uintptr_t pointerVa = static_cast<std::uintptr_t>(
+                    static_cast<std::intptr_t>(current + 6) + displacement);
+                SafeReadValue(reinterpret_cast<void*>(pointerVa), next);
+            }
+            else if (bytes[0] == 0x48 && bytes[1] == 0xFF && bytes[2] == 0x25)
+            {
+                std::int32_t displacement = 0;
+                std::memcpy(&displacement, bytes + 3, sizeof(displacement));
+                const std::uintptr_t pointerVa = static_cast<std::uintptr_t>(
+                    static_cast<std::intptr_t>(current + 7) + displacement);
+                SafeReadValue(reinterpret_cast<void*>(pointerVa), next);
+            }
+            if (!next || !MemoryRangeHasProtection(reinterpret_cast<void*>(next), 1, true))
+                break;
+            current = next;
+            ++depth;
+        }
+        return current;
+    }
+
+    bool R15LooksLikeTrivialThisGetter(const std::vector<unsigned char>& bytes)
+    {
+        std::size_t i = 0;
+        if (bytes.size() >= 4 && bytes[0] == 0xF3 && bytes[1] == 0x0F &&
+            bytes[2] == 0x1E && bytes[3] == 0xFA)
+            i = 4;
+        if (i < bytes.size() && bytes[i] >= 0x40 && bytes[i] <= 0x4F)
+        {
+            if ((bytes[i] & 0x01u) != 0)
+                return false;
+            ++i;
+        }
+        if (i + 2 >= bytes.size())
+            return false;
+
+        std::size_t instructionEnd = 0;
+        if (bytes[i] == 0x8B)
+        {
+            const unsigned char modrm = bytes[i + 1];
+            const unsigned int mod = modrm >> 6;
+            const unsigned int rm = modrm & 7u;
+            if (rm != 1u || (mod != 1u && mod != 2u))
+                return false;
+            instructionEnd = i + 2 + (mod == 1u ? 1u : 4u);
+        }
+        else if (i + 3 < bytes.size() && bytes[i] == 0x0F &&
+                 (bytes[i + 1] == 0xB6 || bytes[i + 1] == 0xB7))
+        {
+            const unsigned char modrm = bytes[i + 2];
+            const unsigned int mod = modrm >> 6;
+            const unsigned int rm = modrm & 7u;
+            if (rm != 1u || (mod != 1u && mod != 2u))
+                return false;
+            instructionEnd = i + 3 + (mod == 1u ? 1u : 4u);
+        }
+        return instructionEnd < bytes.size() && bytes[instructionEnd] == 0xC3;
+    }
+
+    void R15AnalyzeOutputPointerAbi(R15TargetCodeEvidence& evidence)
+    {
+        const std::size_t limit = (std::min)(
+            static_cast<std::size_t>(256), evidence.bytes.size());
+        evidence.trivialThisGetter = R15LooksLikeTrivialThisGetter(evidence.bytes);
+        std::size_t firstReturn = static_cast<std::size_t>(-1);
+        for (std::size_t i = 0; i < limit; ++i)
+        {
+            if (evidence.bytes[i] == 0xC3 && firstReturn == static_cast<std::size_t>(-1))
+                firstReturn = i;
+            if (evidence.bytes[i] == 0xE8)
+                evidence.callObserved = true;
+            if (i + 1 < limit && evidence.bytes[i] == 0xFF &&
+                ((evidence.bytes[i + 1] >> 3) & 7u) == 2u)
+                evidence.callObserved = true;
+
+            std::size_t opcode = i;
+            unsigned char rex = 0;
+            if (evidence.bytes[opcode] >= 0x40 && evidence.bytes[opcode] <= 0x4F)
+            {
+                rex = evidence.bytes[opcode];
+                ++opcode;
+            }
+            if (opcode + 1 >= limit)
+                continue;
+
+            const unsigned char operation = evidence.bytes[opcode];
+            if (operation == 0x8B || operation == 0x89 || operation == 0x88 ||
+                operation == 0x8D || operation == 0x85 || operation == 0x84 ||
+                operation == 0xC6 || operation == 0xC7)
+            {
+                const unsigned char modrm = evidence.bytes[opcode + 1];
+                const unsigned int mod = modrm >> 6;
+                const unsigned int reg = (modrm >> 3) & 7u;
+                const unsigned int rm = modrm & 7u;
+                const bool rmIsRdx = rm == 2u && (rex & 0x01u) == 0;
+                const bool regIsRdx = reg == 2u && (rex & 0x04u) == 0;
+                bool rdxRead = false;
+                if (operation == 0x8B || operation == 0x8D)
+                    rdxRead = rmIsRdx;
+                else if (operation == 0x89 || operation == 0x88)
+                    rdxRead = regIsRdx || (mod != 3u && rmIsRdx);
+                else if (operation == 0x85 || operation == 0x84)
+                    rdxRead = rmIsRdx || regIsRdx;
+                else if (operation == 0xC6 || operation == 0xC7)
+                    rdxRead = mod != 3u && rmIsRdx;
+                if (rdxRead)
+                    evidence.rdxObserved = true;
+                if (mod != 3u && rmIsRdx &&
+                    (operation == 0x89 || operation == 0x88 ||
+                     operation == 0xC6 || operation == 0xC7))
+                    evidence.directOutputWrite = true;
+                if ((operation == 0x8B || operation == 0x8D) && rmIsRdx)
+                    evidence.rdxForwardedOrSaved = true;
+                if ((operation == 0x89 || operation == 0x88) && regIsRdx)
+                    evidence.rdxForwardedOrSaved = true;
+            }
+
+            std::size_t twoByte = opcode;
+            if ((evidence.bytes[twoByte] == 0xF2 || evidence.bytes[twoByte] == 0xF3 ||
+                 evidence.bytes[twoByte] == 0x66) && twoByte + 1 < limit)
+                ++twoByte;
+            if (twoByte + 2 < limit && evidence.bytes[twoByte] == 0x0F &&
+                (evidence.bytes[twoByte + 1] == 0x11 ||
+                 evidence.bytes[twoByte + 1] == 0x7F))
+            {
+                const unsigned char modrm = evidence.bytes[twoByte + 2];
+                if ((modrm >> 6) != 3u && (modrm & 7u) == 2u)
+                {
+                    evidence.rdxObserved = true;
+                    evidence.directOutputWrite = true;
+                }
+            }
+        }
+
+        evidence.earlyLeafReturnWithoutRdx =
+            firstReturn != static_cast<std::size_t>(-1) && firstReturn <= 32 &&
+            !evidence.rdxObserved && !evidence.callObserved;
+        if (evidence.trivialThisGetter)
+        {
+            evidence.classification = R15AbiClassification::Rejected;
+            evidence.diagnostic = "trivial this-field getter ignores the required RDX output pointer";
+        }
+        else if (evidence.earlyLeafReturnWithoutRdx)
+        {
+            evidence.classification = R15AbiClassification::Rejected;
+            evidence.diagnostic = "early leaf return has no RDX output-pointer evidence";
+        }
+        else if (evidence.directOutputWrite)
+        {
+            evidence.classification = R15AbiClassification::Compatible;
+            evidence.diagnostic = "direct write through an RDX-based output address observed";
+        }
+        else if (evidence.rdxObserved &&
+                 (evidence.rdxForwardedOrSaved || evidence.callObserved))
+        {
+            evidence.classification = R15AbiClassification::Plausible;
+            evidence.diagnostic = "RDX is preserved or forwarded on a call-capable path";
+        }
+        else
+        {
+            evidence.classification = R15AbiClassification::Unknown;
+            evidence.diagnostic = evidence.bytes.empty()
+                ? "target code could not be read"
+                : "no decisive output-pointer evidence in the bounded raw window";
+        }
+    }
+
+    R15TargetCodeEvidence R15AnalyzeTargetCode(
+        const Snapshot& snapshot,
+        std::uintptr_t targetVa)
+    {
+        R15TargetCodeEvidence evidence;
+        evidence.originalTargetVa = targetVa;
+        evidence.effectiveTargetVa = R15ResolveDirectThunk(targetVa, evidence.thunkDepth);
+        const ModuleRecord* module = R15ModuleForAddress(
+            snapshot, evidence.effectiveTargetVa);
+        evidence.moduleName = R15ModuleDisplayName(module);
+        if (module)
+        {
+            evidence.moduleBase = module->base;
+            evidence.targetRva = evidence.effectiveTargetVa - module->base;
+        }
+        R15ResolveRuntimeBoundary(evidence.effectiveTargetVa, evidence);
+        evidence.windowBeginVa = evidence.boundaryFound
+            ? evidence.functionBeginVa : evidence.effectiveTargetVa;
+        std::size_t byteCount = 256;
+        if (evidence.boundaryFound)
+            byteCount = static_cast<std::size_t>((std::min)(
+                static_cast<std::uintptr_t>(384),
+                evidence.functionEndVa - evidence.windowBeginVa));
+        if (module)
+            byteCount = static_cast<std::size_t>((std::min)(
+                static_cast<std::uintptr_t>(byteCount),
+                module->base + module->size - evidence.windowBeginVa));
+        if (byteCount)
+        {
+            evidence.bytes.resize(byteCount);
+            if (!SafeReadBytes(
+                    reinterpret_cast<void*>(evidence.windowBeginVa),
+                    evidence.bytes.data(), evidence.bytes.size()))
+                evidence.bytes.clear();
+        }
+        R15AnalyzeOutputPointerAbi(evidence);
+        return evidence;
+    }
+
+    int R15VtableModuleBonus(const std::string& moduleName)
+    {
+        if (_stricmp(moduleName.c_str(), "ATCenterProxy.dll") == 0) return 100;
+        if (_stricmp(moduleName.c_str(), "ATCenterCommon.dll") == 0) return 80;
+        if (_stricmp(moduleName.c_str(), "Objects.dll") == 0) return 60;
+        if (_stricmp(moduleName.c_str(), "ATOnPTracker.dll") == 0) return 20;
+        return 0;
+    }
+
+    void R15ApplyAbiEvidenceAndSort(
+        std::vector<R15InterfaceCandidate>& candidates,
+        const std::map<std::uintptr_t, R15TargetCodeEvidence>& targetEvidence)
+    {
+        for (R15InterfaceCandidate& candidate : candidates)
+        {
+            candidate.compatibleSlots = 0;
+            candidate.plausibleSlots = 0;
+            candidate.unknownSlots = 0;
+            candidate.rejectedSlots = 0;
+            bool currencySlotsHaveAbiEvidence = true;
+            for (R15InterfaceSlotEvidence& slot : candidate.slots)
+            {
+                const auto found = targetEvidence.find(slot.targetVa);
+                slot.abiClassification = found == targetEvidence.end()
+                    ? R15AbiClassification::Unknown : found->second.classification;
+                switch (slot.abiClassification)
+                {
+                case R15AbiClassification::Compatible: ++candidate.compatibleSlots; break;
+                case R15AbiClassification::Plausible: ++candidate.plausibleSlots; break;
+                case R15AbiClassification::Rejected: ++candidate.rejectedSlots; break;
+                default: ++candidate.unknownSlots; break;
+                }
+                if ((slot.slotOffset == 0x70 || slot.slotOffset == 0x88) &&
+                    slot.abiClassification != R15AbiClassification::Compatible &&
+                    slot.abiClassification != R15AbiClassification::Plausible)
+                    currencySlotsHaveAbiEvidence = false;
+            }
+            candidate.abiCandidate = candidate.rejectedSlots == 0 &&
+                currencySlotsHaveAbiEvidence &&
+                candidate.compatibleSlots + candidate.plausibleSlots >= 4;
+            candidate.score = R15VtableModuleBonus(candidate.vtableModule) +
+                static_cast<int>(candidate.compatibleSlots * 40) +
+                static_cast<int>(candidate.plausibleSlots * 25) +
+                static_cast<int>(candidate.unknownSlots * 2) -
+                static_cast<int>(candidate.rejectedSlots * 80) +
+                static_cast<int>(candidate.uniqueTargets * 3) +
+                static_cast<int>((std::min)(
+                    static_cast<std::size_t>(20), candidate.interfaceInstances.size()));
+        }
+        std::stable_sort(
+            candidates.begin(), candidates.end(),
+            [](const R15InterfaceCandidate& a, const R15InterfaceCandidate& b)
+            {
+                if (a.abiCandidate != b.abiCandidate) return a.abiCandidate > b.abiCandidate;
+                if (a.score != b.score) return a.score > b.score;
+                if (a.rejectedSlots != b.rejectedSlots) return a.rejectedSlots < b.rejectedSlots;
+                return a.vtableVa < b.vtableVa;
+            });
+    }
+
+    void R15FindUniqueInterfaceVtables(
+        const Snapshot& snapshot,
+        const std::vector<PositionResearchRegion>& regions,
+        std::vector<R15InterfaceCandidate>& candidates,
+        R15InterfaceSearchStats& stats)
+    {
+        candidates.clear();
+        stats = R15InterfaceSearchStats{};
+        constexpr std::uint64_t kByteLimit = 512ull * 1024ull * 1024ull;
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+        constexpr std::size_t kUniqueVtableLimit = 512;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        std::map<std::uintptr_t, std::size_t> retainedVtableIndexes;
+        std::set<std::uintptr_t> rejectedVtables;
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        const std::uintptr_t maximumUserAddress =
+            reinterpret_cast<std::uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+        unsigned char* buffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kChunkBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!buffer)
+        {
+            stats.allocationFailed = true;
+            return;
+        }
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            ++stats.regionsConsidered;
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            if (stats.bytesRead >= kByteLimit)
+            {
+                stats.byteLimitReached = true;
+                break;
+            }
+            bool regionRead = false;
+            for (std::size_t regionOffset = 0; regionOffset < region.size;)
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                const std::size_t remaining = region.size - regionOffset;
+                std::size_t bytesToRead = (std::min)(kChunkBytes, remaining);
+                bytesToRead = static_cast<std::size_t>((std::min)(
+                    static_cast<std::uint64_t>(bytesToRead), kByteLimit - stats.bytesRead));
+                if (bytesToRead < sizeof(std::uintptr_t))
+                {
+                    stats.byteLimitReached = true;
+                    break;
+                }
+                const std::uintptr_t chunkVa = region.base + regionOffset;
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkVa), buffer, bytesToRead))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+                regionRead = true;
+                stats.bytesRead += bytesToRead;
+                for (std::size_t offset = 0;
+                     offset + sizeof(std::uintptr_t) <= bytesToRead;
+                     offset += sizeof(std::uintptr_t))
+                {
+                    ++stats.alignedValuesChecked;
+                    std::uintptr_t interfaceVa = 0;
+                    std::memcpy(&interfaceVa, buffer + offset, sizeof(interfaceVa));
+                    if (interfaceVa < 0x10000 || interfaceVa > maximumUserAddress ||
+                        (interfaceVa & (sizeof(std::uintptr_t) - 1)) != 0)
+                        continue;
+                    ++stats.pointerShapedValues;
+
+                    std::uintptr_t vtableVa = 0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(interfaceVa), vtableVa))
+                        continue;
+                    ++stats.objectPointersRead;
+                    if (vtableVa < 0x10000 || vtableVa > maximumUserAddress ||
+                        !R15ModuleForAddress(snapshot, vtableVa, 0x98))
+                        continue;
+                    ++stats.vtablesInKnownModules;
+
+                    const auto retained = retainedVtableIndexes.find(vtableVa);
+                    if (retained != retainedVtableIndexes.end())
+                    {
+                        R15InterfaceCandidate& candidate = candidates[retained->second];
+                        ++candidate.referenceCount;
+                        candidate.interfaceInstances.insert(interfaceVa);
+                        if (candidate.referenceSamples.size() < 8)
+                            candidate.referenceSamples.push_back(
+                                {chunkVa + offset, interfaceVa});
+                        ++stats.duplicateVtableReferences;
+                        continue;
+                    }
+                    if (rejectedVtables.find(vtableVa) != rejectedVtables.end())
+                        continue;
+                    ++stats.uniqueVtablesExamined;
+
+                    R15InterfaceCandidate candidate;
+                    candidate.referenceFieldVa = chunkVa + offset;
+                    candidate.interfaceVa = interfaceVa;
+                    candidate.vtableVa = vtableVa;
+                    candidate.regionBase = region.base;
+                    candidate.regionSize = region.size;
+                    candidate.regionSource = R15SummarizeRegionSource(region.source);
+                    const ModuleRecord* vtableModule = R15ModuleForAddress(snapshot, vtableVa);
+                    candidate.vtableModule = R15ModuleDisplayName(vtableModule);
+                    if (vtableModule)
+                    {
+                        candidate.vtableModuleBase = vtableModule->base;
+                        candidate.vtableRva = vtableVa - vtableModule->base;
+                    }
+                    candidate.referenceCount = 1;
+                    candidate.interfaceInstances.insert(interfaceVa);
+                    candidate.referenceSamples.push_back({chunkVa + offset, interfaceVa});
+                    std::set<std::uintptr_t> uniqueTargets;
+                    bool fullShape = true;
+                    for (const auto& required : kR15DispatchSlots)
+                    {
+                        R15InterfaceSlotEvidence slot;
+                        slot.slotOffset = required.first;
+                        slot.semanticName = required.second;
+                        if (!SafeReadValue(
+                                reinterpret_cast<void*>(vtableVa + slot.slotOffset),
+                                slot.targetVa) ||
+                            !MemoryRangeHasProtection(
+                                reinterpret_cast<void*>(slot.targetVa), 1, true))
+                        {
+                            fullShape = false;
+                            break;
+                        }
+                        slot.executable = true;
+                        const ModuleRecord* targetModule = R15ModuleForAddress(
+                            snapshot, slot.targetVa);
+                        slot.targetModule = R15ModuleDisplayName(targetModule);
+                        if (targetModule)
+                        {
+                            slot.targetModuleBase = targetModule->base;
+                            slot.targetRva = slot.targetVa - targetModule->base;
+                        }
+                        uniqueTargets.insert(slot.targetVa);
+                        candidate.slots.push_back(slot);
+                    }
+                    if (!fullShape || candidate.slots.size() !=
+                        sizeof(kR15DispatchSlots) / sizeof(kR15DispatchSlots[0]))
+                    {
+                        rejectedVtables.insert(vtableVa);
+                        continue;
+                    }
+                    ++stats.fullDispatchVtables;
+                    candidate.uniqueTargets = uniqueTargets.size();
+                    if (candidate.uniqueTargets < 4)
+                    {
+                        rejectedVtables.insert(vtableVa);
+                        continue;
+                    }
+                    if (candidates.size() >= kUniqueVtableLimit)
+                    {
+                        stats.uniqueVtableLimitReached = true;
+                        rejectedVtables.insert(vtableVa);
+                        continue;
+                    }
+                    retainedVtableIndexes[vtableVa] = candidates.size();
+                    candidates.push_back(std::move(candidate));
+                }
+                regionOffset += bytesToRead;
+            }
+            if (regionRead)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached)
+                break;
+        }
+        VirtualFree(buffer, 0, MEM_RELEASE);
+    }
+
     std::string PositionResearchOffsetText(long long offset)
     {
         std::ostringstream out;
@@ -8538,7 +9380,7 @@ DWORD sehCode = 0;
 
         out << "    small_integer_fields_near_average:\r\n";
         std::size_t smallIntegerCount = 0;
-        for (long long delta = -0x100; delta <= 0x180; delta += 4)
+        for (long long delta = -0x400; delta <= 0x800; delta += 4)
         {
             const std::uintptr_t address = static_cast<std::uintptr_t>(
                 static_cast<std::intptr_t>(candidate.averageAddress) + delta);
@@ -8556,7 +9398,7 @@ DWORD sehCode = 0;
 
         out << "    nearby_pointer_strings:\r\n";
         std::size_t pointerStringCount = 0;
-        for (long long delta = -0x180; delta <= 0x180; delta += 8)
+        for (long long delta = -0x800; delta <= 0x1000; delta += 8)
         {
             const std::uintptr_t fieldAddress = static_cast<std::uintptr_t>(
                 static_cast<std::intptr_t>(candidate.averageAddress) + delta);
@@ -8626,7 +9468,7 @@ DWORD sehCode = 0;
 
         out << "    nearby_double_fields:\r\n";
         std::size_t doubleCount = 0;
-        for (long long delta = -0x100; delta <= 0x180; delta += 8)
+        for (long long delta = -0x400; delta <= 0x800; delta += 8)
         {
             const std::uintptr_t address = static_cast<std::uintptr_t>(
                 static_cast<std::intptr_t>(candidate.averageAddress) + delta);
@@ -8657,7 +9499,675 @@ DWORD sehCode = 0;
             out << "      none\r\n";
     }
 
-    bool WritePositionCurrencyDirectResearch(
+    struct R6ValidatedPositionTable
+    {
+        std::uintptr_t firstRecord = 0;
+        std::uintptr_t firstAverage = 0;
+        std::uintptr_t regionBase = 0;
+        std::size_t regionSize = 0;
+        std::string regionSource;
+        std::size_t rowsMatched = 0;
+        std::size_t openPlRowsMatched = 0;
+    };
+
+    struct R6OwnerBackReference
+    {
+        std::uintptr_t fieldAddress = 0;
+        std::uintptr_t pointerValue = 0;
+        std::size_t rowIndex = 0;
+        std::uintptr_t regionBase = 0;
+        std::string regionSource;
+    };
+
+    bool R6NumberMatches(double actual, double expected, double minimumTolerance)
+    {
+        if (!std::isfinite(actual))
+            return false;
+        const double tolerance = (std::max)(minimumTolerance, std::fabs(expected) * 1.0e-7);
+        return std::fabs(actual - expected) <= tolerance;
+    }
+
+    bool R6ValidateStrideTable(
+        const std::vector<PositionResearchRow>& rows,
+        const PositionResearchCandidate& firstCandidate,
+        R6ValidatedPositionTable& table)
+    {
+        if (rows.empty() || firstCandidate.averageAddress < 8)
+            return false;
+
+        R6ValidatedPositionTable candidate;
+        candidate.firstAverage = firstCandidate.averageAddress;
+        candidate.firstRecord = firstCandidate.averageAddress - 0x20;
+        candidate.regionBase = firstCandidate.regionBase;
+        candidate.regionSize = firstCandidate.regionSize;
+        candidate.regionSource = firstCandidate.regionSource;
+
+        for (std::size_t i = 0; i < rows.size(); ++i)
+        {
+            const PositionResearchRow& row = rows[i];
+            if (!row.quantityOk || !row.averageOk)
+                return false;
+
+            const std::uintptr_t averageAddress = candidate.firstAverage + i * 0x30;
+            std::int32_t quantity = 0;
+            double average = 0.0;
+            double openPl = 0.0;
+            if (!SafeReadValue(reinterpret_cast<void*>(averageAddress - 0x08), quantity) ||
+                !SafeReadValue(reinterpret_cast<void*>(averageAddress), average) ||
+                !SafeReadValue(reinterpret_cast<void*>(averageAddress + 0x08), openPl))
+                return false;
+
+            const long long quantityMagnitude = quantity < 0
+                ? -static_cast<long long>(quantity)
+                : static_cast<long long>(quantity);
+            if (quantityMagnitude != row.quantityAbs ||
+                !R6NumberMatches(average, row.averagePrice, 0.00051))
+                return false;
+
+            ++candidate.rowsMatched;
+            if (row.openPlOk && R6NumberMatches(openPl, row.displayedOpenPl, 0.011))
+                ++candidate.openPlRowsMatched;
+        }
+
+        if (candidate.rowsMatched != rows.size() ||
+            candidate.openPlRowsMatched != rows.size())
+            return false;
+        table = candidate;
+        return true;
+    }
+
+    std::vector<R6ValidatedPositionTable> R6FindValidatedTables(
+        const std::vector<PositionResearchRow>& rows,
+        const std::vector<std::vector<PositionResearchCandidate>>& rowCandidates)
+    {
+        std::vector<R6ValidatedPositionTable> tables;
+        if (rows.empty() || rows.front().rowIndex >= rowCandidates.size())
+            return tables;
+
+        std::set<std::uintptr_t> seen;
+        for (const PositionResearchCandidate& candidate : rowCandidates[rows.front().rowIndex])
+        {
+            R6ValidatedPositionTable table;
+            if (R6ValidateStrideTable(rows, candidate, table) &&
+                seen.insert(table.firstAverage).second)
+                tables.push_back(table);
+        }
+        return tables;
+    }
+
+    std::vector<R6ValidatedPositionTable> R7SearchValidatedTablesProcessWide(
+        const std::vector<PositionResearchRow>& rows,
+        PositionResearchScanStats& stats,
+        std::size_t& regionsEnumerated)
+    {
+        std::vector<R6ValidatedPositionTable> tables;
+        regionsEnumerated = 0;
+        if (rows.empty() || !rows.front().averageOk)
+            return tables;
+
+        std::map<std::uintptr_t, std::size_t> noExcludedRegions;
+        const std::vector<PositionResearchRegion> regions =
+            EnumerateFallbackPositionResearchRegions(noExcludedRegions);
+        regionsEnumerated = regions.size();
+        std::set<std::uintptr_t> seenFirstAverages;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(150);
+        constexpr std::uint64_t kByteBudget = 3ull * 1024ull * 1024ull * 1024ull;
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+        constexpr std::size_t kMaximumTables = 8;
+        unsigned char* tableScanBuffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kChunkBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!tableScanBuffer)
+            return tables;
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            if (stats.bytesRead >= kByteBudget)
+            {
+                stats.byteLimitReached = true;
+                break;
+            }
+
+            ++stats.regionsConsidered;
+            bool readAny = false;
+            for (std::size_t regionOffset = 0; regionOffset < region.size; )
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                const std::uint64_t remainingBudget = kByteBudget - stats.bytesRead;
+                std::size_t bytesToRead = (std::min)(kChunkBytes, region.size - regionOffset);
+                bytesToRead = static_cast<std::size_t>((std::min)(
+                    remainingBudget, static_cast<std::uint64_t>(bytesToRead)));
+                if (bytesToRead < sizeof(double))
+                    break;
+
+                const std::uintptr_t chunkAddress = region.base + regionOffset;
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), tableScanBuffer, bytesToRead))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+                readAny = true;
+                stats.bytesRead += bytesToRead;
+                const std::size_t firstAligned = static_cast<std::size_t>((8u - (chunkAddress & 7u)) & 7u);
+                for (std::size_t offset = firstAligned; offset + sizeof(double) <= bytesToRead; offset += 8)
+                {
+                    double value = 0.0;
+                    std::memcpy(&value, tableScanBuffer + offset, sizeof(value));
+                    ++stats.valuesChecked;
+                    if (!R6NumberMatches(value, rows.front().averagePrice, 0.00051))
+                        continue;
+
+                    const std::uintptr_t averageAddress = chunkAddress + offset;
+                    if (!seenFirstAverages.insert(averageAddress).second)
+                        continue;
+                    PositionResearchCandidate candidate;
+                    candidate.averageAddress = averageAddress;
+                    candidate.regionBase = region.base;
+                    candidate.regionSize = region.size;
+                    candidate.regionSource = "R7_process_wide_table_search";
+                    R6ValidatedPositionTable table;
+                    if (R6ValidateStrideTable(rows, candidate, table))
+                    {
+                        tables.push_back(table);
+                        if (tables.size() >= kMaximumTables)
+                            break;
+                    }
+                }
+                regionOffset += bytesToRead;
+                if (tables.size() >= kMaximumTables)
+                    break;
+            }
+            if (readAny)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached || tables.size() >= kMaximumTables)
+                break;
+        }
+        VirtualFree(tableScanBuffer, 0, MEM_RELEASE);
+        return tables;
+    }
+
+    struct R12CleanBackReferenceStats
+    {
+        std::size_t rawHits = 0;
+        std::size_t excludedRegions = 0;
+        std::size_t excludedRegionsEncountered = 0;
+        std::size_t rawCapacityDrops = 0;
+        std::size_t postScanValueMismatches = 0;
+        std::size_t postScanUnreadable = 0;
+        std::size_t duplicatePairsRemoved = 0;
+        std::size_t historicalSelfRecordsRejected = 0;
+        std::size_t selfRecordShapeMatches = 0;
+        std::size_t cleanCandidateRegions = 0;
+        std::size_t fullRowCoverageRegions = 0;
+        std::size_t currentResearchAddressesSupplied = 0;
+        std::size_t currentResearchRegionsExcluded = 0;
+        std::size_t verifiedHits = 0;
+    };
+
+    bool R12AddExcludedRegion(
+        std::set<std::uintptr_t>& excludedBases,
+        const void* address)
+    {
+        if (!address)
+            return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi))
+            return false;
+        return excludedBases.insert(reinterpret_cast<std::uintptr_t>(mbi.BaseAddress)).second;
+    }
+
+    void R12AddExcludedAllocation(
+        std::set<std::uintptr_t>& excludedBases,
+        const void* address)
+    {
+        MEMORY_BASIC_INFORMATION origin{};
+        if (!address || VirtualQuery(address, &origin, sizeof(origin)) != sizeof(origin) ||
+            !origin.AllocationBase)
+            return;
+
+        std::uintptr_t cursor = reinterpret_cast<std::uintptr_t>(origin.AllocationBase);
+        const void* allocationBase = origin.AllocationBase;
+        for (;;)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi) ||
+                mbi.AllocationBase != allocationBase || !mbi.RegionSize)
+                break;
+            excludedBases.insert(reinterpret_cast<std::uintptr_t>(mbi.BaseAddress));
+            const std::uintptr_t next = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (next <= cursor)
+                break;
+            cursor = next;
+        }
+    }
+
+    bool R12IsKnownMcstResearchSource(const std::string& value)
+    {
+        return value.find("process_fallback") != std::string::npos ||
+            value.find("R7_process_wide_table_search") != std::string::npos ||
+            value.find("object_graph") != std::string::npos ||
+            value.find("validated_stride") != std::string::npos ||
+            value.find("independent_quantity_average") != std::string::npos;
+    }
+
+    bool R12IsHistoricalMcstBackReference(
+        std::uintptr_t hitAddress,
+        std::size_t expectedRow,
+        std::string& sourceEvidence)
+    {
+        sourceEvidence.clear();
+        std::size_t storedRow = static_cast<std::size_t>(-1);
+        std::uintptr_t storedRegionBase = 0;
+        std::uintptr_t sourcePointer = 0;
+        if (!SafeReadValue(reinterpret_cast<void*>(hitAddress + 0x08), storedRow) ||
+            !SafeReadValue(reinterpret_cast<void*>(hitAddress + 0x10), storedRegionBase) ||
+            !SafeReadValue(reinterpret_cast<void*>(hitAddress + 0x18), sourcePointer) ||
+            storedRow != expectedRow || !storedRegionBase ||
+            (storedRegionBase & 0xFFFu) != 0 || !sourcePointer)
+            return false;
+
+        sourceEvidence = ReadShortAsciiCandidate(sourcePointer);
+        if (!R12IsKnownMcstResearchSource(sourceEvidence))
+            return false;
+
+        return true;
+    }
+
+    void R12FindCleanTargetBackReferences(
+        const std::map<std::uintptr_t, std::size_t>& targetRows,
+        const std::vector<const void*>& currentResearchAddresses,
+        std::vector<R6OwnerBackReference>& references,
+        std::vector<R6OwnerBackReference>& rejectedSelfRecords,
+        PositionResearchScanStats& stats,
+        R12CleanBackReferenceStats& cleanStats)
+    {
+        references.clear();
+        rejectedSelfRecords.clear();
+        cleanStats = R12CleanBackReferenceStats{};
+        if (targetRows.empty())
+            return;
+
+        struct RawHit
+        {
+            std::uintptr_t fieldAddress;
+            std::uintptr_t pointerValue;
+            std::size_t rowIndex;
+            std::uintptr_t regionBase;
+        };
+        constexpr std::size_t kMaximumRawHits = 16384;
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+        RawHit* rawHits = static_cast<RawHit*>(VirtualAlloc(
+            nullptr, kMaximumRawHits * sizeof(RawHit), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        unsigned char* scanBuffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kChunkBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!rawHits || !scanBuffer)
+        {
+            if (rawHits) VirtualFree(rawHits, 0, MEM_RELEASE);
+            if (scanBuffer) VirtualFree(scanBuffer, 0, MEM_RELEASE);
+            return;
+        }
+
+        std::set<std::uintptr_t> excludedBases;
+        R12AddExcludedRegion(excludedBases, rawHits);
+        R12AddExcludedRegion(excludedBases, scanBuffer);
+        R12AddExcludedRegion(excludedBases, &targetRows);
+        R12AddExcludedRegion(excludedBases, &references);
+        R12AddExcludedRegion(excludedBases, &rejectedSelfRecords);
+        R12AddExcludedRegion(excludedBases, &stats);
+        R12AddExcludedRegion(excludedBases, &cleanStats);
+        R12AddExcludedRegion(excludedBases, &currentResearchAddresses);
+        if (!currentResearchAddresses.empty())
+            R12AddExcludedRegion(excludedBases, currentResearchAddresses.data());
+        cleanStats.currentResearchAddressesSupplied = currentResearchAddresses.size();
+        for (const void* address : currentResearchAddresses)
+        {
+            if (R12AddExcludedRegion(excludedBases, address))
+                ++cleanStats.currentResearchRegionsExcluded;
+        }
+        int stackMarker = 0;
+        R12AddExcludedAllocation(excludedBases, &stackMarker);
+        for (const auto& target : targetRows)
+            R12AddExcludedRegion(excludedBases, &target);
+
+        std::map<std::uintptr_t, std::size_t> noExcludedRegions;
+        const std::vector<PositionResearchRegion> regions =
+            EnumerateFallbackPositionResearchRegions(noExcludedRegions);
+        R12AddExcludedRegion(excludedBases, &regions);
+        if (!regions.empty())
+            R12AddExcludedRegion(excludedBases, regions.data());
+        cleanStats.excludedRegions = excludedBases.size();
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+        constexpr std::uint64_t kByteBudget = 3ull * 1024ull * 1024ull * 1024ull;
+        std::size_t rawHitCount = 0;
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            if (excludedBases.find(region.base) != excludedBases.end())
+            {
+                ++cleanStats.excludedRegionsEncountered;
+                continue;
+            }
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            if (stats.bytesRead >= kByteBudget)
+            {
+                stats.byteLimitReached = true;
+                break;
+            }
+            ++stats.regionsConsidered;
+            bool readAny = false;
+            for (std::size_t regionOffset = 0; regionOffset < region.size; )
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                const std::uint64_t remainingBudget = kByteBudget - stats.bytesRead;
+                std::size_t bytesToRead = (std::min)(kChunkBytes, region.size - regionOffset);
+                bytesToRead = static_cast<std::size_t>((std::min)(
+                    remainingBudget, static_cast<std::uint64_t>(bytesToRead)));
+                if (bytesToRead < sizeof(std::uintptr_t))
+                    break;
+                const std::uintptr_t chunkAddress = region.base + regionOffset;
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), scanBuffer, bytesToRead))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+                readAny = true;
+                stats.bytesRead += bytesToRead;
+                const std::size_t firstAligned = static_cast<std::size_t>(
+                    (sizeof(std::uintptr_t) - (chunkAddress & (sizeof(std::uintptr_t) - 1))) &
+                    (sizeof(std::uintptr_t) - 1));
+                for (std::size_t offset = firstAligned;
+                     offset + sizeof(std::uintptr_t) <= bytesToRead;
+                     offset += sizeof(std::uintptr_t))
+                {
+                    std::uintptr_t value = 0;
+                    std::memcpy(&value, scanBuffer + offset, sizeof(value));
+                    ++stats.valuesChecked;
+                    const auto target = targetRows.find(value);
+                    if (target == targetRows.end())
+                        continue;
+                    const std::uintptr_t fieldAddress = chunkAddress + offset;
+                    if (rawHitCount < kMaximumRawHits)
+                    {
+                        rawHits[rawHitCount++] = { fieldAddress, value, target->second, region.base };
+                    }
+                    else
+                    {
+                        ++cleanStats.rawCapacityDrops;
+                    }
+                }
+                regionOffset += bytesToRead;
+            }
+            if (readAny)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached)
+                break;
+        }
+
+        cleanStats.rawHits = rawHitCount;
+        std::set<std::pair<std::uintptr_t, std::uintptr_t>> verifiedPairs;
+        references.reserve(rawHitCount);
+        for (std::size_t i = 0; i < rawHitCount; ++i)
+        {
+            const RawHit& raw = rawHits[i];
+            std::uintptr_t currentValue = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(raw.fieldAddress), currentValue))
+            {
+                ++cleanStats.postScanUnreadable;
+                continue;
+            }
+            if (currentValue != raw.pointerValue)
+            {
+                ++cleanStats.postScanValueMismatches;
+                continue;
+            }
+            std::string historicalSource;
+            if (R12IsHistoricalMcstBackReference(raw.fieldAddress, raw.rowIndex, historicalSource))
+            {
+                ++cleanStats.selfRecordShapeMatches;
+                ++cleanStats.historicalSelfRecordsRejected;
+                rejectedSelfRecords.push_back({
+                    raw.fieldAddress,
+                    raw.pointerValue,
+                    raw.rowIndex,
+                    raw.regionBase,
+                    "historical_mcst_self_record:" + historicalSource });
+                continue;
+            }
+            if (!verifiedPairs.insert({ raw.fieldAddress, raw.pointerValue }).second)
+            {
+                ++cleanStats.duplicatePairsRemoved;
+                continue;
+            }
+            references.push_back({
+                raw.fieldAddress,
+                raw.pointerValue,
+                raw.rowIndex,
+                raw.regionBase,
+                "process_fallback_verified_after_scan" });
+        }
+        cleanStats.verifiedHits = references.size();
+        std::map<std::uintptr_t, std::set<std::size_t>> rowsByRegion;
+        for (const R6OwnerBackReference& reference : references)
+            rowsByRegion[reference.regionBase].insert(reference.rowIndex);
+        cleanStats.cleanCandidateRegions = rowsByRegion.size();
+        for (const auto& regionRows : rowsByRegion)
+        {
+            if (regionRows.second.size() == targetRows.size())
+                ++cleanStats.fullRowCoverageRegions;
+        }
+        std::stable_sort(references.begin(), references.end(),
+            [](const R6OwnerBackReference& a, const R6OwnerBackReference& b)
+            {
+                if (a.fieldAddress != b.fieldAddress)
+                    return a.fieldAddress < b.fieldAddress;
+                return a.pointerValue < b.pointerValue;
+            });
+        VirtualFree(scanBuffer, 0, MEM_RELEASE);
+        VirtualFree(rawHits, 0, MEM_RELEASE);
+    }
+
+    void R6FindUniqueOwnerBackReferences(
+        const R6ValidatedPositionTable& table,
+        const std::vector<PositionResearchRow>& rows,
+        std::vector<R6OwnerBackReference>& references,
+        PositionResearchScanStats& stats)
+    {
+        references.clear();
+        std::map<std::uintptr_t, std::size_t> noExcludedRegions;
+        const std::vector<PositionResearchRegion> regions =
+            EnumerateFallbackPositionResearchRegions(noExcludedRegions);
+        std::set<std::pair<std::uintptr_t, std::uintptr_t>> uniquePairs;
+        std::set<std::size_t> referencedRows;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        constexpr std::uint64_t kByteBudget = 1024ull * 1024ull * 1024ull;
+        constexpr std::size_t kMaximumUniqueReferences = 1024;
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            if (stats.bytesRead >= kByteBudget || references.size() >= kMaximumUniqueReferences)
+            {
+                stats.byteLimitReached = stats.bytesRead >= kByteBudget;
+                break;
+            }
+            ++stats.regionsConsidered;
+            bool readAny = false;
+            for (std::size_t regionOffset = 0; regionOffset < region.size; )
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                const std::uint64_t remainingBudget = kByteBudget - stats.bytesRead;
+                std::size_t bytesToRead = (std::min)(kChunkBytes, region.size - regionOffset);
+                bytesToRead = static_cast<std::size_t>((std::min)(remainingBudget, static_cast<std::uint64_t>(bytesToRead)));
+                if (bytesToRead < sizeof(std::uintptr_t))
+                    break;
+
+                const std::uintptr_t chunkAddress = region.base + regionOffset;
+                std::vector<unsigned char> bytes(bytesToRead);
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), bytes.data(), bytes.size()))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+                readAny = true;
+                stats.bytesRead += bytes.size();
+                const std::size_t firstAligned = static_cast<std::size_t>(
+                    (sizeof(std::uintptr_t) - (chunkAddress & (sizeof(std::uintptr_t) - 1))) &
+                    (sizeof(std::uintptr_t) - 1));
+                for (std::size_t offset = firstAligned;
+                     offset + sizeof(std::uintptr_t) <= bytes.size();
+                     offset += sizeof(std::uintptr_t))
+                {
+                    std::uintptr_t value = 0;
+                    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+                    ++stats.valuesChecked;
+                    if (value < table.firstAverage)
+                        continue;
+                    const std::uintptr_t delta = value - table.firstAverage;
+                    if ((delta % 0x30) != 0)
+                        continue;
+                    const std::size_t rowIndex = static_cast<std::size_t>(delta / 0x30);
+                    if (rowIndex >= rows.size())
+                        continue;
+
+                    const std::uintptr_t fieldAddress = chunkAddress + offset;
+                    if (!uniquePairs.insert({ fieldAddress, value }).second)
+                        continue;
+                    references.push_back({ fieldAddress, value, rowIndex, region.base, region.source });
+                    referencedRows.insert(rowIndex);
+                    if (references.size() >= kMaximumUniqueReferences)
+                        break;
+                }
+                regionOffset += bytesToRead;
+                if (references.size() >= kMaximumUniqueReferences)
+                    break;
+            }
+            if (readAny)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached ||
+                references.size() >= kMaximumUniqueReferences)
+                break;
+        }
+
+        std::stable_sort(references.begin(), references.end(),
+            [](const R6OwnerBackReference& a, const R6OwnerBackReference& b)
+            {
+                if (a.fieldAddress != b.fieldAddress)
+                    return a.fieldAddress < b.fieldAddress;
+                return a.pointerValue < b.pointerValue;
+            });
+    }
+
+    void R6AppendOwnerRecordNeighborhood(
+        std::ostringstream& out,
+        const R6OwnerBackReference& reference,
+        std::uintptr_t familyAnchor)
+    {
+        const std::uintptr_t distance = reference.fieldAddress - familyAnchor;
+        out << "OWNER_RECORD field_address=" << HexValue(reference.fieldAddress)
+            << " pointer_value=" << HexValue(reference.pointerValue)
+            << " row=" << reference.rowIndex
+            << " family_anchor=" << HexValue(familyAnchor)
+            << " delta_from_anchor=" << HexValue(distance)
+            << " stride_0x90_slot=";
+        if ((distance % 0x90) == 0)
+            out << (distance / 0x90);
+        else
+            out << "NOT_ALIGNED";
+        out << " region_base=" << HexValue(reference.regionBase)
+            << " region_source=" << V153EscapeFieldUtf8(reference.regionSource) << "\r\n";
+
+        for (long long delta = -0x400; delta <= 0x800; delta += 8)
+        {
+            const std::uintptr_t address = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(reference.fieldAddress) + delta);
+            std::uintptr_t value = 0;
+            if (!SafeReadValue(reinterpret_cast<void*>(address), value))
+                continue;
+            const std::wstring wide = ReadShortUtf16Candidate(value);
+            const std::string ascii = ReadShortAsciiCandidate(value);
+            if (value == reference.pointerValue || !wide.empty() || !ascii.empty())
+            {
+                out << "  field_offset=" << PositionResearchOffsetText(delta)
+                    << " raw=" << HexValue(value);
+                if (value == reference.pointerValue)
+                    out << " tag=POSITION_ROW_AVERAGE_POINTER";
+                if (!wide.empty())
+                    out << " utf16=" << V153EscapeField(wide)
+                        << " currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(wide));
+                if (!ascii.empty())
+                {
+                    const std::wstring asciiWide(ascii.begin(), ascii.end());
+                    out << " ascii=" << V153EscapeFieldUtf8(ascii)
+                        << " currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(asciiWide));
+                }
+                out << "\r\n";
+            }
+        }
+    }
+
+    void R12AppendRawReferenceLayout(
+        std::ostringstream& out,
+        const R6OwnerBackReference& reference)
+    {
+        out << "RAW_LAYOUT field_address=" << HexValue(reference.fieldAddress)
+            << " row=" << reference.rowIndex << "\r\n";
+        for (long long delta = -0x10; delta <= 0x40; delta += 8)
+        {
+            const std::uintptr_t address = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(reference.fieldAddress) + delta);
+            std::uintptr_t value = 0;
+            out << "  qword_offset=" << PositionResearchOffsetText(delta)
+                << " address=" << HexValue(address);
+            if (!SafeReadValue(reinterpret_cast<void*>(address), value))
+            {
+                out << " status=UNREADABLE\r\n";
+                continue;
+            }
+            out << " raw=" << HexValue(value);
+            if (value == reference.pointerValue)
+                out << " tag=POSITION_ROW_AVERAGE_POINTER";
+            if (delta == 0x08 && value == reference.rowIndex)
+                out << " tag=POSSIBLE_R6_ROW_INDEX";
+            if (delta == 0x10 && value && (value & 0xFFFu) == 0)
+                out << " tag=POSSIBLE_R6_REGION_BASE";
+            const std::string ascii = ReadShortAsciiCandidate(value);
+            const std::wstring wide = ReadShortUtf16Candidate(value);
+            if (!ascii.empty())
+                out << " ascii=" << V153EscapeFieldUtf8(ascii);
+            if (!wide.empty())
+                out << " utf16=" << V153EscapeField(wide)
+                    << " currency_hint=" << V153EscapeField(PositionResearchCurrencyHint(wide));
+            out << "\r\n";
+        }
+    }
+
+    bool WritePositionCurrencyDirectResearchR15(
         const Snapshot& snapshot,
         std::string& summaryJson)
     {
@@ -8665,6 +10175,20 @@ DWORD sehCode = 0;
         CreateDirectoryW(kOutputDirectory, nullptr);
         const std::wstring reportPath =
             ReportPath(L"MCST_Position_Currency_Dynamic", snapshot.processId);
+        const std::wstring checkpointPath =
+            ReportPath(L"MCST_Position_Currency_R15_Checkpoint", snapshot.processId);
+        auto writeR15PhaseCheckpoint = [&](const char* phase, const std::string& evidence)
+        {
+            std::ostringstream phaseOut;
+            phaseOut << "MCST POSITION CURRENCY R15 CHECKPOINT\r\n"
+                     << "research_build=1.114-R15\r\n"
+                     << "bridge_version=" << kBridgeVersion << "\r\n"
+                     << "read_only=yes\r\n"
+                     << "phase_status=RUNNING\r\n"
+                     << "current_phase=" << phase << "\r\n"
+                     << evidence;
+            WriteUtf8File(checkpointPath, phaseOut.str());
+        };
         constexpr DWORD kResearchAtonpTimestamp = 0x6A5694FBu;
         constexpr DWORD kResearchAtonpImageSize = 3534848u;
 
@@ -8674,16 +10198,16 @@ DWORD sehCode = 0;
             std::ostringstream mismatch;
             mismatch << "MCST POSITION CURRENCY DYNAMIC RESEARCH\r\n"
                      << "=======================================\r\n"
-                     << "research_build=1.114-R3\r\n"
+                     << "research_build=1.114-R15\r\n"
                      << "status=BLOCKED_FINGERPRINT_MISMATCH\r\n"
                      << "expected_atonptracker_pe_timestamp=" << HexValue(kResearchAtonpTimestamp) << "\r\n"
                      << "expected_atonptracker_image_size=" << kResearchAtonpImageSize << "\r\n"
                      << "actual_atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
                      << "actual_atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
-                     << "reason=R3 memory-correlation research is fingerprint-scoped and is not reused on a different ATOnPTracker build.\r\n";
+                     << "reason=R15 interface ABI research is fingerprint-scoped and is not reused on a different ATOnPTracker build.\r\n";
             const bool mismatchWritten = WriteUtf8File(reportPath, mismatch.str());
             std::ostringstream mismatchSummary;
-            mismatchSummary << "{\"capture\":\"position_currency_dynamic_research\",\"version\":158,"
+            mismatchSummary << "{\"capture\":\"position_currency_dynamic_research\",\"version\":170,"
                             << "\"blocked\":true,\"reason\":\"fingerprint_mismatch\","
                             << "\"report_written\":" << (mismatchWritten ? "true" : "false") << ','
                             << "\"report_path\":" << JsonString(reportPath) << '}';
@@ -8790,9 +10314,20 @@ DWORD sehCode = 0;
         if (pageObject) seeds.push_back({ pageObject, "OpenPositionsPage" });
         if (gridObject) seeds.push_back({ gridObject, "OpenPositionsGrid" });
 
+        {
+            std::ostringstream evidence;
+            evidence << "visible_rows=" << positions.rows.size() << "\r\n"
+                     << "parsed_rows=" << parsedRows.size() << "\r\n";
+            writeR15PhaseCheckpoint("independent_record_discovery", evidence.str());
+        }
+
         std::vector<PositionResearchRegion> graphRegions;
         std::size_t pointerNodesScanned = 0;
-        DiscoverPositionResearchRegions(seeds, graphRegions, pointerNodesScanned);
+        DiscoverPositionResearchRegions(
+            seeds,
+            graphRegions,
+            pointerNodesScanned,
+            std::chrono::steady_clock::now() + std::chrono::seconds(8));
 
         std::vector<std::vector<PositionResearchCandidate>> rowCandidates(
             positions.rows.size());
@@ -8858,6 +10393,117 @@ DWORD sehCode = 0;
                 candidates.resize(8);
         }
 
+        PositionResearchScanStats tableSearchStats;
+        std::size_t tableSearchRegionsEnumerated = 0;
+        writeR15PhaseCheckpoint(
+            "broad_process_wide_stride_table_search",
+            "byte_budget=3221225472\r\nruntime_limit_seconds=150\r\n");
+        const std::vector<R6ValidatedPositionTable> validatedTables =
+            R7SearchValidatedTablesProcessWide(
+                parsedRows, tableSearchStats, tableSearchRegionsEnumerated);
+
+        std::map<std::uintptr_t, std::size_t> ownerTargets;
+        std::string ownerTargetSource;
+        if (!validatedTables.empty())
+        {
+            ownerTargetSource = "validated_stride_0x30_table";
+            for (std::size_t i = 0; i < parsedRows.size(); ++i)
+                ownerTargets[validatedTables.front().firstAverage + i * 0x30] = i;
+        }
+        else
+        {
+            ownerTargetSource = "independent_quantity_average_open_pl_records";
+            for (const PositionResearchRow& row : parsedRows)
+            {
+                if (row.rowIndex < rowCandidates.size() &&
+                    !rowCandidates[row.rowIndex].empty())
+                {
+                    ownerTargets[rowCandidates[row.rowIndex].front().averageAddress] = row.rowIndex;
+                }
+            }
+        }
+        std::vector<R6OwnerBackReference> ownerReferences;
+        std::vector<R6OwnerBackReference> rejectedSelfRecords;
+        PositionResearchScanStats ownerReferenceStats;
+        R12CleanBackReferenceStats cleanBackReferenceStats;
+        std::vector<const void*> currentResearchAddresses;
+        currentResearchAddresses.reserve(256);
+        auto addResearchObject = [&](const void* address)
+        {
+            if (address)
+                currentResearchAddresses.push_back(address);
+        };
+        addResearchObject(&parsedRows);
+        if (!parsedRows.empty()) addResearchObject(parsedRows.data());
+        addResearchObject(&rowCandidates);
+        if (!rowCandidates.empty()) addResearchObject(rowCandidates.data());
+        for (const auto& candidates : rowCandidates)
+        {
+            addResearchObject(&candidates);
+            if (!candidates.empty()) addResearchObject(candidates.data());
+            for (const PositionResearchCandidate& candidate : candidates)
+            {
+                addResearchObject(&candidate);
+                addResearchObject(candidate.regionSource.data());
+                if (!candidate.quantityI32Offsets.empty()) addResearchObject(candidate.quantityI32Offsets.data());
+                if (!candidate.quantityI64Offsets.empty()) addResearchObject(candidate.quantityI64Offsets.data());
+                if (!candidate.openPlOffsets.empty()) addResearchObject(candidate.openPlOffsets.data());
+            }
+        }
+        addResearchObject(&seenAverageAddresses);
+        if (!seenAverageAddresses.empty()) addResearchObject(seenAverageAddresses.data());
+        for (const auto& addresses : seenAverageAddresses)
+        {
+            addResearchObject(&addresses);
+            for (const std::uintptr_t& address : addresses)
+                addResearchObject(&address);
+        }
+        addResearchObject(&graphRegions);
+        if (!graphRegions.empty()) addResearchObject(graphRegions.data());
+        for (const PositionResearchRegion& region : graphRegions)
+            addResearchObject(region.source.data());
+        addResearchObject(&fallbackRegions);
+        if (!fallbackRegions.empty()) addResearchObject(fallbackRegions.data());
+        for (const PositionResearchRegion& region : fallbackRegions)
+            addResearchObject(region.source.data());
+        addResearchObject(&validatedTables);
+        if (!validatedTables.empty()) addResearchObject(validatedTables.data());
+        for (const R6ValidatedPositionTable& table : validatedTables)
+            addResearchObject(table.regionSource.data());
+        addResearchObject(&graphRegionIndex);
+        for (const auto& entry : graphRegionIndex)
+            addResearchObject(&entry);
+        addResearchObject(&seeds);
+        if (!seeds.empty()) addResearchObject(seeds.data());
+        for (const auto& seed : seeds)
+            addResearchObject(seed.second.data());
+        {
+            std::ostringstream evidence;
+            evidence << "validated_stride_tables=" << validatedTables.size() << "\r\n"
+                     << "table_search_regions_enumerated=" << tableSearchRegionsEnumerated << "\r\n"
+                     << "table_search_bytes_read=" << tableSearchStats.bytesRead << "\r\n"
+                     << "owner_target_source=" << ownerTargetSource << "\r\n"
+                     << "owner_target_count=" << ownerTargets.size() << "\r\n"
+                     << "current_research_addresses=" << currentResearchAddresses.size() << "\r\n"
+                     << "byte_budget=3221225472\r\n"
+                     << "runtime_limit_seconds=120\r\n";
+            writeR15PhaseCheckpoint("prepare_static_method_analysis", evidence.str());
+        }
+        // R15 intentionally stops repeating the process-wide owner-pointer search.
+        // R12 proved that its survivors were MCST research containers. Preserve the
+        // earlier numeric/table evidence, then spend the next capture on static code.
+        {
+            std::ostringstream evidence;
+            evidence << "unique_owner_back_references=" << ownerReferences.size() << "\r\n"
+                     << "raw_hits=" << cleanBackReferenceStats.rawHits << "\r\n"
+                     << "excluded_regions=" << cleanBackReferenceStats.excludedRegions << "\r\n"
+                     << "historical_self_records_rejected=" << cleanBackReferenceStats.historicalSelfRecordsRejected << "\r\n"
+                     << "current_research_regions_excluded=" << cleanBackReferenceStats.currentResearchRegionsExcluded << "\r\n"
+                     << "genuine_candidates=" << cleanBackReferenceStats.verifiedHits << "\r\n"
+                     << "post_scan_value_mismatches=" << cleanBackReferenceStats.postScanValueMismatches << "\r\n";
+            writeR15PhaseCheckpoint("static_method_code_windows_and_final_report", evidence.str());
+        }
+
         std::vector<PeSectionAnalysis> sections;
         std::string peSectionDiagnostic;
         const bool sectionsParsed =
@@ -8874,6 +10520,7 @@ DWORD sehCode = 0;
             "ATOnPTracker::COpenPositionInfoExtractor::PriceScaleCode"
         };
         std::vector<PositionResearchSignatureEvidence> signatureEvidence;
+        std::vector<std::vector<R13StaticCodeWindow>> staticCodeEvidence;
         for (const char* signature : methodSignatures)
         {
             PositionResearchSignatureEvidence evidence;
@@ -8883,17 +10530,98 @@ DWORD sehCode = 0;
             else
                 evidence.signature = signature;
             signatureEvidence.push_back(evidence);
+            std::vector<R13StaticCodeWindow> methodWindows;
+            for (std::uintptr_t reference : evidence.rawRipReferences)
+            {
+                R13StaticCodeWindow window;
+                if (R13ReadStaticCodeWindow(sections, reference, window))
+                    methodWindows.push_back(std::move(window));
+            }
+            staticCodeEvidence.push_back(std::move(methodWindows));
         }
+
+        const std::size_t expectedDispatchOffsets[] =
+        {
+            0x48, // AveragePrice
+            0x58, // OpenPL
+            0x90, // RealizedPL
+            0x70, // CurrencyCode
+            0x70, // CurrencyLetter
+            0x88, // CurrencyLetterRPL
+            0x60  // PriceScaleCode
+        };
+        std::vector<R15DispatchSlotEvidence> dispatchEvidence;
+        std::size_t verifiedDispatchMethods = 0;
+        for (std::size_t methodIndex = 0;
+             methodIndex < signatureEvidence.size(); ++methodIndex)
+        {
+            R15DispatchSlotEvidence dispatch = R15AnalyzeDispatchCalls(
+                signatureEvidence[methodIndex].signature,
+                expectedDispatchOffsets[methodIndex],
+                staticCodeEvidence[methodIndex]);
+            if (dispatch.expectedSlotFound)
+                ++verifiedDispatchMethods;
+            dispatchEvidence.push_back(std::move(dispatch));
+        }
+
+        writeR15PhaseCheckpoint(
+            "unique_interface_vtable_and_abi_search",
+            "search_scope=known_anchor_graph_regions\r\n"
+            "byte_limit=536870912\r\nruntime_limit_seconds=30\r\n"
+            "unique_vtable_limit=512\r\ntarget_code_limit=2048\r\n");
+        std::vector<R15InterfaceCandidate> interfaceCandidates;
+        R15InterfaceSearchStats interfaceSearchStats;
+        R15FindUniqueInterfaceVtables(
+            snapshot, graphRegions, interfaceCandidates, interfaceSearchStats);
+
+        std::map<std::uintptr_t, std::set<std::string>> targetSemantics;
+        for (const R15InterfaceCandidate& candidate : interfaceCandidates)
+            for (const R15InterfaceSlotEvidence& slot : candidate.slots)
+                targetSemantics[slot.targetVa].insert(slot.semanticName);
+
+        constexpr std::size_t kTargetCodeLimit = 2048;
+        std::map<std::uintptr_t, R15TargetCodeEvidence> targetCodeEvidence;
+        for (const auto& target : targetSemantics)
+        {
+            if (targetCodeEvidence.size() >= kTargetCodeLimit)
+            {
+                interfaceSearchStats.targetAnalysisLimitReached = true;
+                break;
+            }
+            R15TargetCodeEvidence evidence = R15AnalyzeTargetCode(
+                snapshot, target.first);
+            switch (evidence.classification)
+            {
+            case R15AbiClassification::Compatible:
+                ++interfaceSearchStats.compatibleTargets;
+                break;
+            case R15AbiClassification::Plausible:
+                ++interfaceSearchStats.plausibleTargets;
+                break;
+            case R15AbiClassification::Rejected:
+                ++interfaceSearchStats.rejectedTargets;
+                break;
+            default:
+                ++interfaceSearchStats.unknownTargets;
+                break;
+            }
+            targetCodeEvidence[target.first] = std::move(evidence);
+        }
+        interfaceSearchStats.uniqueTargetsAnalyzed = targetCodeEvidence.size();
+        R15ApplyAbiEvidenceAndSort(interfaceCandidates, targetCodeEvidence);
+        const std::size_t abiCandidateCount = static_cast<std::size_t>(std::count_if(
+            interfaceCandidates.begin(), interfaceCandidates.end(),
+            [](const R15InterfaceCandidate& candidate) { return candidate.abiCandidate; }));
 
         std::ostringstream out;
         out << "MCST POSITION CURRENCY DYNAMIC RESEARCH\r\n"
             << "=======================================\r\n"
-            << "research_build=1.114-R3\r\n"
+            << "research_build=1.114-R15\r\n"
             << "bridge_version=" << kBridgeVersion << "\r\n"
             << "bridge_protocol=" << mcbridge::kProtocolVersion << "\r\n"
             << "read_only=yes\r\n"
             << "unknown_functions_called=no\r\n"
-            << "purpose=dynamically locate live Open Positions data without relying on the R2 +0x10E0 record-root assumption\r\n"
+            << "purpose=group live interface objects by unique vtable and test every required target for the extractor RDX output-pointer ABI\r\n"
             << "process_id=" << snapshot.processId << "\r\n"
             << "atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
             << "atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
@@ -8945,13 +10673,252 @@ DWORD sehCode = 0;
             out << "\r\n";
         }
         out << "NOTE: diagnostic strings and raw RIP references prove static presence only. "
-               "R3 does not call these unknown internal extractor functions.\r\n\r\n";
+               "R15 does not call these unknown internal extractor functions.\r\n\r\n";
+
+        out << "R15 VERIFIED EXTRACTOR VTABLE DISPATCH\r\n"
+            << "--------------------------------------\r\n"
+            << "verification=raw_call_[rax+offset]_or_load_[rax+offset]_then_indirect_call_opcode_scan\r\n"
+            << "verified_methods=" << verifiedDispatchMethods << "\r\n"
+            << "expected_methods=" << dispatchEvidence.size() << "\r\n";
+        for (const R15DispatchSlotEvidence& dispatch : dispatchEvidence)
+        {
+            out << "METHOD " << dispatch.methodName
+                << " expected_vtable_slot=" << HexValue(dispatch.expectedSlotOffset)
+                << " expected_slot_found=" << (dispatch.expectedSlotFound ? "yes" : "no")
+                << " dispatch_access_count=" << dispatch.virtualCalls.size() << "\r\n";
+            for (const auto& call : dispatch.virtualCalls)
+                out << "  DISPATCH_ACCESS instruction_rva="
+                    << HexValue(call.first - snapshot.atonpTrackerBase)
+                    << " vtable_slot=" << HexValue(call.second) << "\r\n";
+        }
+        out << "NOTE: CurrencyCode and CurrencyLetter are independently verified at the shared +0x70 slot; CurrencyLetterRPL is verified at +0x88.\r\n\r\n";
+
+        out << "R15 UNIQUE INTERFACE VTABLE AND ABI SEARCH\r\n"
+            << "------------------------------------------\r\n"
+            << "search_scope=known_anchor_graph_regions\r\n"
+            << "search_unit=unique_vtable_not_object_instance\r\n"
+            << "fallback_process_wide_search=no\r\n"
+            << "required_executable_slots=0x48,0x58,0x60,0x70,0x88,0x90\r\n"
+            << "minimum_unique_targets=4\r\n"
+            << "abi_requirement=callee must consume, preserve, forward, or write through the RDX output pointer\r\n"
+            << "abi_analysis=bounded raw x64 heuristic plus direct-thunk following\r\n"
+            << "regions_considered=" << interfaceSearchStats.regionsConsidered << "\r\n"
+            << "regions_read=" << interfaceSearchStats.regionsRead << "\r\n"
+            << "bytes_read=" << interfaceSearchStats.bytesRead << "\r\n"
+            << "aligned_values_checked=" << interfaceSearchStats.alignedValuesChecked << "\r\n"
+            << "pointer_shaped_values=" << interfaceSearchStats.pointerShapedValues << "\r\n"
+            << "object_pointers_read=" << interfaceSearchStats.objectPointersRead << "\r\n"
+            << "vtables_in_known_modules=" << interfaceSearchStats.vtablesInKnownModules << "\r\n"
+            << "unique_vtables_examined=" << interfaceSearchStats.uniqueVtablesExamined << "\r\n"
+            << "full_dispatch_vtables=" << interfaceSearchStats.fullDispatchVtables << "\r\n"
+            << "retained_unique_vtables=" << interfaceCandidates.size() << "\r\n"
+            << "duplicate_vtable_references_grouped=" << interfaceSearchStats.duplicateVtableReferences << "\r\n"
+            << "abi_candidate_vtables=" << abiCandidateCount << "\r\n"
+            << "unique_targets_total=" << targetSemantics.size() << "\r\n"
+            << "unique_targets_analyzed=" << interfaceSearchStats.uniqueTargetsAnalyzed << "\r\n"
+            << "compatible_targets=" << interfaceSearchStats.compatibleTargets << "\r\n"
+            << "plausible_targets=" << interfaceSearchStats.plausibleTargets << "\r\n"
+            << "unknown_targets=" << interfaceSearchStats.unknownTargets << "\r\n"
+            << "rejected_targets=" << interfaceSearchStats.rejectedTargets << "\r\n"
+            << "allocation_failed=" << (interfaceSearchStats.allocationFailed ? "yes" : "no") << "\r\n"
+            << "byte_limit_reached=" << (interfaceSearchStats.byteLimitReached ? "yes" : "no") << "\r\n"
+            << "runtime_limit_reached=" << (interfaceSearchStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+            << "unique_vtable_limit_reached=" << (interfaceSearchStats.uniqueVtableLimitReached ? "yes" : "no") << "\r\n"
+            << "target_analysis_limit_reached=" << (interfaceSearchStats.targetAnalysisLimitReached ? "yes" : "no") << "\r\n";
+        for (std::size_t candidateIndex = 0;
+             candidateIndex < interfaceCandidates.size(); ++candidateIndex)
+        {
+            const R15InterfaceCandidate& candidate = interfaceCandidates[candidateIndex];
+            out << "VTABLE_CANDIDATE " << candidateIndex
+                << " score=" << candidate.score
+                << " abi_candidate=" << (candidate.abiCandidate ? "yes" : "no")
+                << " reference_field=" << HexValue(candidate.referenceFieldVa)
+                << " reference_offset_in_region="
+                << HexValue(candidate.referenceFieldVa - candidate.regionBase)
+                << " representative_interface_object=" << HexValue(candidate.interfaceVa)
+                << " vtable=" << HexValue(candidate.vtableVa)
+                << " vtable_module=" << V153EscapeFieldUtf8(candidate.vtableModule)
+                << " vtable_rva=" << HexValue(candidate.vtableRva)
+                << " region_base=" << HexValue(candidate.regionBase)
+                << " region_size=" << candidate.regionSize
+                << " reference_count=" << candidate.referenceCount
+                << " unique_interface_instances=" << candidate.interfaceInstances.size()
+                << " unique_targets=" << candidate.uniqueTargets
+                << " compatible_slots=" << candidate.compatibleSlots
+                << " plausible_slots=" << candidate.plausibleSlots
+                << " unknown_slots=" << candidate.unknownSlots
+                << " rejected_slots=" << candidate.rejectedSlots
+                << " region_source=" << V153EscapeFieldUtf8(candidate.regionSource)
+                << "\r\n";
+            for (const R15InterfaceSlotEvidence& slot : candidate.slots)
+            {
+                out << "  SLOT offset=" << HexValue(slot.slotOffset)
+                    << " semantic=" << slot.semanticName
+                    << " target=" << HexValue(slot.targetVa)
+                    << " target_module=" << V153EscapeFieldUtf8(slot.targetModule)
+                    << " target_rva=" << HexValue(slot.targetRva)
+                    << " abi=" << R15AbiClassificationText(slot.abiClassification)
+                    << "\r\n";
+            }
+            for (const auto& sample : candidate.referenceSamples)
+                out << "  REFERENCE_SAMPLE field=" << HexValue(sample.first)
+                    << " interface_object=" << HexValue(sample.second) << "\r\n";
+        }
+        if (interfaceCandidates.empty())
+            out << "none\r\n";
+        out << "\r\n";
+
+        out << "R15 ALL-MODULE VTABLE TARGET ABI WINDOWS\r\n"
+            << "----------------------------------------\r\n"
+            << "unique_targets=" << targetSemantics.size() << "\r\n"
+            << "captured_code_windows=" << targetCodeEvidence.size() << "\r\n"
+            << "direct_thunk_hop_limit=4\r\n"
+            << "maximum_function_window_bytes=384\r\n"
+            << "classification_is_heuristic=yes\r\n";
+        for (const auto& target : targetCodeEvidence)
+        {
+            const R15TargetCodeEvidence& evidence = target.second;
+            const ModuleRecord* originalModule = R15ModuleForAddress(snapshot, target.first);
+            out << "TARGET original_va=" << HexValue(target.first)
+                << " original_module=" << V153EscapeFieldUtf8(
+                    R15ModuleDisplayName(originalModule));
+            if (originalModule)
+                out << " original_rva=" << HexValue(target.first - originalModule->base);
+            out << " effective_va=" << HexValue(evidence.effectiveTargetVa)
+                << " thunk_depth=" << evidence.thunkDepth
+                << " effective_module=" << V153EscapeFieldUtf8(evidence.moduleName)
+                << " effective_rva=" << HexValue(evidence.targetRva)
+                << " abi=" << R15AbiClassificationText(evidence.classification)
+                << " semantics=";
+            bool firstSemantic = true;
+            for (const std::string& semantic : targetSemantics[target.first])
+            {
+                if (!firstSemantic) out << ',';
+                firstSemantic = false;
+                out << semantic;
+            }
+            out << " runtime_boundary=" << (evidence.boundaryFound ? "yes" : "no")
+                << " rdx_observed=" << (evidence.rdxObserved ? "yes" : "no")
+                << " direct_output_write=" << (evidence.directOutputWrite ? "yes" : "no")
+                << " rdx_forwarded_or_saved=" << (evidence.rdxForwardedOrSaved ? "yes" : "no")
+                << " call_observed=" << (evidence.callObserved ? "yes" : "no")
+                << " trivial_this_getter=" << (evidence.trivialThisGetter ? "yes" : "no")
+                << " early_leaf_return_without_rdx="
+                << (evidence.earlyLeafReturnWithoutRdx ? "yes" : "no")
+                << " diagnostic=" << V153EscapeFieldUtf8(evidence.diagnostic);
+            if (evidence.boundaryFound && evidence.moduleBase)
+                out << " function_begin_rva="
+                    << HexValue(evidence.functionBeginVa - evidence.moduleBase)
+                    << " function_end_rva="
+                    << HexValue(evidence.functionEndVa - evidence.moduleBase)
+                    << " unwind_info_rva="
+                    << HexValue(evidence.unwindInfoVa - evidence.moduleBase);
+            out << " window_begin_rva="
+                << HexValue(evidence.moduleBase
+                    ? evidence.windowBeginVa - evidence.moduleBase : evidence.windowBeginVa)
+                << " effective_target_offset_in_window="
+                << (evidence.effectiveTargetVa >= evidence.windowBeginVa
+                    ? evidence.effectiveTargetVa - evidence.windowBeginVa : 0)
+                << " byte_count=" << evidence.bytes.size() << "\r\n";
+            for (std::size_t offset = 0; offset < evidence.bytes.size(); offset += 16)
+            {
+                out << "  RAW rva="
+                    << HexValue(evidence.moduleBase
+                        ? evidence.windowBeginVa + offset - evidence.moduleBase
+                        : evidence.windowBeginVa + offset)
+                    << " bytes=";
+                const std::size_t count = (std::min)(
+                    static_cast<std::size_t>(16), evidence.bytes.size() - offset);
+                for (std::size_t byteIndex = 0; byteIndex < count; ++byteIndex)
+                {
+                    if (byteIndex) out << ' ';
+                    out << std::hex << std::uppercase << std::setfill('0')
+                        << std::setw(2)
+                        << static_cast<unsigned int>(evidence.bytes[offset + byteIndex])
+                        << std::dec;
+                }
+                out << "\r\n";
+            }
+        }
+        if (targetCodeEvidence.empty())
+            out << "none\r\n";
+        out << "\r\n";
+
+        out << "R15 STATIC METHOD CODE WINDOWS\r\n"
+            << "------------------------------\r\n"
+            << "analysis_kind=bounded_raw_x64_byte_pattern_analysis\r\n"
+            << "window_before_reference=0x180\r\n"
+            << "window_after_reference=0x280\r\n"
+            << "pattern_candidates_are_disassembler_verified=no\r\n"
+            << "general_owner_pointer_search_executed=no\r\n"
+            << "unknown_functions_called=no\r\n\r\n";
+        std::map<std::string, std::map<long long, std::size_t>> methodFieldFrequencies;
+        for (std::size_t methodIndex = 0; methodIndex < signatureEvidence.size(); ++methodIndex)
+        {
+            const PositionResearchSignatureEvidence& evidence = signatureEvidence[methodIndex];
+            out << "METHOD " << evidence.signature << "\r\n"
+                << "  code_window_count=" << staticCodeEvidence[methodIndex].size() << "\r\n";
+            for (std::size_t windowIndex = 0;
+                 windowIndex < staticCodeEvidence[methodIndex].size(); ++windowIndex)
+            {
+                const R13StaticCodeWindow& window = staticCodeEvidence[methodIndex][windowIndex];
+                out << "  WINDOW " << windowIndex
+                    << " reference_rva=" << HexValue(window.referenceVa - snapshot.atonpTrackerBase)
+                    << " begin_rva=" << HexValue(window.beginVa - snapshot.atonpTrackerBase)
+                    << " byte_count=" << window.bytes.size() << "\r\n";
+                for (std::size_t offset = 0; offset < window.bytes.size(); offset += 16)
+                {
+                    out << "    RAW rva="
+                        << HexValue(window.beginVa + offset - snapshot.atonpTrackerBase)
+                        << " bytes=";
+                    const std::size_t count = (std::min)(
+                        static_cast<std::size_t>(16), window.bytes.size() - offset);
+                    for (std::size_t byteIndex = 0; byteIndex < count; ++byteIndex)
+                    {
+                        if (byteIndex) out << ' ';
+                        out << std::hex << std::uppercase << std::setfill('0')
+                            << std::setw(2)
+                            << static_cast<unsigned int>(window.bytes[offset + byteIndex])
+                            << std::dec;
+                    }
+                    out << "\r\n";
+                }
+                for (const R13CodePatternEvidence& pattern : window.patterns)
+                {
+                    out << "    PATTERN kind=" << pattern.kind
+                        << " instruction_rva="
+                        << HexValue(pattern.instructionVa - snapshot.atonpTrackerBase);
+                    if (pattern.kind.find("this_") == 0)
+                    {
+                        out << " field_offset=" << PositionResearchOffsetText(pattern.fieldOffset);
+                        ++methodFieldFrequencies[evidence.signature][pattern.fieldOffset];
+                    }
+                    if (pattern.targetVa)
+                        out << " target_rva="
+                            << HexValue(pattern.targetVa - snapshot.atonpTrackerBase);
+                    out << "\r\n";
+                }
+            }
+            out << "\r\n";
+        }
+
+        out << "R15 CROSS-METHOD THIS-OFFSET SUMMARY\r\n"
+            << "------------------------------------\r\n";
+        for (const auto& method : methodFieldFrequencies)
+        {
+            out << method.first << "\r\n";
+            for (const auto& frequency : method.second)
+                out << "  field_offset=" << PositionResearchOffsetText(frequency.first)
+                    << " pattern_occurrences=" << frequency.second << "\r\n";
+        }
+        if (methodFieldFrequencies.empty())
+            out << "none\r\n";
+        out << "NOTE: offsets are byte-pattern candidates. Compare repeated offsets across AveragePrice, OpenPL, CurrencyCode, CurrencyLetter, and CurrencyLetterRPL before promoting any object layout.\r\n\r\n";
 
         out << "DYNAMIC ROW CORRELATION\r\n"
             << "-----------------------\r\n"
-            << "R3 searches readable private/mapped data regions for the visible Average Price values, "
-               "then requires the visible Quantity nearby before keeping a candidate. "
-               "A nearby displayed Open P/L match raises confidence but is not required.\r\n"
+            << "R15 retains the earlier numeric row correlation only as context and skips the disproven general owner-pointer pass. "
+               "The independent route requires visible Quantity and Average Price; displayed Open P/L raises confidence.\r\n"
             << "No fixed record base, +0x60/+0x68/+0x70 layout, or +0x10E0 container pointer is assumed.\r\n\r\n";
 
         std::size_t rowsWithCandidates = 0;
@@ -9028,7 +10995,7 @@ DWORD sehCode = 0;
 
             if (candidates.empty())
             {
-                out << "  candidate_status=no Quantity+AveragePrice co-location found within R3 scan limits\r\n";
+                out << "  candidate_status=no Quantity+AveragePrice co-location found within R12 scan limits\r\n";
             }
             out << "\r\n";
         }
@@ -9067,23 +11034,276 @@ DWORD sehCode = 0;
         appendFrequency("displayed_open_pl_offsets:", openPlOffsetFrequency);
         out << "\r\n";
 
+        out << "VALIDATED STRIDE-0x30 TABLES\r\n"
+            << "----------------------------\r\n";
+        out << "process_wide_regions_enumerated=" << tableSearchRegionsEnumerated << "\r\n"
+            << "process_wide_regions_read=" << tableSearchStats.regionsRead << "\r\n"
+            << "process_wide_bytes_read=" << tableSearchStats.bytesRead << "\r\n"
+            << "process_wide_values_checked=" << tableSearchStats.valuesChecked << "\r\n"
+            << "process_wide_runtime_limit_reached="
+            << (tableSearchStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+            << "process_wide_byte_limit_reached="
+            << (tableSearchStats.byteLimitReached ? "yes" : "no") << "\r\n";
+        if (validatedTables.empty())
+        {
+            out << "none\r\n\r\n";
+        }
+        else
+        {
+            for (std::size_t i = 0; i < validatedTables.size(); ++i)
+            {
+                const R6ValidatedPositionTable& table = validatedTables[i];
+                out << "TABLE " << i
+                    << " first_record=" << HexValue(table.firstRecord)
+                    << " first_average=" << HexValue(table.firstAverage)
+                    << " rows_matched=" << table.rowsMatched
+                    << " open_pl_rows_matched=" << table.openPlRowsMatched
+                    << " region_base=" << HexValue(table.regionBase)
+                    << " region_size=" << table.regionSize
+                    << " region_source=" << V153EscapeFieldUtf8(table.regionSource)
+                    << "\r\n";
+            }
+            out << "\r\n";
+        }
+
+        std::set<std::size_t> referencedRows;
+        for (const R6OwnerBackReference& reference : ownerReferences)
+            referencedRows.insert(reference.rowIndex);
+
+        out << "DEDUPLICATED TABLE OWNERSHIP BACK-REFERENCES\r\n"
+            << "--------------------------------------------\r\n"
+            << "deduplication_key=field_address+pointer_value\r\n"
+            << "target_source=" << ownerTargetSource << "\r\n"
+            << "target_count=" << ownerTargets.size() << "\r\n"
+            << "unique_reference_count=" << ownerReferences.size() << "\r\n"
+            << "referenced_row_count=" << referencedRows.size() << "\r\n"
+            << "pointer_scan_regions_read=" << ownerReferenceStats.regionsRead << "\r\n"
+            << "pointer_scan_bytes_read=" << ownerReferenceStats.bytesRead << "\r\n"
+            << "pointer_scan_runtime_limit_reached="
+            << (ownerReferenceStats.runtimeLimitReached ? "yes" : "no") << "\r\n";
+        for (std::size_t i = 0; i < ownerReferences.size(); ++i)
+        {
+            const R6OwnerBackReference& reference = ownerReferences[i];
+            out << "REFERENCE " << i
+                << " field_address=" << HexValue(reference.fieldAddress)
+                << " pointer_value=" << HexValue(reference.pointerValue)
+                << " row=" << reference.rowIndex
+                << " region_base=" << HexValue(reference.regionBase)
+                << " region_source=" << V153EscapeFieldUtf8(reference.regionSource)
+                << "\r\n";
+        }
+        out << "\r\n";
+
+        out << "R12 HISTORICAL SELF-RECORD REJECTION AND VERIFICATION\r\n"
+            << "------------------------------------------------------\r\n"
+            << "scan_result_storage=fixed_VirtualAlloc_array\r\n"
+            << "scan_buffer_storage=fixed_VirtualAlloc_buffer\r\n"
+            << "result_vector_mutated_during_scan=no\r\n"
+            << "target_container_regions_excluded=yes\r\n"
+            << "scan_storage_regions_excluded=yes\r\n"
+            << "current_stack_region_excluded=yes\r\n"
+            << "preexisting_research_containers_excluded=yes\r\n"
+            << "graph_discovery_buffer=fixed_VirtualAlloc_then_MEM_RELEASE\r\n"
+            << "candidate_scan_buffer=fixed_VirtualAlloc_then_MEM_RELEASE\r\n"
+            << "table_scan_buffer=fixed_VirtualAlloc_then_MEM_RELEASE\r\n"
+            << "prior_scan_copy_regions_rejected=yes\r\n"
+            << "post_scan_direct_memory_revalidation=yes\r\n"
+            << "raw_hits=" << cleanBackReferenceStats.rawHits << "\r\n"
+            << "raw_capacity_drops=" << cleanBackReferenceStats.rawCapacityDrops << "\r\n"
+            << "excluded_region_count=" << cleanBackReferenceStats.excludedRegions << "\r\n"
+            << "excluded_regions_encountered=" << cleanBackReferenceStats.excludedRegionsEncountered << "\r\n"
+            << "post_scan_unreadable=" << cleanBackReferenceStats.postScanUnreadable << "\r\n"
+            << "post_scan_value_mismatches=" << cleanBackReferenceStats.postScanValueMismatches << "\r\n"
+            << "duplicate_pairs_removed=" << cleanBackReferenceStats.duplicatePairsRemoved << "\r\n"
+            << "self_record_shape_matches=" << cleanBackReferenceStats.selfRecordShapeMatches << "\r\n"
+            << "historical_self_records_rejected=" << cleanBackReferenceStats.historicalSelfRecordsRejected << "\r\n"
+            << "current_research_addresses_supplied=" << cleanBackReferenceStats.currentResearchAddressesSupplied << "\r\n"
+            << "current_research_regions_excluded=" << cleanBackReferenceStats.currentResearchRegionsExcluded << "\r\n"
+            << "current_research_structures_rejected=" << cleanBackReferenceStats.currentResearchRegionsExcluded << "\r\n"
+            << "clean_candidate_regions=" << cleanBackReferenceStats.cleanCandidateRegions << "\r\n"
+            << "full_row_coverage_regions=" << cleanBackReferenceStats.fullRowCoverageRegions << "\r\n"
+            << "genuine_candidates=" << cleanBackReferenceStats.verifiedHits << "\r\n"
+            << "verified_hits=" << cleanBackReferenceStats.verifiedHits << "\r\n"
+            << "NOTE: R12 rejects historical R6OwnerBackReference records only when row, region-base, and a known MCST research-source string form the complete self-record signature.\r\n\r\n";
+
+        out << "REJECTED HISTORICAL MCST SELF-RECORDS\r\n"
+            << "-------------------------------------\r\n";
+        for (const R6OwnerBackReference& rejected : rejectedSelfRecords)
+        {
+            out << "SELF_RECORD field_address=" << HexValue(rejected.fieldAddress)
+                << " pointer_value=" << HexValue(rejected.pointerValue)
+                << " row=" << rejected.rowIndex
+                << " region_base=" << HexValue(rejected.regionBase)
+                << " evidence=" << V153EscapeFieldUtf8(rejected.regionSource) << "\r\n";
+        }
+        if (rejectedSelfRecords.empty())
+            out << "none\r\n";
+        out << "\r\n";
+
+        out << "CLEAN CANDIDATE REGION COVERAGE\r\n"
+            << "-------------------------------\r\n";
+        std::map<std::uintptr_t, std::vector<const R6OwnerBackReference*>> cleanReferencesByRegion;
+        for (const R6OwnerBackReference& reference : ownerReferences)
+            cleanReferencesByRegion[reference.regionBase].push_back(&reference);
+        for (const auto& regionEntry : cleanReferencesByRegion)
+        {
+            std::set<std::size_t> rows;
+            for (const R6OwnerBackReference* reference : regionEntry.second)
+                rows.insert(reference->rowIndex);
+            out << "CANDIDATE_REGION base=" << HexValue(regionEntry.first)
+                << " reference_count=" << regionEntry.second.size()
+                << " distinct_rows=" << rows.size()
+                << " full_row_coverage=" << (rows.size() == ownerTargets.size() ? "yes" : "no")
+                << " rows=";
+            bool firstRow = true;
+            for (std::size_t row : rows)
+            {
+                if (!firstRow) out << ',';
+                firstRow = false;
+                out << row;
+            }
+            out << "\r\n";
+        }
+        if (cleanReferencesByRegion.empty())
+            out << "none\r\n";
+        out << "\r\n";
+
+        out << "VERIFIED REFERENCE NEIGHBORHOODS\r\n"
+            << "--------------------------------\r\n";
+        for (const R6OwnerBackReference& reference : ownerReferences)
+        {
+            R12AppendRawReferenceLayout(out, reference);
+            R6AppendOwnerRecordNeighborhood(out, reference, reference.fieldAddress);
+        }
+        out << "\r\n";
+
         out << "SUMMARY\r\n"
             << "-------\r\n"
             << "visible_rows=" << positions.rows.size() << "\r\n"
             << "parsed_reference_rows=" << parsedRows.size() << "\r\n"
             << "rows_with_dynamic_candidates=" << rowsWithCandidates << "\r\n"
             << "total_retained_candidates=" << totalCandidates << "\r\n"
-            << "research_interpretation=Promote native-currency or P/L-currency fields only after repeated live captures show stable row correlation across at least two instrument currencies. "
+            << "validated_stride_tables=" << validatedTables.size() << "\r\n"
+            << "unique_owner_back_references=" << ownerReferences.size() << "\r\n"
+            << "owner_rows_referenced=" << referencedRows.size() << "\r\n"
+            << "raw_owner_back_reference_hits=" << cleanBackReferenceStats.rawHits << "\r\n"
+            << "verified_owner_back_references=" << cleanBackReferenceStats.verifiedHits << "\r\n"
+            << "historical_self_records_rejected=" << cleanBackReferenceStats.historicalSelfRecordsRejected << "\r\n"
+            << "current_research_regions_excluded=" << cleanBackReferenceStats.currentResearchRegionsExcluded << "\r\n"
+            << "clean_candidate_regions=" << cleanBackReferenceStats.cleanCandidateRegions << "\r\n"
+            << "full_row_coverage_regions=" << cleanBackReferenceStats.fullRowCoverageRegions << "\r\n"
+            << "verified_dispatch_methods=" << verifiedDispatchMethods << "\r\n"
+            << "interface_unique_vtables=" << interfaceCandidates.size() << "\r\n"
+            << "interface_abi_candidate_vtables=" << abiCandidateCount << "\r\n"
+            << "unique_vtable_targets=" << targetSemantics.size() << "\r\n"
+            << "unique_vtable_targets_analyzed=" << targetCodeEvidence.size() << "\r\n"
+            << "research_interpretation=R15 ranks interface vtables by the required RDX output-pointer ABI. Promote native-currency or P/L-currency fields only after a retained interface is tied back to the visible position rows and repeated captures remain stable across at least two instrument currencies. "
                "UNKNOWN remains the required production result when that proof is absent.\r\n";
 
         const bool written = WriteUtf8File(reportPath, out.str());
+        std::ostringstream checkpoint;
+        std::size_t methodsWithCodeWindows = 0;
+        for (const auto& windows : staticCodeEvidence)
+            if (!windows.empty()) ++methodsWithCodeWindows;
+        const bool researchComplete =
+            sectionsParsed && methodsWithCodeWindows == signatureEvidence.size() &&
+            verifiedDispatchMethods == signatureEvidence.size() &&
+            positions.ok && !interfaceSearchStats.allocationFailed &&
+            !interfaceSearchStats.byteLimitReached &&
+            !interfaceSearchStats.runtimeLimitReached &&
+            !interfaceSearchStats.uniqueVtableLimitReached &&
+            !interfaceSearchStats.targetAnalysisLimitReached &&
+            targetCodeEvidence.size() == targetSemantics.size();
+        checkpoint << "MCST POSITION CURRENCY R15 CHECKPOINT\r\n"
+                   << "research_build=1.114-R15\r\n"
+                   << "bridge_version=" << kBridgeVersion << "\r\n"
+                   << "read_only=yes\r\n"
+                   << "phase_status="
+                   << (!written ? "WRITE_FAILED" : (researchComplete ? "OK" : "PARTIAL")) << "\r\n"
+                   << "visible_rows=" << positions.rows.size() << "\r\n"
+                   << "parsed_rows=" << parsedRows.size() << "\r\n"
+                   << "static_methods_expected=" << signatureEvidence.size() << "\r\n"
+                   << "static_methods_with_code_windows=" << methodsWithCodeWindows << "\r\n"
+                   << "verified_dispatch_methods=" << verifiedDispatchMethods << "\r\n"
+                   << "expected_dispatch_methods=" << dispatchEvidence.size() << "\r\n"
+                   << "interface_search_regions_read=" << interfaceSearchStats.regionsRead << "\r\n"
+                   << "interface_search_bytes_read=" << interfaceSearchStats.bytesRead << "\r\n"
+                   << "interface_unique_vtables_examined=" << interfaceSearchStats.uniqueVtablesExamined << "\r\n"
+                   << "interface_full_dispatch_vtables=" << interfaceSearchStats.fullDispatchVtables << "\r\n"
+                   << "interface_retained_unique_vtables=" << interfaceCandidates.size() << "\r\n"
+                   << "interface_abi_candidate_vtables=" << abiCandidateCount << "\r\n"
+                   << "interface_allocation_failed=" << (interfaceSearchStats.allocationFailed ? "yes" : "no") << "\r\n"
+                   << "interface_byte_limit_reached=" << (interfaceSearchStats.byteLimitReached ? "yes" : "no") << "\r\n"
+                   << "interface_runtime_limit_reached=" << (interfaceSearchStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+                   << "interface_unique_vtable_limit_reached=" << (interfaceSearchStats.uniqueVtableLimitReached ? "yes" : "no") << "\r\n"
+                   << "interface_target_analysis_limit_reached=" << (interfaceSearchStats.targetAnalysisLimitReached ? "yes" : "no") << "\r\n"
+                   << "unique_vtable_targets=" << targetSemantics.size() << "\r\n"
+                   << "vtable_targets_analyzed=" << targetCodeEvidence.size() << "\r\n"
+                   << "vtable_targets_compatible=" << interfaceSearchStats.compatibleTargets << "\r\n"
+                   << "vtable_targets_plausible=" << interfaceSearchStats.plausibleTargets << "\r\n"
+                   << "vtable_targets_unknown=" << interfaceSearchStats.unknownTargets << "\r\n"
+                   << "vtable_targets_rejected=" << interfaceSearchStats.rejectedTargets << "\r\n"
+                   << "general_owner_pointer_search_executed=no\r\n"
+                   << "validated_stride_tables=" << validatedTables.size() << "\r\n"
+                   << "table_search_regions_enumerated=" << tableSearchRegionsEnumerated << "\r\n"
+                   << "table_search_bytes_read=" << tableSearchStats.bytesRead << "\r\n"
+                   << "table_search_runtime_limit_reached="
+                   << (tableSearchStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+                   << "owner_target_source=" << ownerTargetSource << "\r\n"
+                   << "unique_owner_back_references=" << ownerReferences.size() << "\r\n"
+                   << "owner_rows_referenced=" << referencedRows.size() << "\r\n"
+                   << "raw_owner_back_reference_hits=" << cleanBackReferenceStats.rawHits << "\r\n"
+                   << "verified_owner_back_references=" << cleanBackReferenceStats.verifiedHits << "\r\n"
+                   << "historical_self_records_rejected=" << cleanBackReferenceStats.historicalSelfRecordsRejected << "\r\n"
+                   << "current_research_addresses_supplied=" << cleanBackReferenceStats.currentResearchAddressesSupplied << "\r\n"
+                   << "current_research_regions_excluded=" << cleanBackReferenceStats.currentResearchRegionsExcluded << "\r\n"
+                   << "current_research_structures_rejected=" << cleanBackReferenceStats.currentResearchRegionsExcluded << "\r\n"
+                   << "clean_candidate_regions=" << cleanBackReferenceStats.cleanCandidateRegions << "\r\n"
+                   << "full_row_coverage_regions=" << cleanBackReferenceStats.fullRowCoverageRegions << "\r\n"
+                   << "excluded_regions_encountered=" << cleanBackReferenceStats.excludedRegionsEncountered << "\r\n"
+                   << "post_scan_value_mismatches=" << cleanBackReferenceStats.postScanValueMismatches << "\r\n"
+                   << "owner_scan_runtime_limit_reached="
+                   << (ownerReferenceStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+                   << "unknown_functions_called=no\r\n"
+                   << "report_written=" << (written ? "yes" : "no") << "\r\n";
+        const bool checkpointWritten = WriteUtf8File(checkpointPath, checkpoint.str());
         std::ostringstream summary;
-        summary << "{\"capture\":\"position_currency_dynamic_research\",\"version\":158,"
+        summary << "{\"capture\":\"position_currency_dynamic_research\",\"version\":170,"
                 << "\"read_only\":true,\"unknown_functions_called\":false,"
                 << "\"visible_rows\":" << positions.rows.size() << ','
                 << "\"parsed_reference_rows\":" << parsedRows.size() << ','
+                << "\"static_methods_expected\":" << signatureEvidence.size() << ','
+                << "\"static_methods_with_code_windows\":" << methodsWithCodeWindows << ','
+                << "\"verified_dispatch_methods\":" << verifiedDispatchMethods << ','
+                << "\"expected_dispatch_methods\":" << dispatchEvidence.size() << ','
+                << "\"interface_search_bytes\":" << interfaceSearchStats.bytesRead << ','
+                << "\"interface_unique_vtables_examined\":" << interfaceSearchStats.uniqueVtablesExamined << ','
+                << "\"interface_full_dispatch_vtables\":" << interfaceSearchStats.fullDispatchVtables << ','
+                << "\"interface_retained_unique_vtables\":" << interfaceCandidates.size() << ','
+                << "\"interface_abi_candidate_vtables\":" << abiCandidateCount << ','
+                << "\"unique_vtable_targets\":" << targetSemantics.size() << ','
+                << "\"vtable_targets_analyzed\":" << targetCodeEvidence.size() << ','
+                << "\"vtable_targets_compatible\":" << interfaceSearchStats.compatibleTargets << ','
+                << "\"vtable_targets_plausible\":" << interfaceSearchStats.plausibleTargets << ','
+                << "\"vtable_targets_unknown\":" << interfaceSearchStats.unknownTargets << ','
+                << "\"vtable_targets_rejected\":" << interfaceSearchStats.rejectedTargets << ','
+                << "\"interface_search_complete\":" << (researchComplete ? "true" : "false") << ','
+                << "\"general_owner_pointer_search_executed\":false,"
                 << "\"rows_with_dynamic_candidates\":" << rowsWithCandidates << ','
                 << "\"total_retained_candidates\":" << totalCandidates << ','
+                << "\"validated_stride_tables\":" << validatedTables.size() << ','
+                << "\"table_search_bytes\":" << tableSearchStats.bytesRead << ','
+                << "\"owner_target_source\":" << JsonString(ownerTargetSource) << ','
+                << "\"unique_owner_back_references\":" << ownerReferences.size() << ','
+                << "\"owner_rows_referenced\":" << referencedRows.size() << ','
+                << "\"raw_owner_back_reference_hits\":" << cleanBackReferenceStats.rawHits << ','
+                << "\"verified_owner_back_references\":" << cleanBackReferenceStats.verifiedHits << ','
+                << "\"historical_self_records_rejected\":" << cleanBackReferenceStats.historicalSelfRecordsRejected << ','
+                << "\"current_research_regions_excluded\":" << cleanBackReferenceStats.currentResearchRegionsExcluded << ','
+                << "\"current_research_structures_rejected\":" << cleanBackReferenceStats.currentResearchRegionsExcluded << ','
+                << "\"clean_candidate_regions\":" << cleanBackReferenceStats.cleanCandidateRegions << ','
+                << "\"full_row_coverage_regions\":" << cleanBackReferenceStats.fullRowCoverageRegions << ','
+                << "\"checkpoint_written\":" << (checkpointWritten ? "true" : "false") << ','
                 << "\"graph_scan_bytes\":" << graphStats.bytesRead << ','
                 << "\"fallback_scan_bytes\":" << fallbackStats.bytesRead << ','
                 << "\"report_written\":" << (written ? "true" : "false") << ','
@@ -9092,6 +11312,1160 @@ DWORD sehCode = 0;
 
         // A completed research capture is useful even if no candidate was found;
         // the report then records scan coverage and the negative result.
+        return written && positions.ok && !positions.rows.empty();
+    }
+
+    struct R16MsvcWstringEvidence
+    {
+        bool metadataReadable = false;
+        bool layoutValid = false;
+        bool terminatorValid = false;
+        bool inlineStorage = false;
+        bool empty = false;
+        bool strictCurrencyCode = false;
+        std::size_t size = 0;
+        std::size_t capacity = 0;
+        std::uintptr_t dataAddress = 0;
+        std::wstring value;
+        std::string diagnostic;
+    };
+
+    R16MsvcWstringEvidence R16ReadMsvcWstring(
+        std::uintptr_t object,
+        std::size_t fieldOffset)
+    {
+        R16MsvcWstringEvidence result;
+        const std::uintptr_t stringObject = object + fieldOffset;
+        if (stringObject < object ||
+            !SafeReadValue(reinterpret_cast<void*>(stringObject + 0x10), result.size) ||
+            !SafeReadValue(reinterpret_cast<void*>(stringObject + 0x18), result.capacity))
+        {
+            result.diagnostic = "wstring metadata unreadable";
+            return result;
+        }
+        result.metadataReadable = true;
+
+        // MSVC x64 std::wstring has a 16-byte small-string buffer, followed by
+        // size and capacity. Currency fields are intentionally bounded much
+        // more tightly than a general-purpose string reader.
+        constexpr std::size_t kInlineCapacity = 7;
+        constexpr std::size_t kMaximumCapacity = 1024;
+        constexpr std::size_t kMaximumCurrencyCharacters = 8;
+        if (result.capacity > kMaximumCapacity || result.size > result.capacity ||
+            result.size > kMaximumCurrencyCharacters)
+        {
+            result.diagnostic = "wstring size/capacity outside the bounded currency layout";
+            return result;
+        }
+
+        result.inlineStorage = result.capacity <= kInlineCapacity;
+        result.dataAddress = stringObject;
+        if (!result.inlineStorage &&
+            !SafeReadValue(reinterpret_cast<void*>(stringObject), result.dataAddress))
+        {
+            result.diagnostic = "wstring heap pointer unreadable";
+            return result;
+        }
+        if (!result.dataAddress)
+        {
+            result.diagnostic = "wstring data pointer is null";
+            return result;
+        }
+
+        wchar_t characters[kMaximumCurrencyCharacters + 1]{};
+        const std::size_t charactersToRead = result.size + 1;
+        if (!SafeReadBytes(
+                reinterpret_cast<void*>(result.dataAddress),
+                characters,
+                charactersToRead * sizeof(wchar_t)))
+        {
+            result.diagnostic = "wstring character buffer unreadable";
+            return result;
+        }
+        if (characters[result.size] != L'\0')
+        {
+            result.diagnostic = "wstring is missing its bounded terminator";
+            return result;
+        }
+        result.terminatorValid = true;
+        result.value.assign(characters, result.size);
+        result.empty = result.value.empty();
+
+        bool printable = true;
+        for (wchar_t ch : result.value)
+        {
+            if (!iswprint(ch) || iswspace(ch))
+            {
+                printable = false;
+                break;
+            }
+        }
+        if (!printable)
+        {
+            result.diagnostic = "wstring contains non-printable currency characters";
+            return result;
+        }
+
+        result.layoutValid = true;
+        result.strictCurrencyCode = result.value.size() == 3;
+        for (wchar_t ch : result.value)
+        {
+            if (ch < L'A' || ch > L'Z')
+                result.strictCurrencyCode = false;
+        }
+        result.diagnostic = result.empty ? "valid empty wstring" :
+            (result.strictCurrencyCode ? "valid ISO-like currency code" :
+             "valid bounded wstring but not a strict three-letter currency code");
+        return result;
+    }
+
+    struct R16PositionObjectEvidence
+    {
+        std::uintptr_t object = 0;
+        std::uintptr_t vtable = 0;
+        std::uintptr_t regionBase = 0;
+        std::size_t regionSize = 0;
+        std::string discoverySource;
+        std::size_t pointerReferenceCount = 0;
+        bool directVtableHit = false;
+        bool vtableStable = false;
+        bool numericReadable = false;
+        bool numericPlausible = false;
+        std::int32_t quantity = 0;
+        double averagePrice = 0.0;
+        double openPl = 0.0;
+        double realizedPl = 0.0;
+        R16MsvcWstringEvidence primaryCurrency;
+        R16MsvcWstringEvidence rplCurrency;
+    };
+
+    R16PositionObjectEvidence R16ReadPositionObject(
+        std::uintptr_t object,
+        std::uintptr_t expectedVtable,
+        const PositionResearchRegion& region,
+        const std::string& discoverySource,
+        bool directVtableHit)
+    {
+        R16PositionObjectEvidence result;
+        result.object = object;
+        result.regionBase = region.base;
+        result.regionSize = region.size;
+        result.discoverySource = discoverySource;
+        result.directVtableHit = directVtableHit;
+        result.vtableStable =
+            SafeReadValue(reinterpret_cast<void*>(object), result.vtable) &&
+            result.vtable == expectedVtable;
+        if (!result.vtableStable)
+            return result;
+
+        const bool quantityOk = SafeReadValue(
+            reinterpret_cast<void*>(object + 0x1A8), result.quantity);
+        const bool averageOk = SafeReadValue(
+            reinterpret_cast<void*>(object + 0x1B0), result.averagePrice);
+        const bool openPlOk = SafeReadValue(
+            reinterpret_cast<void*>(object + 0x1B8), result.openPl);
+        const bool realizedOk = SafeReadValue(
+            reinterpret_cast<void*>(object + 0x1C8), result.realizedPl);
+        result.numericReadable = quantityOk && averageOk && openPlOk && realizedOk;
+        if (result.numericReadable)
+        {
+            const long long absoluteQuantity = result.quantity < 0
+                ? -static_cast<long long>(result.quantity)
+                : static_cast<long long>(result.quantity);
+            result.numericPlausible = absoluteQuantity > 0 && absoluteQuantity <= 1000000000ll &&
+                std::isfinite(result.averagePrice) && result.averagePrice > 0.0 &&
+                result.averagePrice < 1000000000.0 &&
+                std::isfinite(result.openPl) && std::fabs(result.openPl) < 1.0e15 &&
+                std::isfinite(result.realizedPl) && std::fabs(result.realizedPl) < 1.0e15;
+        }
+        result.primaryCurrency = R16ReadMsvcWstring(object, 0x308);
+        result.rplCurrency = R16ReadMsvcWstring(object, 0x328);
+        return result;
+    }
+
+    const ModuleRecord* R16FindModule(
+        const Snapshot& snapshot,
+        const wchar_t* moduleName)
+    {
+        for (const ModuleRecord& module : snapshot.modules)
+        {
+            const std::wstring display = module.name.empty()
+                ? BaseName(module.path) : module.name;
+            if (_wcsicmp(display.c_str(), moduleName) == 0)
+                return &module;
+        }
+        return nullptr;
+    }
+
+    bool R16BytesMatch(
+        std::uintptr_t address,
+        const unsigned char* expected,
+        std::size_t expectedSize)
+    {
+        if (!expected || expectedSize == 0)
+            return false;
+        std::vector<unsigned char> actual(expectedSize);
+        return SafeReadBytes(reinterpret_cast<void*>(address), actual.data(), actual.size()) &&
+            std::equal(actual.begin(), actual.end(), expected);
+    }
+
+    struct R16FingerprintSlot
+    {
+        std::size_t slotOffset = 0;
+        const char* semantic = nullptr;
+        std::uintptr_t expectedRva = 0;
+        std::uintptr_t actualTarget = 0;
+        std::uintptr_t actualRva = 0;
+        bool match = false;
+    };
+
+    struct R16FingerprintEvidence
+    {
+        const ModuleRecord* module = nullptr;
+        std::uintptr_t expectedVtable = 0;
+        bool moduleSizeMatches = false;
+        bool vtableReadable = false;
+        bool slotsMatch = false;
+        bool codeSignaturesMatch = false;
+        bool ok = false;
+        std::uintptr_t lastUpdateTarget = 0;
+        std::uintptr_t lastUpdateTargetRva = 0;
+        std::vector<R16FingerprintSlot> slots;
+        std::string diagnostic;
+    };
+
+    R16FingerprintEvidence R16VerifyPositionInterfaceFingerprint(
+        const Snapshot& snapshot)
+    {
+        R16FingerprintEvidence result;
+        constexpr DWORD kExpectedAtCenterProxySize = 7303168u;
+        constexpr std::uintptr_t kVtableRva = 0x44D518;
+        struct ExpectedSlot
+        {
+            std::size_t offset;
+            const char* semantic;
+            std::uintptr_t rva;
+        };
+        constexpr ExpectedSlot expectedSlots[] =
+        {
+            { 0x40, "Quantity", 0x1DE610 },
+            { 0x48, "AveragePrice", 0x1DE720 },
+            { 0x58, "OpenPL", 0x1DE840 },
+            { 0x60, "same-interface +0x60 (not PriceScaleCode)", 0x69480 },
+            { 0x70, "CurrencyCode_or_CurrencyLetter", 0x1E02F0 },
+            { 0x88, "CurrencyLetterRPL", 0x1E0570 },
+            { 0x90, "RealizedPL", 0x1E09B0 }
+        };
+
+        result.module = R16FindModule(snapshot, L"ATCenterProxy.dll");
+        if (!result.module)
+        {
+            result.diagnostic = "ATCenterProxy.dll is not loaded";
+            return result;
+        }
+        result.moduleSizeMatches = result.module->size == kExpectedAtCenterProxySize;
+        result.expectedVtable = result.module->base + kVtableRva;
+        result.vtableReadable =
+            result.expectedVtable >= result.module->base &&
+            result.expectedVtable + 0xA0 >= result.expectedVtable &&
+            result.expectedVtable + 0xA0 <= result.module->base + result.module->size &&
+            MemoryRangeHasProtection(reinterpret_cast<void*>(result.expectedVtable), 0xA0, false);
+
+        bool allSlotsMatch = result.vtableReadable;
+        for (const ExpectedSlot& expected : expectedSlots)
+        {
+            R16FingerprintSlot slot;
+            slot.slotOffset = expected.offset;
+            slot.semantic = expected.semantic;
+            slot.expectedRva = expected.rva;
+            if (result.vtableReadable && SafeReadValue(
+                    reinterpret_cast<void*>(result.expectedVtable + expected.offset),
+                    slot.actualTarget))
+            {
+                if (slot.actualTarget >= result.module->base)
+                    slot.actualRva = slot.actualTarget - result.module->base;
+                slot.match = slot.actualTarget == result.module->base + expected.rva;
+            }
+            allSlotsMatch = allSlotsMatch && slot.match;
+            result.slots.push_back(slot);
+        }
+        result.slotsMatch = allSlotsMatch;
+        if (result.vtableReadable && SafeReadValue(
+                reinterpret_cast<void*>(result.expectedVtable + 0x98),
+                result.lastUpdateTarget) &&
+            result.lastUpdateTarget >= result.module->base)
+        {
+            result.lastUpdateTargetRva = result.lastUpdateTarget - result.module->base;
+        }
+
+        static const unsigned char quantitySignature[] =
+        {
+            0x48,0x8B,0xC4,0x48,0x81,0xEC,0x18,0x01,0x00,0x00,
+            0x48,0xC7,0x40,0xB8,0xFE,0xFF,0xFF,0xFF,0x48,0x85,
+            0xD2,0x74,0x48,0x8B,0x81,0xA8,0x01,0x00,0x00,0x89,0x02
+        };
+        static const unsigned char averageSignature[] =
+        {
+            0x48,0x8B,0xC4,0x48,0x81,0xEC,0x18,0x01,0x00,0x00,
+            0x48,0xC7,0x40,0xB8,0xFE,0xFF,0xFF,0xFF,0x48,0x85,
+            0xD2,0x74,0x4C,0xF2,0x0F,0x10,0x81,0xB0,0x01,0x00,0x00,0xF2,
+            0x0F,0x11,0x02
+        };
+        static const unsigned char openPlSignature[] =
+        {
+            0x48,0x8B,0xC4,0x48,0x81,0xEC,0x18,0x01,0x00,0x00,
+            0x48,0xC7,0x40,0xB8,0xFE,0xFF,0xFF,0xFF,0x48,0x85,
+            0xD2,0x74,0x4C,0xF2,0x0F,0x10,0x81,0xB8,0x01,0x00,0x00,0xF2,
+            0x0F,0x11,0x02
+        };
+        static const unsigned char primaryCurrencySignature[] =
+        {
+            0x48,0x8B,0xC4,0x57,0x41,0x56,0x41,0x57,
+            0x48,0x81,0xEC,0xF0,0x02,0x00,0x00,0x48
+        };
+        static const unsigned char rplCurrencySignature[] =
+        {
+            0x48,0x8B,0xC4,0x57,0x41,0x56,0x41,0x57,
+            0x48,0x81,0xEC,0x00,0x03,0x00,0x00,0x48
+        };
+        static const unsigned char realizedSignature[] =
+        {
+            0x48,0x8B,0xC4,0x48,0x81,0xEC,0x18,0x01,0x00,0x00,
+            0x48,0xC7,0x40,0xB8,0xFE,0xFF,0xFF,0xFF,0x48,0x85,
+            0xD2,0x74,0x4C,0xF2,0x0F,0x10,0x81,0xC8,0x01,0x00,0x00,0xF2,
+            0x0F,0x11,0x02
+        };
+        result.codeSignaturesMatch =
+            R16BytesMatch(result.module->base + 0x1DE610, quantitySignature, sizeof(quantitySignature)) &&
+            R16BytesMatch(result.module->base + 0x1DE720, averageSignature, sizeof(averageSignature)) &&
+            R16BytesMatch(result.module->base + 0x1DE840, openPlSignature, sizeof(openPlSignature)) &&
+            R16BytesMatch(result.module->base + 0x1E02F0, primaryCurrencySignature, sizeof(primaryCurrencySignature)) &&
+            R16BytesMatch(result.module->base + 0x1E0570, rplCurrencySignature, sizeof(rplCurrencySignature)) &&
+            R16BytesMatch(result.module->base + 0x1E09B0, realizedSignature, sizeof(realizedSignature));
+        result.ok = result.moduleSizeMatches && result.vtableReadable &&
+            result.slotsMatch && result.codeSignaturesMatch;
+        result.diagnostic = result.ok
+            ? "ATCenterProxy position-interface vtable, targets, and field-access signatures match R15 evidence"
+            : "ATCenterProxy position-interface fingerprint mismatch; R16 refuses layout reads";
+        return result;
+    }
+
+    struct R16ScanStats
+    {
+        std::size_t regionsConsidered = 0;
+        std::size_t regionsRead = 0;
+        std::uint64_t bytesRead = 0;
+        std::uint64_t alignedValuesChecked = 0;
+        std::size_t directVtableMatches = 0;
+        std::size_t pointerReferenceMatches = 0;
+        bool allocationFailed = false;
+        bool byteLimitReached = false;
+        bool runtimeLimitReached = false;
+        bool objectLimitReached = false;
+    };
+
+    void R16ScanDirectVtableValues(
+        const std::vector<PositionResearchRegion>& regions,
+        std::uintptr_t expectedVtable,
+        std::uint64_t byteLimit,
+        const std::chrono::steady_clock::time_point& deadline,
+        const std::string& scope,
+        std::map<std::uintptr_t, R16PositionObjectEvidence>& objects,
+        R16ScanStats& stats)
+    {
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+        constexpr std::size_t kObjectLimit = 4096;
+        unsigned char* buffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kChunkBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!buffer)
+        {
+            stats.allocationFailed = true;
+            return;
+        }
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            ++stats.regionsConsidered;
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            bool regionRead = false;
+            for (std::size_t regionOffset = 0; regionOffset < region.size;)
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                if (stats.bytesRead >= byteLimit)
+                {
+                    stats.byteLimitReached = true;
+                    break;
+                }
+                std::size_t bytesToRead = (std::min)(kChunkBytes, region.size - regionOffset);
+                bytesToRead = static_cast<std::size_t>((std::min)(
+                    static_cast<std::uint64_t>(bytesToRead), byteLimit - stats.bytesRead));
+                if (bytesToRead < sizeof(std::uintptr_t))
+                {
+                    stats.byteLimitReached = true;
+                    break;
+                }
+                const std::uintptr_t chunkAddress = region.base + regionOffset;
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), buffer, bytesToRead))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+                regionRead = true;
+                stats.bytesRead += bytesToRead;
+                for (std::size_t offset = 0;
+                     offset + sizeof(std::uintptr_t) <= bytesToRead;
+                     offset += sizeof(std::uintptr_t))
+                {
+                    ++stats.alignedValuesChecked;
+                    std::uintptr_t value = 0;
+                    std::memcpy(&value, buffer + offset, sizeof(value));
+                    if (value != expectedVtable)
+                        continue;
+                    ++stats.directVtableMatches;
+                    const std::uintptr_t object = chunkAddress + offset;
+                    if (objects.find(object) != objects.end())
+                        continue;
+                    if (objects.size() >= kObjectLimit)
+                    {
+                        stats.objectLimitReached = true;
+                        break;
+                    }
+                    const std::string source = scope + ":" +
+                        R15SummarizeRegionSource(region.source);
+                    objects.emplace(object, R16ReadPositionObject(
+                        object, expectedVtable, region, source, true));
+                }
+                regionOffset += bytesToRead;
+                if (stats.objectLimitReached)
+                    break;
+            }
+            if (regionRead)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached || stats.objectLimitReached)
+                break;
+        }
+        VirtualFree(buffer, 0, MEM_RELEASE);
+    }
+
+    void R16ScanPointerReferences(
+        const std::vector<PositionResearchRegion>& regions,
+        std::uintptr_t expectedVtable,
+        std::uint64_t byteLimit,
+        const std::chrono::steady_clock::time_point& deadline,
+        std::map<std::uintptr_t, R16PositionObjectEvidence>& objects,
+        R16ScanStats& stats)
+    {
+        constexpr std::size_t kChunkBytes = 4u * 1024u * 1024u;
+        constexpr std::size_t kObjectLimit = 4096;
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        const std::uintptr_t maximumUserAddress =
+            reinterpret_cast<std::uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+        unsigned char* buffer = static_cast<unsigned char*>(VirtualAlloc(
+            nullptr, kChunkBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!buffer)
+        {
+            stats.allocationFailed = true;
+            return;
+        }
+
+        for (const PositionResearchRegion& region : regions)
+        {
+            ++stats.regionsConsidered;
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                stats.runtimeLimitReached = true;
+                break;
+            }
+            bool regionRead = false;
+            for (std::size_t regionOffset = 0; regionOffset < region.size;)
+            {
+                if (std::chrono::steady_clock::now() >= deadline)
+                {
+                    stats.runtimeLimitReached = true;
+                    break;
+                }
+                if (stats.bytesRead >= byteLimit)
+                {
+                    stats.byteLimitReached = true;
+                    break;
+                }
+                std::size_t bytesToRead = (std::min)(kChunkBytes, region.size - regionOffset);
+                bytesToRead = static_cast<std::size_t>((std::min)(
+                    static_cast<std::uint64_t>(bytesToRead), byteLimit - stats.bytesRead));
+                if (bytesToRead < sizeof(std::uintptr_t))
+                {
+                    stats.byteLimitReached = true;
+                    break;
+                }
+                const std::uintptr_t chunkAddress = region.base + regionOffset;
+                if (!SafeReadBytes(reinterpret_cast<void*>(chunkAddress), buffer, bytesToRead))
+                {
+                    regionOffset += bytesToRead;
+                    continue;
+                }
+                regionRead = true;
+                stats.bytesRead += bytesToRead;
+                for (std::size_t offset = 0;
+                     offset + sizeof(std::uintptr_t) <= bytesToRead;
+                     offset += sizeof(std::uintptr_t))
+                {
+                    ++stats.alignedValuesChecked;
+                    std::uintptr_t object = 0;
+                    std::memcpy(&object, buffer + offset, sizeof(object));
+                    if (object < 0x10000 || object > maximumUserAddress ||
+                        (object & (sizeof(std::uintptr_t) - 1)) != 0)
+                        continue;
+                    auto known = objects.find(object);
+                    if (known != objects.end())
+                    {
+                        ++known->second.pointerReferenceCount;
+                        ++stats.pointerReferenceMatches;
+                        continue;
+                    }
+                    std::uintptr_t vtable = 0;
+                    if (!SafeReadValue(reinterpret_cast<void*>(object), vtable) ||
+                        vtable != expectedVtable)
+                        continue;
+                    ++stats.pointerReferenceMatches;
+                    if (objects.size() >= kObjectLimit)
+                    {
+                        stats.objectLimitReached = true;
+                        break;
+                    }
+                    PositionResearchRegion objectRegion;
+                    std::uintptr_t objectRegionEnd = 0;
+                    MEMORY_BASIC_INFORMATION objectMbi{};
+                    if (QueryReadableSpan(object, objectRegionEnd, objectMbi))
+                    {
+                        objectRegion.base = reinterpret_cast<std::uintptr_t>(objectMbi.BaseAddress);
+                        objectRegion.size = objectMbi.RegionSize;
+                        objectRegion.protect = objectMbi.Protect;
+                        objectRegion.type = objectMbi.Type;
+                        objectRegion.source = "object reached by graph pointer";
+                    }
+                    R16PositionObjectEvidence evidence = R16ReadPositionObject(
+                        object,
+                        expectedVtable,
+                        objectRegion,
+                        "known_anchor_graph:pointer_reference",
+                        false);
+                    evidence.pointerReferenceCount = 1;
+                    objects.emplace(object, std::move(evidence));
+                }
+                regionOffset += bytesToRead;
+                if (stats.objectLimitReached)
+                    break;
+            }
+            if (regionRead)
+                ++stats.regionsRead;
+            if (stats.runtimeLimitReached || stats.byteLimitReached || stats.objectLimitReached)
+                break;
+        }
+        VirtualFree(buffer, 0, MEM_RELEASE);
+    }
+
+    std::size_t R16PlausibleObjectCount(
+        const std::map<std::uintptr_t, R16PositionObjectEvidence>& objects)
+    {
+        return static_cast<std::size_t>(std::count_if(
+            objects.begin(), objects.end(),
+            [](const auto& item) { return item.second.numericPlausible; }));
+    }
+
+    struct R16RowMatch
+    {
+        const PositionResearchRow* row = nullptr;
+        std::vector<std::uintptr_t> candidates;
+        std::uintptr_t matchedObject = 0;
+        std::string status = "NO_MATCH";
+    };
+
+    std::vector<R16RowMatch> R16MatchRowsToObjects(
+        const std::vector<PositionResearchRow>& rows,
+        const std::map<std::uintptr_t, R16PositionObjectEvidence>& objects)
+    {
+        std::vector<R16RowMatch> matches;
+        matches.reserve(rows.size());
+        for (const PositionResearchRow& row : rows)
+        {
+            R16RowMatch match;
+            match.row = &row;
+            std::vector<std::uintptr_t> anchoredCandidates;
+            const double averageTolerance = (std::max)(
+                0.0011, std::fabs(row.averagePrice) * 1.0e-8);
+            for (const auto& item : objects)
+            {
+                const R16PositionObjectEvidence& object = item.second;
+                if (!object.numericPlausible)
+                    continue;
+                const long long absoluteQuantity = object.quantity < 0
+                    ? -static_cast<long long>(object.quantity)
+                    : static_cast<long long>(object.quantity);
+                if (absoluteQuantity == row.quantityAbs &&
+                    std::fabs(object.averagePrice - row.averagePrice) <= averageTolerance)
+                {
+                    match.candidates.push_back(item.first);
+                    if (object.pointerReferenceCount > 0)
+                        anchoredCandidates.push_back(item.first);
+                }
+            }
+            if (anchoredCandidates.size() == 1)
+            {
+                match.matchedObject = anchoredCandidates.front();
+                match.status = "UNIQUE_ANCHORED_QUANTITY_AVERAGE";
+            }
+            else if (anchoredCandidates.size() > 1)
+            {
+                match.candidates = std::move(anchoredCandidates);
+                match.status = "AMBIGUOUS_ANCHORED_QUANTITY_AVERAGE";
+            }
+            else if (match.candidates.size() == 1)
+            {
+                match.matchedObject = match.candidates.front();
+                match.status = "UNIQUE_QUANTITY_AVERAGE";
+            }
+            else if (!match.candidates.empty())
+            {
+                match.status = "AMBIGUOUS_QUANTITY_AVERAGE";
+            }
+            matches.push_back(std::move(match));
+        }
+
+        std::map<std::uintptr_t, std::size_t> useCounts;
+        for (const R16RowMatch& match : matches)
+            if (match.matchedObject) ++useCounts[match.matchedObject];
+        for (R16RowMatch& match : matches)
+        {
+            if (match.matchedObject && useCounts[match.matchedObject] != 1)
+            {
+                match.status = "CONFLICT_OBJECT_MATCHED_TO_MULTIPLE_ROWS";
+                match.matchedObject = 0;
+            }
+        }
+        return matches;
+    }
+
+    std::size_t R16UniqueMatchedRowCount(
+        const std::vector<PositionResearchRow>& rows,
+        const std::map<std::uintptr_t, R16PositionObjectEvidence>& objects)
+    {
+        const std::vector<R16RowMatch> matches =
+            R16MatchRowsToObjects(rows, objects);
+        return static_cast<std::size_t>(std::count_if(
+            matches.begin(), matches.end(),
+            [](const R16RowMatch& match) { return match.matchedObject != 0; }));
+    }
+
+    std::wstring R16EffectiveCurrency(const R16PositionObjectEvidence& object)
+    {
+        return object.rplCurrency.layoutValid && !object.rplCurrency.empty
+            ? object.rplCurrency.value : object.primaryCurrency.value;
+    }
+
+    bool WritePositionCurrencyDirectResearch(
+        const Snapshot& snapshot,
+        std::string& summaryJson)
+    {
+        V153GridReadLockGuard lock;
+        CreateDirectoryW(kOutputDirectory, nullptr);
+        const std::wstring reportPath =
+            ReportPath(L"MCST_Position_Currency_Dynamic", snapshot.processId);
+        const std::wstring checkpointPath =
+            ReportPath(L"MCST_Position_Currency_R16_Checkpoint", snapshot.processId);
+        auto writeCheckpoint = [&](const char* phase, const std::string& evidence)
+        {
+            std::ostringstream checkpoint;
+            checkpoint << "MCST POSITION CURRENCY R16 CHECKPOINT\r\n"
+                       << "research_build=1.114-R16\r\n"
+                       << "bridge_version=" << kBridgeVersion << "\r\n"
+                       << "read_only=yes\r\n"
+                       << "unknown_functions_called=no\r\n"
+                       << "phase_status=RUNNING\r\n"
+                       << "current_phase=" << phase << "\r\n"
+                       << evidence;
+            WriteUtf8File(checkpointPath, checkpoint.str());
+        };
+
+        constexpr DWORD kResearchAtonpTimestamp = 0x6A5694FBu;
+        constexpr DWORD kResearchAtonpImageSize = 3534848u;
+        if (snapshot.atonpTrackerPeTimestamp != kResearchAtonpTimestamp ||
+            snapshot.atonpTrackerSize != kResearchAtonpImageSize)
+        {
+            std::ostringstream blocked;
+            blocked << "MCST POSITION CURRENCY R16 TARGETED VERIFICATION\r\n"
+                    << "=================================================\r\n"
+                    << "research_build=1.114-R16\r\n"
+                    << "bridge_version=" << kBridgeVersion << "\r\n"
+                    << "status=BLOCKED_ATONPTRACKER_FINGERPRINT_MISMATCH\r\n"
+                    << "expected_atonptracker_pe_timestamp=" << HexValue(kResearchAtonpTimestamp) << "\r\n"
+                    << "expected_atonptracker_image_size=" << kResearchAtonpImageSize << "\r\n"
+                    << "actual_atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
+                    << "actual_atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
+                    << "read_only=yes\r\nunknown_functions_called=no\r\n";
+            const bool written = WriteUtf8File(reportPath, blocked.str());
+            writeCheckpoint("blocked_fingerprint", "phase_status=BLOCKED\r\n");
+            std::ostringstream summary;
+            summary << "{\"capture\":\"position_currency_r16\",\"version\":171,"
+                    << "\"blocked\":true,\"reason\":\"atonptracker_fingerprint_mismatch\","
+                    << "\"report_written\":" << (written ? "true" : "false") << ','
+                    << "\"report_path\":" << JsonString(reportPath) << '}';
+            summaryJson = summary.str();
+            return false;
+        }
+
+        const R16FingerprintEvidence fingerprint =
+            R16VerifyPositionInterfaceFingerprint(snapshot);
+        {
+            std::ostringstream evidence;
+            evidence << "atcenterproxy_found=" << (fingerprint.module ? "yes" : "no") << "\r\n"
+                     << "module_size_match=" << (fingerprint.moduleSizeMatches ? "yes" : "no") << "\r\n"
+                     << "vtable_readable=" << (fingerprint.vtableReadable ? "yes" : "no") << "\r\n"
+                     << "slot_targets_match=" << (fingerprint.slotsMatch ? "yes" : "no") << "\r\n"
+                     << "code_signatures_match=" << (fingerprint.codeSignaturesMatch ? "yes" : "no") << "\r\n";
+            writeCheckpoint("verify_position_interface_fingerprint", evidence.str());
+        }
+        if (!fingerprint.ok)
+        {
+            std::ostringstream blocked;
+            blocked << "MCST POSITION CURRENCY R16 TARGETED VERIFICATION\r\n"
+                    << "=================================================\r\n"
+                    << "research_build=1.114-R16\r\n"
+                    << "bridge_version=" << kBridgeVersion << "\r\n"
+                    << "status=BLOCKED_ATCENTERPROXY_FINGERPRINT_MISMATCH\r\n"
+                    << "diagnostic=" << V153EscapeFieldUtf8(fingerprint.diagnostic) << "\r\n"
+                    << "module_found=" << (fingerprint.module ? "yes" : "no") << "\r\n"
+                    << "module_size_match=" << (fingerprint.moduleSizeMatches ? "yes" : "no") << "\r\n"
+                    << "vtable_readable=" << (fingerprint.vtableReadable ? "yes" : "no") << "\r\n"
+                    << "slot_targets_match=" << (fingerprint.slotsMatch ? "yes" : "no") << "\r\n"
+                    << "code_signatures_match=" << (fingerprint.codeSignaturesMatch ? "yes" : "no") << "\r\n";
+            for (const R16FingerprintSlot& slot : fingerprint.slots)
+            {
+                blocked << "SLOT offset=" << HexValue(slot.slotOffset)
+                        << " semantic=" << slot.semantic
+                        << " expected_rva=" << HexValue(slot.expectedRva)
+                        << " actual_rva=" << HexValue(slot.actualRva)
+                        << " match=" << (slot.match ? "yes" : "no") << "\r\n";
+            }
+            blocked << "read_only=yes\r\nunknown_functions_called=no\r\n";
+            const bool written = WriteUtf8File(reportPath, blocked.str());
+            std::ostringstream finalCheckpoint;
+            finalCheckpoint << "MCST POSITION CURRENCY R16 CHECKPOINT\r\n"
+                            << "research_build=1.114-R16\r\nbridge_version=" << kBridgeVersion << "\r\n"
+                            << "read_only=yes\r\nunknown_functions_called=no\r\n"
+                            << "phase_status=BLOCKED\r\ncurrent_phase=verify_position_interface_fingerprint\r\n"
+                            << "report_written=" << (written ? "yes" : "no") << "\r\n";
+            WriteUtf8File(checkpointPath, finalCheckpoint.str());
+            std::ostringstream summary;
+            summary << "{\"capture\":\"position_currency_r16\",\"version\":171,"
+                    << "\"blocked\":true,\"reason\":\"atcenterproxy_fingerprint_mismatch\","
+                    << "\"report_written\":" << (written ? "true" : "false") << ','
+                    << "\"report_path\":" << JsonString(reportPath) << '}';
+            summaryJson = summary.str();
+            return false;
+        }
+
+        TrackerCompatibilityProfile trackerProfile =
+            ResolveExternalTrackerCompatibilityProfile(snapshot);
+        if (!trackerProfile.matched)
+        {
+            TrackerCompatibilityProfile embedded =
+                EmbeddedLegacyTrackerCompatibilityProfile(snapshot);
+            if (embedded.matched)
+                trackerProfile = embedded;
+        }
+        std::string tabViewDiagnostic;
+        const std::uintptr_t tabView = trackerProfile.matched
+            ? FindTabViewObject(snapshot, tabViewDiagnostic, &trackerProfile) : 0;
+        std::string flexGridRttiDiagnostic;
+        const std::vector<RttiVtableRecord> flexGridRttiVtables = trackerProfile.matched
+            ? ResolveRttiVtables(
+                snapshot,
+                ".?AVCFlexGridImpl@implementation@UILayer@@",
+                flexGridRttiDiagnostic)
+            : std::vector<RttiVtableRecord>{};
+        V153GridSectionResult positions = ReadV153GridSection(
+            snapshot,
+            flexGridRttiVtables,
+            tabView,
+            trackerProfile,
+            "open_positions",
+            trackerProfile.openPositionsPageOffset,
+            1,
+            8,
+            1000,
+            1000,
+            3);
+
+        std::vector<PositionResearchRow> parsedRows;
+        parsedRows.reserve(positions.rows.size());
+        for (std::size_t rowIndex = 0; rowIndex < positions.rows.size(); ++rowIndex)
+        {
+            const auto& fields = positions.rows[rowIndex];
+            if (fields.size() < 8)
+                continue;
+            PositionResearchRow row;
+            row.rowIndex = rowIndex;
+            row.fields = &fields;
+            double quantity = 0.0;
+            row.quantityOk = TryParsePositionResearchNumber(fields[4], quantity);
+            row.averageOk = TryParsePositionResearchNumber(fields[5], row.averagePrice);
+            row.openPlOk = TryParsePositionResearchNumber(fields[6], row.displayedOpenPl);
+            if (row.quantityOk)
+            {
+                const long long signedQuantity = static_cast<long long>(std::llround(quantity));
+                row.quantityAbs = signedQuantity < 0 ? -signedQuantity : signedQuantity;
+            }
+            if (row.quantityOk && row.averageOk && row.quantityAbs > 0)
+                parsedRows.push_back(row);
+        }
+        {
+            std::ostringstream evidence;
+            evidence << "grid_ok=" << (positions.ok ? "yes" : "no") << "\r\n"
+                     << "visible_rows=" << positions.rows.size() << "\r\n"
+                     << "parsed_rows=" << parsedRows.size() << "\r\n";
+            writeCheckpoint("read_open_positions_reference", evidence.str());
+        }
+
+        ExtractorAttempt positionProbe =
+            BuildExtractorProbe(snapshot, "position_currency_r16", kExtractOpenPositionsRva);
+        const std::uintptr_t tradeInfo = positionProbe.tradeInfo;
+        std::uintptr_t root98 = 0;
+        std::uintptr_t root88 = 0;
+        if (tradeInfo)
+        {
+            SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x98), root98);
+            SafeReadValue(reinterpret_cast<void*>(tradeInfo + 0x88), root88);
+        }
+        std::uintptr_t pageObject = 0;
+        std::uintptr_t gridObject = 0;
+        if (tabView && trackerProfile.matched)
+        {
+            SafeReadValue(
+                reinterpret_cast<void*>(tabView + trackerProfile.openPositionsPageOffset),
+                pageObject);
+            if (pageObject)
+                SafeReadValue(
+                    reinterpret_cast<void*>(pageObject + trackerProfile.gridMemberOffset),
+                    gridObject);
+        }
+        std::vector<std::pair<std::uintptr_t, std::string>> seeds;
+        if (tradeInfo) seeds.push_back({ tradeInfo, "ITC_TradeInfo" });
+        if (root98) seeds.push_back({ root98, "ITC_TradeInfo+0x98" });
+        if (root88) seeds.push_back({ root88, "ITC_TradeInfo+0x88" });
+        if (tabView) seeds.push_back({ tabView, "CATPTTabView" });
+        if (pageObject) seeds.push_back({ pageObject, "OpenPositionsPage" });
+        if (gridObject) seeds.push_back({ gridObject, "OpenPositionsGrid" });
+
+        std::vector<PositionResearchRegion> graphRegions;
+        std::size_t pointerNodesScanned = 0;
+        DiscoverPositionResearchRegions(
+            seeds,
+            graphRegions,
+            pointerNodesScanned,
+            std::chrono::steady_clock::now() + std::chrono::seconds(10));
+        std::map<std::uintptr_t, R16PositionObjectEvidence> objects;
+        R16ScanStats graphDirectStats;
+        R16ScanDirectVtableValues(
+            graphRegions,
+            fingerprint.expectedVtable,
+            512ull * 1024ull * 1024ull,
+            std::chrono::steady_clock::now() + std::chrono::seconds(30),
+            "known_anchor_graph_direct",
+            objects,
+            graphDirectStats);
+        {
+            std::ostringstream evidence;
+            evidence << "pointer_nodes_scanned=" << pointerNodesScanned << "\r\n"
+                     << "graph_regions=" << graphRegions.size() << "\r\n"
+                     << "bytes_read=" << graphDirectStats.bytesRead << "\r\n"
+                     << "direct_vtable_matches=" << graphDirectStats.directVtableMatches << "\r\n"
+                     << "unique_objects=" << objects.size() << "\r\n"
+                     << "plausible_objects=" << R16PlausibleObjectCount(objects) << "\r\n";
+            writeCheckpoint("scan_anchor_graph_for_exact_vtable", evidence.str());
+        }
+
+        R16ScanStats graphPointerStats;
+        bool pointerReferenceScanExecuted = false;
+        if (R16UniqueMatchedRowCount(parsedRows, objects) < parsedRows.size())
+        {
+            pointerReferenceScanExecuted = true;
+            R16ScanPointerReferences(
+                graphRegions,
+                fingerprint.expectedVtable,
+                512ull * 1024ull * 1024ull,
+                std::chrono::steady_clock::now() + std::chrono::seconds(45),
+                objects,
+                graphPointerStats);
+            std::ostringstream evidence;
+            evidence << "bytes_read=" << graphPointerStats.bytesRead << "\r\n"
+                     << "pointer_reference_matches=" << graphPointerStats.pointerReferenceMatches << "\r\n"
+                     << "unique_objects=" << objects.size() << "\r\n"
+                     << "plausible_objects=" << R16PlausibleObjectCount(objects) << "\r\n";
+            writeCheckpoint("scan_anchor_graph_pointer_references", evidence.str());
+        }
+
+        R16ScanStats fallbackStats;
+        bool fallbackScanExecuted = false;
+        std::size_t fallbackRegionCount = 0;
+        if (R16UniqueMatchedRowCount(parsedRows, objects) < parsedRows.size())
+        {
+            fallbackScanExecuted = true;
+            std::map<std::uintptr_t, std::size_t> excludedGraphRegions;
+            for (std::size_t index = 0; index < graphRegions.size(); ++index)
+                excludedGraphRegions[graphRegions[index].base] = index;
+            const std::vector<PositionResearchRegion> fallbackRegions =
+                EnumerateFallbackPositionResearchRegions(excludedGraphRegions);
+            fallbackRegionCount = fallbackRegions.size();
+            R16ScanDirectVtableValues(
+                fallbackRegions,
+                fingerprint.expectedVtable,
+                2ull * 1024ull * 1024ull * 1024ull,
+                std::chrono::steady_clock::now() + std::chrono::seconds(90),
+                "bounded_process_fallback_direct",
+                objects,
+                fallbackStats);
+            std::ostringstream evidence;
+            evidence << "fallback_regions=" << fallbackRegionCount << "\r\n"
+                     << "bytes_read=" << fallbackStats.bytesRead << "\r\n"
+                     << "direct_vtable_matches=" << fallbackStats.directVtableMatches << "\r\n"
+                     << "unique_objects=" << objects.size() << "\r\n"
+                     << "plausible_objects=" << R16PlausibleObjectCount(objects) << "\r\n";
+            writeCheckpoint("bounded_process_fallback_exact_vtable", evidence.str());
+        }
+
+        const std::vector<R16RowMatch> rowMatches =
+            R16MatchRowsToObjects(parsedRows, objects);
+        std::size_t matchedRows = 0;
+        std::size_t currencyDecodedRows = 0;
+        std::set<std::uintptr_t> matchedObjects;
+        for (const R16RowMatch& match : rowMatches)
+        {
+            if (!match.matchedObject)
+                continue;
+            ++matchedRows;
+            matchedObjects.insert(match.matchedObject);
+            const auto found = objects.find(match.matchedObject);
+            if (found == objects.end())
+                continue;
+            const R16PositionObjectEvidence& object = found->second;
+            const bool primaryOk = object.primaryCurrency.layoutValid &&
+                object.primaryCurrency.strictCurrencyCode;
+            const bool rplOk = object.rplCurrency.layoutValid &&
+                (object.rplCurrency.empty || object.rplCurrency.strictCurrencyCode);
+            if (primaryOk && rplOk)
+                ++currencyDecodedRows;
+        }
+
+        const bool verificationComplete = positions.ok && !parsedRows.empty() &&
+            parsedRows.size() == positions.rows.size() &&
+            matchedRows == parsedRows.size() &&
+            matchedObjects.size() == parsedRows.size() &&
+            currencyDecodedRows == parsedRows.size();
+
+        std::ostringstream out;
+        out << std::setprecision(15)
+            << "MCST POSITION CURRENCY R16 TARGETED VERIFICATION\r\n"
+            << "=================================================\r\n"
+            << "research_build=1.114-R16\r\n"
+            << "bridge_version=" << kBridgeVersion << "\r\n"
+            << "bridge_protocol=" << mcbridge::kProtocolVersion << "\r\n"
+            << "read_only=yes\r\n"
+            << "unknown_functions_called=no\r\n"
+            << "process_memory_writes=no\r\n"
+            << "purpose=verify the R15 ATCenterProxy position interface against visible rows and decode its two bounded currency wstrings\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "verification_status=" << (verificationComplete ? "COMPLETE" : "PARTIAL") << "\r\n\r\n";
+
+        out << "R16 POSITION INTERFACE FINGERPRINT\r\n"
+            << "----------------------------------\r\n"
+            << "module=ATCenterProxy.dll\r\n"
+            << "module_base=" << HexValue(fingerprint.module->base) << "\r\n"
+            << "module_size=" << fingerprint.module->size << "\r\n"
+            << "module_size_match=" << (fingerprint.moduleSizeMatches ? "yes" : "no") << "\r\n"
+            << "vtable=" << HexValue(fingerprint.expectedVtable) << "\r\n"
+            << "vtable_rva=0x44D518\r\n"
+            << "slot_targets_match=" << (fingerprint.slotsMatch ? "yes" : "no") << "\r\n"
+            << "code_signatures_match=" << (fingerprint.codeSignaturesMatch ? "yes" : "no") << "\r\n"
+            << "last_update_slot_0x98_target=" << HexValue(fingerprint.lastUpdateTarget) << "\r\n"
+            << "last_update_slot_0x98_target_rva=" << HexValue(fingerprint.lastUpdateTargetRva) << "\r\n";
+        for (const R16FingerprintSlot& slot : fingerprint.slots)
+        {
+            out << "SLOT offset=" << HexValue(slot.slotOffset)
+                << " semantic=" << slot.semantic
+                << " expected_rva=" << HexValue(slot.expectedRva)
+                << " actual_rva=" << HexValue(slot.actualRva)
+                << " match=" << (slot.match ? "yes" : "no") << "\r\n";
+        }
+        out << "NOTE: PriceScaleCode first obtains a different interface. The position interface's own +0x60 slot is fingerprint evidence only and is not interpreted as PriceScaleCode.\r\n\r\n";
+
+        out << "OPEN POSITIONS REFERENCE\r\n"
+            << "------------------------\r\n"
+            << "grid_ok=" << (positions.ok ? "yes" : "no") << "\r\n"
+            << "grid_diagnostic=" << V153EscapeField(positions.diagnostic) << "\r\n"
+            << "visible_rows=" << positions.rows.size() << "\r\n"
+            << "parsed_rows=" << parsedRows.size() << "\r\n";
+        for (const PositionResearchRow& row : parsedRows)
+        {
+            const auto& fields = *row.fields;
+            out << "REFERENCE_ROW row=" << row.rowIndex
+                << " profile=" << V153EscapeField(fields[0])
+                << " account=" << V153EscapeField(fields[1])
+                << " symbol=" << V153EscapeField(fields[2])
+                << " side=" << V153EscapeField(fields[3])
+                << " quantity_text=" << V153EscapeField(fields[4])
+                << " average_price_text=" << V153EscapeField(fields[5])
+                << " open_pl_text=" << V153EscapeField(fields[6])
+                << " last_update=" << V153EscapeField(fields[7]) << "\r\n";
+        }
+        out << "\r\n";
+
+        out << "TARGETED OBJECT SEARCH COVERAGE\r\n"
+            << "-------------------------------\r\n"
+            << "pointer_graph_nodes_scanned=" << pointerNodesScanned << "\r\n"
+            << "pointer_graph_regions=" << graphRegions.size() << "\r\n"
+            << "graph_direct_regions_read=" << graphDirectStats.regionsRead << "\r\n"
+            << "graph_direct_bytes_read=" << graphDirectStats.bytesRead << "\r\n"
+            << "graph_direct_vtable_matches=" << graphDirectStats.directVtableMatches << "\r\n"
+            << "graph_direct_runtime_limit_reached=" << (graphDirectStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+            << "pointer_reference_scan_executed=" << (pointerReferenceScanExecuted ? "yes" : "no") << "\r\n"
+            << "pointer_reference_bytes_read=" << graphPointerStats.bytesRead << "\r\n"
+            << "pointer_reference_matches=" << graphPointerStats.pointerReferenceMatches << "\r\n"
+            << "pointer_reference_runtime_limit_reached=" << (graphPointerStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+            << "fallback_scan_executed=" << (fallbackScanExecuted ? "yes" : "no") << "\r\n"
+            << "fallback_regions=" << fallbackRegionCount << "\r\n"
+            << "fallback_bytes_read=" << fallbackStats.bytesRead << "\r\n"
+            << "fallback_vtable_matches=" << fallbackStats.directVtableMatches << "\r\n"
+            << "fallback_runtime_limit_reached=" << (fallbackStats.runtimeLimitReached ? "yes" : "no") << "\r\n"
+            << "unique_exact_vtable_objects=" << objects.size() << "\r\n"
+            << "numeric_plausible_objects=" << R16PlausibleObjectCount(objects) << "\r\n\r\n";
+
+        out << "PER-ROW OBJECT AND CURRENCY VERIFICATION\r\n"
+            << "----------------------------------------\r\n";
+        for (const R16RowMatch& match : rowMatches)
+        {
+            const auto& fields = *match.row->fields;
+            out << "ROW_MATCH row=" << match.row->rowIndex
+                << " symbol=" << V153EscapeField(fields[2])
+                << " status=" << match.status
+                << " candidate_count=" << match.candidates.size()
+                << " matched_object=" << HexValue(match.matchedObject) << "\r\n";
+            for (std::uintptr_t candidateAddress : match.candidates)
+            {
+                const R16PositionObjectEvidence& object = objects.at(candidateAddress);
+                out << "  CANDIDATE object=" << HexValue(candidateAddress)
+                    << " quantity=" << object.quantity
+                    << " average_price=" << object.averagePrice
+                    << " average_delta=" << (object.averagePrice - match.row->averagePrice)
+                    << " open_pl=" << object.openPl;
+                if (match.row->openPlOk)
+                    out << " displayed_open_pl_delta=" << (object.openPl - match.row->displayedOpenPl);
+                out << "\r\n";
+            }
+            if (!match.matchedObject)
+                continue;
+            const R16PositionObjectEvidence& object = objects.at(match.matchedObject);
+            out << "  VERIFIED_FIELDS quantity_offset=0x1A8 quantity=" << object.quantity
+                << " average_price_offset=0x1B0 average_price=" << object.averagePrice
+                << " open_pl_offset=0x1B8 open_pl=" << object.openPl
+                << " realized_pl_offset=0x1C8 realized_pl=" << object.realizedPl << "\r\n"
+                << "  PRIMARY_CURRENCY offset=0x308 value=" << V153EscapeField(object.primaryCurrency.value)
+                << " layout_valid=" << (object.primaryCurrency.layoutValid ? "yes" : "no")
+                << " strict_code=" << (object.primaryCurrency.strictCurrencyCode ? "yes" : "no")
+                << " size=" << object.primaryCurrency.size
+                << " capacity=" << object.primaryCurrency.capacity
+                << " storage=" << (object.primaryCurrency.inlineStorage ? "inline" : "heap")
+                << " diagnostic=" << V153EscapeFieldUtf8(object.primaryCurrency.diagnostic) << "\r\n"
+                << "  RPL_CURRENCY offset=0x328 value=" << V153EscapeField(object.rplCurrency.value)
+                << " layout_valid=" << (object.rplCurrency.layoutValid ? "yes" : "no")
+                << " strict_code=" << (object.rplCurrency.strictCurrencyCode ? "yes" : "no")
+                << " empty=" << (object.rplCurrency.empty ? "yes" : "no")
+                << " size=" << object.rplCurrency.size
+                << " capacity=" << object.rplCurrency.capacity
+                << " storage=" << (object.rplCurrency.inlineStorage ? "inline" : "heap")
+                << " diagnostic=" << V153EscapeFieldUtf8(object.rplCurrency.diagnostic) << "\r\n"
+                << "  EFFECTIVE_RPL_CURRENCY value=" << V153EscapeField(R16EffectiveCurrency(object))
+                << " rule=RPL_CURRENCY_when_nonempty_otherwise_PRIMARY_CURRENCY\r\n";
+        }
+        out << "\r\n";
+
+        out << "ALL EXACT-VTABLE OBJECTS\r\n"
+            << "------------------------\r\n";
+        for (const auto& item : objects)
+        {
+            const R16PositionObjectEvidence& object = item.second;
+            out << "OBJECT address=" << HexValue(object.object)
+                << " vtable_stable=" << (object.vtableStable ? "yes" : "no")
+                << " numeric_readable=" << (object.numericReadable ? "yes" : "no")
+                << " numeric_plausible=" << (object.numericPlausible ? "yes" : "no")
+                << " direct_vtable_hit=" << (object.directVtableHit ? "yes" : "no")
+                << " pointer_reference_count=" << object.pointerReferenceCount
+                << " region_base=" << HexValue(object.regionBase)
+                << " region_size=" << object.regionSize
+                << " source=" << V153EscapeFieldUtf8(object.discoverySource)
+                << " quantity=" << object.quantity
+                << " average_price=" << object.averagePrice
+                << " open_pl=" << object.openPl
+                << " realized_pl=" << object.realizedPl
+                << " primary_currency=" << V153EscapeField(object.primaryCurrency.value)
+                << " rpl_currency=" << V153EscapeField(object.rplCurrency.value)
+                << " effective_rpl_currency=" << V153EscapeField(R16EffectiveCurrency(object))
+                << "\r\n";
+        }
+        if (objects.empty())
+            out << "none\r\n";
+        out << "\r\n"
+            << "R16 RESULT\r\n"
+            << "----------\r\n"
+            << "matched_rows=" << matchedRows << "\r\n"
+            << "matched_unique_objects=" << matchedObjects.size() << "\r\n"
+            << "currency_decoded_rows=" << currencyDecodedRows << "\r\n"
+            << "verification_complete=" << (verificationComplete ? "yes" : "no") << "\r\n"
+            << "interpretation=+0x308 is the primary position-currency string used by CurrencyCode/CurrencyLetter. +0x328 is the CurrencyLetterRPL override; an empty override falls back to +0x308. Production promotion still requires repeat stability and at least one capture with a different native instrument currency.\r\n";
+
+        const bool written = WriteUtf8File(reportPath, out.str());
+        std::ostringstream finalCheckpoint;
+        finalCheckpoint << "MCST POSITION CURRENCY R16 CHECKPOINT\r\n"
+                        << "research_build=1.114-R16\r\n"
+                        << "bridge_version=" << kBridgeVersion << "\r\n"
+                        << "read_only=yes\r\nunknown_functions_called=no\r\n"
+                        << "phase_status=" << (!written ? "WRITE_FAILED" :
+                            (verificationComplete ? "OK" : "PARTIAL")) << "\r\n"
+                        << "visible_rows=" << positions.rows.size() << "\r\n"
+                        << "parsed_rows=" << parsedRows.size() << "\r\n"
+                        << "exact_vtable_objects=" << objects.size() << "\r\n"
+                        << "numeric_plausible_objects=" << R16PlausibleObjectCount(objects) << "\r\n"
+                        << "matched_rows=" << matchedRows << "\r\n"
+                        << "matched_unique_objects=" << matchedObjects.size() << "\r\n"
+                        << "currency_decoded_rows=" << currencyDecodedRows << "\r\n"
+                        << "pointer_reference_scan_executed=" << (pointerReferenceScanExecuted ? "yes" : "no") << "\r\n"
+                        << "fallback_scan_executed=" << (fallbackScanExecuted ? "yes" : "no") << "\r\n"
+                        << "verification_complete=" << (verificationComplete ? "yes" : "no") << "\r\n"
+                        << "report_written=" << (written ? "yes" : "no") << "\r\n";
+        const bool checkpointWritten = WriteUtf8File(
+            checkpointPath, finalCheckpoint.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"position_currency_r16\",\"version\":171,"
+                << "\"read_only\":true,\"unknown_functions_called\":false,"
+                << "\"visible_rows\":" << positions.rows.size() << ','
+                << "\"parsed_rows\":" << parsedRows.size() << ','
+                << "\"exact_vtable_objects\":" << objects.size() << ','
+                << "\"numeric_plausible_objects\":" << R16PlausibleObjectCount(objects) << ','
+                << "\"matched_rows\":" << matchedRows << ','
+                << "\"currency_decoded_rows\":" << currencyDecodedRows << ','
+                << "\"verification_complete\":" << (verificationComplete ? "true" : "false") << ','
+                << "\"checkpoint_written\":" << (checkpointWritten ? "true" : "false") << ','
+                << "\"report_written\":" << (written ? "true" : "false") << ','
+                << "\"report_path\":" << JsonString(reportPath) << '}';
+        summaryJson = summary.str();
         return written && positions.ok && !positions.rows.empty();
     }
 

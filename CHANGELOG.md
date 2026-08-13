@@ -1,5 +1,81 @@
 ﻿# Changelog
 
+## 1.114-R18
+
+- Moved every known-currency Open P/L total into the Open Positions table so
+  the amount is directly below the individual Open P/L values.
+- Added green HTML styling for complete positive Open P/L cells, including the
+  currency symbol/code and optional plus sign.
+- Added red HTML styling for complete negative Open P/L cells, including the
+  currency symbol/code and minus sign.
+- Applied the same styling to individual values and totals in Status Reports
+  and in status reports embedded in alert messages.
+- Removed the Native Value total explanation line from the report.
+- Added regression coverage for column placement and positive/negative colors.
+- Retained the R17 currency aggregation rules, Bridge V171, and Protocol V2.
+
+## 1.114-R17
+
+- Ended the search for the unresolved Average Price/native currency.
+- Added per-currency Open P/L totals based only on unambiguous currency evidence
+  already present in each visible Open Positions cell.
+- Added EUR recognition from the euro sign and support for explicit three-letter
+  currency codes.
+- Added fail-closed handling for ambiguous currency symbols: affected rows are
+  excluded from totals and reported as not totalled.
+- Kept Native Value as a per-row value and intentionally left its total disabled.
+- Added a Status Report regression test for EUR grouping and dollar ambiguity.
+- Retained Bridge V171, Protocol V2, and the R16 Position CCY diagnostic action.
+
+## 1.114-R16 (research)
+
+- Bumped Tracker Bridge internal build from V170 to V171; Protocol V2 and command 50 remain unchanged.
+- Replaced the active broad ABI candidate search with fingerprint-scoped verification of ATCenterProxy vtable RVA `0x44D518`.
+- Added exact target-RVA and code-signature gates for Quantity, Average Price, Open P/L, CurrencyCode/CurrencyLetter, CurrencyLetterRPL, and Realized P/L.
+- Added direct reads of object fields `+0x1A8`, `+0x1B0`, `+0x1B8`, and `+0x1C8` only after the fingerprint gate passes.
+- Added bounded MSVC x64 `std::wstring` decoding and strict currency validation at object offsets `+0x308` and `+0x328`.
+- Added unique row correlation using Quantity and Average Price, plus Open P/L delta reporting.
+- Added staged exact-vtable discovery: known-anchor direct scan, anchor pointer-reference scan, and bounded process-data fallback.
+- Corrected PriceScaleCode receiver semantics: it uses a separately queried interface, not the position interface's own `+0x60` slot.
+- Kept the action read-only; no undocumented MultiCharts function is called.
+
+## 1.114-R15 (research)
+
+- Bumped Tracker Bridge internal build from V169 to V170; Protocol V2 and command 50 remain unchanged.
+- Replaced object-instance candidate limiting with unique-vtable grouping.
+- Added all-module target capture, bounded direct-thunk following, module-relative RVAs, and generic runtime-function boundaries.
+- Added `RDX` output-pointer ABI evidence and target classifications: `COMPATIBLE`, `PLAUSIBLE`, `UNKNOWN`, and `REJECTED`.
+- Added explicit rejection of the R14 false-match pattern: trivial `this`-field getters that ignore the required output pointer.
+- Added ABI-aware vtable ranking, bounded source-path reporting, reference samples, and limit-sensitive `PARTIAL` checkpoints.
+- Kept the action read-only; no undocumented MultiCharts function is called.
+
+## 1.114-R14 (research)
+
+- Bumped Tracker Bridge internal build from V168 to V169; Protocol V2 and command 50 remain unchanged.
+- Added automatic verification of the seven extractor vtable-dispatch offsets.
+- Added a bounded known-anchor interface-object search using the six confirmed semantic slots.
+- Added target-module, RVA, runtime-boundary, and unique target-code evidence.
+- Kept the action read-only; no undocumented MultiCharts function is called.
+
+## 1.114-R7 (research)
+
+- Bumped Tracker Bridge internal build from V161 to V162; Protocol V2 and command 50 remain unchanged.
+- Added an unconditional process-wide stride-table scan with a 3 GiB byte budget and 150-second deadline.
+- Kept the R6 symbol-bearing independent position records as a parallel research route.
+- Added process-wide deduplicated back-reference scanning with a 3 GiB budget, 120-second deadline, and 4096 unique-hit cap.
+- Expanded record-neighborhood inspection substantially for strings, pointers, integers, and numeric fields.
+- Corrected checkpoint status to `PARTIAL` when the validated table phase remains incomplete.
+- Preserved the read-only safety boundary and prohibition on unknown MultiCharts calls.
+
+## 1.114-R6 (research)
+
+- Bumped Tracker Bridge internal build from V160 to V161; Protocol V2 and command 50 remain unchanged.
+- Added strict validation of the live stride-`0x30` position table across every visible row.
+- Deduplicate ownership references by field address and pointer value before result limiting.
+- Added complete per-row owner-pointer coverage and stride-`0x90` owner-record grouping.
+- Added bounded pointer/string inspection around each unique owner field.
+- Preserved the read-only safety boundary and prohibition on unknown MultiCharts calls.
+
 ## 1.114-R3 (research)
 
 - Replaced R2's null `ITC_TradeInfo -> +0x98 -> +0x10E0` record-root dependency with dynamic read-only row correlation.

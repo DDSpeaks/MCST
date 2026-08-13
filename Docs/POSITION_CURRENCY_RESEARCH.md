@@ -1,165 +1,78 @@
-﻿# Position Currency Research — 1.114-R3
+# Position Currency Research — 1.114-R16
 
-## Goal
+> Retained diagnostic in the 1.114-R18 package. R18 does not continue the search
+> for Average Price currency. Production Status Reports total only Open P/L rows
+> whose displayed currency is already unambiguous.
 
-The purpose of this temporary research build is to determine whether MCST can obtain both currency contexts for each Open Positions row directly from MultiCharts:
+## R15 result carried into R16
 
-```text
-Average Price / Native Value  -> instrument currency
-Open P/L                      -> P/L or report/account currency
-```
-
-The values may be in different currencies. R3 therefore keeps them separate throughout the investigation.
-
-## Why R3 exists
-
-R2 verified that the production Tracker reader can read the visible rows, but its research-only `ITC_TradeInfo -> +0x98 -> +0x10E0` storage pointer was null in a live capture. R3 removes that assumption completely.
-
-## Safety boundary
-
-The R3 capture is passive:
+R15's broad search found one interface that uniquely matched the extractor ABI
+and the live position count:
 
 ```text
-Process-memory writes:       no
-Unknown internal calls:      no
-UI input simulation:         no
-Order operations:            no
-Production totals enabled:   no
+module:       ATCenterProxy.dll
+vtable RVA:   0x44D518
+live objects: 10 in the reference capture
 ```
 
-The Bridge reads memory that is already readable inside its own MultiCharts process and writes diagnostic text files under `C:\Temp`.
+The verified interface layout is:
 
-## Required Bridge
+| Vtable slot | Meaning | Object field |
+| ---: | --- | ---: |
+| `+0x40` | Quantity | `+0x1A8` (`int32`) |
+| `+0x48` | Average Price | `+0x1B0` (`double`) |
+| `+0x58` | Open P/L | `+0x1B8` (`double`) |
+| `+0x70` | CurrencyCode / CurrencyLetter source | `+0x308` (`std::wstring`) |
+| `+0x88` | CurrencyLetterRPL source | `+0x328`, falling back to `+0x308` |
+| `+0x90` | Realized P/L | `+0x1C8` (`double`) |
 
-```text
-Product version: 1.0
-Internal build:  V158
-Protocol:        V2
-```
+PriceScaleCode is not read from this interface. Its extractor first obtains a
+different interface and then calls that interface's `+0x60` slot.
 
-Production Tracker snapshots still require only V156 or newer. The `Position CCY` R3 capture specifically requires V158.
+## R16 verification gate
 
-After replacing `C:\MCExtras\MCST-TrackerBridge.dll`, restart MultiCharts so the new DLL is loaded.
+Bridge V171 refuses inferred layout reads unless all of the following match:
 
-## Recommended live data
+- ATOnPTracker timestamp `0x6A5694FB` and image size `3534848`;
+- ATCenterProxy image size `7303168`;
+- vtable RVA `0x44D518`;
+- expected target RVAs at slots `+0x40`, `+0x48`, `+0x58`, `+0x60`,
+  `+0x70`, `+0x88`, and `+0x90`;
+- exact bounded code signatures proving the four numeric field offsets and the
+  two currency getter implementations.
 
-The most useful capture contains at least two open positions whose instrument currencies are known to be different. Three currencies are better.
+This is a fail-closed research fingerprint, not a general cross-version ABI.
 
-Examples:
+## Object search and row correlation
 
-```text
-US stock       -> USD
-Swedish stock  -> SEK
-Euro-area stock -> EUR
-```
+R16 first searches regions reached from `ITC_TradeInfo`, `CATPTTabView`, the
+Open Positions page, and its grid for the exact verified vtable value. If all
+rows are not uniquely covered, it searches pointer references in the same graph
+and then scans other readable private/mapped regions for that exact vtable only.
 
-A row where Open P/L is displayed in EUR while Average Price is in USD or SEK is especially useful.
+Objects are matched to the visible grid using absolute Quantity and Average
+Price. Open P/L is reported as a delta but is not a stable key because it can
+change between the grid read and the memory read.
 
-## Running the capture
+## Currency decoding
 
-1. Build `Release|x64`.
-2. Copy the R3 `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll` to `C:\MCExtras`.
-3. Restart MultiCharts.
-4. Start the Bridge host and Watchdog.
-5. Enable Developer Mode.
-6. Verify that Open Positions contains useful live rows.
-7. Press `Position CCY`.
-8. Wait for the completion dialog. The bounded fallback scan can take longer than R2 because it may inspect a substantial amount of readable data memory.
+Both currency fields are decoded as bounded MSVC x64 `std::wstring` values:
 
-The action writes:
+- primary position currency: object `+0x308`;
+- RPL/P&L currency override: object `+0x328`;
+- effective RPL currency: use `+0x328` when non-empty, otherwise `+0x308`.
 
-```text
-C:\Temp\MCST_Position_Currency_Reference_<pid>.txt
-C:\Temp\MCST_Position_Currency_Dynamic_<pid>.txt
-```
+The reader validates size, capacity, SSO/heap storage, terminator, printable
+characters, and a strict three-uppercase-letter code. It never calls the getter.
 
-## How R3 finds candidates
+## Expected files
 
-R3 parses the visible row values first:
+Build `Release|x64`, replace both binaries in `C:\MCExtras`, restart
+MultiCharts, and run Developer → `Position CCY`. Return:
 
-```text
-Quantity
-Average Price
-Open P/L
-```
+- `C:\Temp\MCST_Position_Currency_Dynamic_<pid>.txt`
+- `C:\Temp\MCST_Position_Currency_R16_Checkpoint_<pid>.txt`
 
-It then discovers readable private/mapped regions reachable from Tracker roots and scans them for Average Price.
-
-An Average Price hit is retained only when the visible Quantity occurs within a bounded nearby window.
-
-A displayed Open P/L numeric match in the same neighborhood is additional evidence.
-
-R3 does not require:
-
-```text
-record base + 0x60 = Quantity
-record base + 0x68 = Average Price
-record base + 0x70 = Open P/L
-root + 0x10E0      = record storage
-```
-
-Those were R2 hypotheses, not production facts.
-
-## What to inspect in the R3 report
-
-For each row, look first at:
-
-```text
-candidate_count=
-CANDIDATE ... score=
-quantity_i32_offsets_from_average=
-quantity_i64_offsets_from_average=
-displayed_open_pl_offsets_from_average=
-```
-
-Repeated relative offsets across several unrelated rows are stronger evidence than a one-row coincidence.
-
-Then inspect:
-
-```text
-small_integer_fields_near_average:
-nearby_pointer_strings:
-nearby_double_fields:
-```
-
-A stable small integer field that changes with USD/SEK/EUR may be a currency code candidate. A readable nearby `USD`, `SEK`, `EUR`, `$`, `€`, etc. string may be even stronger.
-
-## Static extractor evidence
-
-The report separately scans PE sections for the diagnostic names of:
-
-```text
-CurrencyCode
-CurrencyLetter
-CurrencyLetterRPL
-```
-
-and related Open Positions getters.
-
-`diagnostic_string_rva` and `raw_rip_reference_rvas` are static evidence only. R3 does not invoke these functions.
-
-## Success criteria
-
-A field should not be promoted to production merely because it appears plausible.
-
-For native/instrument currency, require repeated live captures showing the same field/relationship with at least two different known instrument currencies.
-
-For Open P/L currency, require a repeated relationship that agrees with the visible P/L currency and distinguishes cases where native currency differs.
-
-Until then:
-
-```text
-currency = UNKNOWN
-totals   = NOT CALCULATED
-```
-
-## Files to return for analysis
-
-The two most important files are:
-
-```text
-MCST_Position_Currency_Reference_<pid>.txt
-MCST_Position_Currency_Dynamic_<pid>.txt
-```
-
-No raw process-memory binary dump is required by R3.
+An `OK` checkpoint means every parsed visible row had one unique verified
+object and both currency fields had a valid layout. A second capture with a
+different native instrument currency is still required before production use.

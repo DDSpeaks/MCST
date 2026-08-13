@@ -8,12 +8,12 @@ MCST Tracker Bridge is the MultiCharts-side runtime component that provides Orde
 Public product name: MCST Tracker Bridge
 Product version:     1.0
 DLL file:            MCST-TrackerBridge.dll
-Internal build:      V158
+Internal build:      V171
 Bridge protocol:     V2
 Runtime location:    C:\MCExtras\MCST-TrackerBridge.dll
 ```
 
-The internal V158 identifier describes this Bridge implementation. It is separate from the public product version and separate from the exact MultiCharts module fingerprints used by the compatibility framework. Production Tracker snapshots still require V156 or newer. V157 introduced the focused Position Currency research command; V158 retains that Protocol V2 command and replaces its R2 fixed-root implementation with the R3 dynamic read-only scan.
+The internal V171 identifier describes this Bridge implementation. It is separate from the public product version and from the exact MultiCharts module fingerprints used by the compatibility framework. Production Tracker snapshots still require V156 or newer. V171 retains Protocol V2 command 50 and changes only its research implementation: the exact R15 ATCenterProxy position interface is verified, its live objects are correlated with visible rows, and its two bounded currency strings are decoded.
 
 ## How the Bridge is loaded
 
@@ -68,4 +68,4 @@ This design allows a newly verified `Profile.*` section to be activated with a f
 
 ## Protocol stability
 
-Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Command 50 was introduced in V157 and is retained unchanged at the protocol level; V158 replaces only its research implementation with dynamic bounded correlation. The message header and production snapshot payload remain unchanged. Internal layout discovery and profile selection stay inside the Bridge.
+Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Command 50 was introduced in V157 and is retained unchanged at the protocol level; V171 changes only its bounded, read-only research implementation. The message header and production snapshot payload remain unchanged. Internal layout discovery and profile selection stay inside the Bridge.

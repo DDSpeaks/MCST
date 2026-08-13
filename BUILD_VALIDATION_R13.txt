@@ -1,0 +1,16 @@
+MCST 1.114-R13 / Tracker Bridge V168 validation
+================================================
+
+Validated in the packaging environment:
+- required R13 static-analysis source tokens are present;
+- Bridge, Watchdog, resource, PowerLanguage, and release-tool versions agree;
+- delimiter balance check passes for the modified Bridge translation unit;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts/ATOnPTracker capture.
+
+The Windows operator must build Release|x64 and return the Dynamic report and R13
+checkpoint. The report itself labels byte-pattern candidates as non-disassembler-
+verified and confirms that no unknown function was called.

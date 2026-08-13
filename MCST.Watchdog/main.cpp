@@ -1184,7 +1184,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R3", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R18", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1464,7 +1464,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R3 Research", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R18", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1580,11 +1580,11 @@ namespace
                 }
                 else if (referenceSnapshot.bridgeVersion < kPositionCurrencyResearchBridgeVersion)
                 {
-                    dialogMessage = L"Position CCY R3 requires MCST Tracker Bridge V" +
+                    dialogMessage = L"Position CCY R16 requires MCST Tracker Bridge V" +
                         std::to_wstring(kPositionCurrencyResearchBridgeVersion) +
                         L" or newer. The currently loaded Bridge is V" +
                         std::to_wstring(referenceSnapshot.bridgeVersion) +
-                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V158 build from this package and restart MultiCharts.";
+                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V171 build from this package and restart MultiCharts.";
                 }
                 else if (!referenceSnapshot.openPositions.present || !referenceSnapshot.openPositions.ok)
                 {
@@ -1607,8 +1607,8 @@ namespace
                         dialogMessage += L"\r\n\r\nBridge capture:\r\n" + summary;
                     dialogMessage +=
                         L"\r\n\r\nResearch files are under C:\\Temp. "
-                        L"The primary R3 result is MCST_Position_Currency_Dynamic_<pid>.txt. "
-                        L"It dynamically searches readable Tracker-related data memory for Quantity + Average Price co-location and inspects separate native-currency and P/L-currency candidates without relying on the rejected +0x10E0 record-root assumption.";
+                        L"The primary R16 result is MCST_Position_Currency_Dynamic_<pid>.txt. "
+                        L"It verifies the exact ATCenterProxy position interface, correlates its objects with visible rows, and reads the two bounded currency strings without calling unknown MultiCharts functions.";
                 }
 
                 MessageBoxW(
@@ -1875,7 +1875,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R3 research process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R18 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -1945,7 +1945,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R3 - Position Currency Research",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R18 - Open P/L Totals",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

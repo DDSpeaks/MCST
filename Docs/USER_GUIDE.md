@@ -87,7 +87,7 @@ Matching is case-insensitive and keywords are separated with `|`. The Log Alert 
 
 ## Status Reports and Heartbeats
 
-Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs. Tracker tables use calculated column widths so values remain vertically aligned. The final Recent Logs message field may extend freely after its aligned starting position. Open Positions also includes a derived `Position Value` field and a final `TOTALS` row for total Position Value and total Open P/L.
+Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs. Tracker tables use calculated column widths so values remain vertically aligned. The final Recent Logs message field may extend freely after its aligned starting position. Open Positions includes a derived per-row `Native Value`, but no Native Value total or explanatory total line. Open P/L is totaled separately for every currency identified unambiguously from the displayed cell; ambiguous rows are excluded and counted below the table. Each total amount is shown directly below the individual Open P/L values. In HTML email reports, complete positive Open P/L cells are green and complete negative cells are red, including their currency symbols/codes and signs.
 
 Heartbeat messages are routine proof-of-life messages and use the report recipient rather than the alert recipient.
 

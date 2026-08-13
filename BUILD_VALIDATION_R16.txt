@@ -1,0 +1,16 @@
+MCST 1.114-R16 / Tracker Bridge V171 validation
+================================================
+
+Validated in the packaging environment:
+- required fingerprint, exact-vtable search, row-correlation, numeric-field, and bounded-wstring source tokens are present;
+- Bridge, Watchdog, resource, PowerLanguage, and release-tool versions agree;
+- delimiter balance check passes for the modified Bridge translation unit;
+- the active R16 command is fail-closed on both ATOnPTracker and ATCenterProxy interface fingerprints;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts/ATOnPTracker capture.
+
+The Windows operator must build Release|x64 and return the Dynamic report and R16
+checkpoint. The research remains read-only and calls no undocumented function.

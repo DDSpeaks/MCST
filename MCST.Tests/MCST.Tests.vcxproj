@@ -15,6 +15,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="../MCST.Watchdog/StatusReport.cpp" />
   </ItemGroup>
   <ItemGroup>
   </ItemGroup>

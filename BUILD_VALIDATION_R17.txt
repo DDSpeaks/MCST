@@ -1,0 +1,22 @@
+MCST 1.114-R17 / Tracker Bridge V171 validation
+================================================
+
+Validated in the packaging environment:
+- Open P/L totals are grouped by an unambiguous currency;
+- euro-sign and explicit three-letter currency recognition are present;
+- ambiguous dollar-only rows are excluded and counted;
+- Native Value remains per-row only and is not aggregated;
+- the Status Report regression tests cover EUR aggregation, ambiguous-currency
+  exclusion, contradictory evidence, and the current ten-row Saxo total of EUR +106.68;
+- the retained R16 fingerprint, exact-vtable, row-correlation, numeric-field, and bounded-wstring source tokens are present;
+- Bridge, Watchdog, resource, PowerLanguage, and release-tool versions agree;
+- delimiter balance check passes for the modified Bridge translation unit;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts Status Report generation.
+
+The Windows operator must build Release|x64, replace the Watchdog executable,
+and verify that the Status Report shows a per-currency Open P/L total while
+leaving Native Value without a total. The Bridge binary is unchanged at V171.

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cerrno>
 #include <cwchar>
+#include <map>
 
 namespace
 {
@@ -300,6 +301,57 @@ namespace
         return result;
     }
 
+    bool IsAsciiLetter(wchar_t ch)
+    {
+        return (ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z');
+    }
+
+    bool TryExtractKnownCurrency(const std::wstring& raw, std::wstring& currency)
+    {
+        currency.clear();
+        const bool hasEuroSign = raw.find(L'\u20ac') != std::wstring::npos;
+        std::wstring explicitCurrency;
+
+        // Accept an explicit three-letter code such as EUR, USD or CHF. Symbols
+        // such as '$', 'kr' and the yen/yuan sign are deliberately not inferred:
+        // without an ISO code they can represent more than one currency.
+        for (std::size_t begin = 0; begin < raw.size();)
+        {
+            while (begin < raw.size() && !IsAsciiLetter(raw[begin]))
+                ++begin;
+            std::size_t end = begin;
+            while (end < raw.size() && IsAsciiLetter(raw[end]))
+                ++end;
+
+            if (end - begin == 3 &&
+                raw[begin] >= L'A' && raw[begin] <= L'Z' &&
+                raw[begin + 1] >= L'A' && raw[begin + 1] <= L'Z' &&
+                raw[begin + 2] >= L'A' && raw[begin + 2] <= L'Z')
+            {
+                const std::wstring candidate = raw.substr(begin, 3);
+                if (!explicitCurrency.empty() && explicitCurrency != candidate)
+                    return false;
+                explicitCurrency = candidate;
+            }
+            begin = end;
+        }
+
+        // Reject contradictory evidence instead of choosing one representation.
+        if (hasEuroSign && !explicitCurrency.empty() && explicitCurrency != L"EUR")
+            return false;
+        if (hasEuroSign)
+        {
+            currency = L"EUR";
+            return true;
+        }
+        if (!explicitCurrency.empty())
+        {
+            currency = explicitCurrency;
+            return true;
+        }
+        return false;
+    }
+
     void AppendOpenPositionsTable(std::wostringstream& out, const TrackerBridgeSection& section)
     {
         if (section.rows.empty())
@@ -314,6 +366,9 @@ namespace
         };
         std::vector<std::vector<std::wstring>> rows;
         rows.reserve(section.rows.size());
+        std::map<std::wstring, double> openPlTotalsByCurrency;
+        std::map<std::wstring, std::size_t> openPlRowsByCurrency;
+        std::size_t openPlRowsNotTotaled = 0;
 
         for (const auto& source : section.rows)
         {
@@ -342,11 +397,36 @@ namespace
                 row[6] = L"n/a";
             }
 
+            double openPl = 0.0;
+            std::wstring openPlCurrency;
+            if (ParseLocalizedNumber(row[7], openPl) &&
+                TryExtractKnownCurrency(row[7], openPlCurrency))
+            {
+                openPlTotalsByCurrency[openPlCurrency] += openPl;
+                ++openPlRowsByCurrency[openPlCurrency];
+            }
+            else
+            {
+                ++openPlRowsNotTotaled;
+            }
+
             rows.push_back(std::move(row));
         }
 
+        std::vector<std::vector<std::wstring>> totalRows;
+        for (const auto& total : openPlTotalsByCurrency)
+        {
+            std::vector<std::wstring> totalRow(headers.size());
+            totalRow[6] = L"Total Open P/L";
+            totalRow[7] = total.first + L" " + FormatReportNumber(total.second, true);
+            totalRow[8] = L"[" + std::to_wstring(openPlRowsByCurrency[total.first]) + L" rows]";
+            totalRows.push_back(std::move(totalRow));
+        }
+
+        std::vector<std::vector<std::wstring>> rowsForWidth = rows;
+        rowsForWidth.insert(rowsForWidth.end(), totalRows.begin(), totalRows.end());
         const std::vector<std::size_t> widths =
-            CalculateColumnWidths(rows, headers.size(), &headers, false);
+            CalculateColumnWidths(rowsForWidth, headers.size(), &headers, false);
         const std::vector<bool> rightAligned = {
             false, false, false, false, true, true, true, true, false
         };
@@ -356,7 +436,15 @@ namespace
         for (const auto& row : rows)
             AppendAlignedRow(out, row, widths, rightAligned, false);
         out << std::wstring(FixedTableWidth(widths, false), L'-') << L'\n';
-        out << L"TOTALS NOT CALCULATED - position and P/L currency normalization is under research.\n";
+        for (const auto& totalRow : totalRows)
+            AppendAlignedRow(out, totalRow, widths, rightAligned, false);
+        if (openPlTotalsByCurrency.empty())
+            out << L"TOTAL OPEN P/L: not calculated - no row had an unambiguous currency.\n";
+        if (openPlRowsNotTotaled != 0)
+        {
+            out << L"OPEN P/L ROWS NOT TOTALLED: " << openPlRowsNotTotaled
+                << L" - value or currency was not unambiguous.\n";
+        }
     }
 }
 
@@ -365,7 +453,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R3 Research\n"
+        << L"Watchdog version       1.114-R18\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -484,6 +572,58 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         return escapeHtml(trim(stateCell));
     };
 
+    auto openPositionLineHtml = [&](const std::wstring& line)
+    {
+        constexpr std::size_t openPlColumn = 7;
+        const std::wstring separator = L" | ";
+        std::vector<std::wstring> cells;
+        std::size_t begin = 0;
+        for (;;)
+        {
+            const std::size_t end = line.find(separator, begin);
+            cells.push_back(end == std::wstring::npos
+                ? line.substr(begin)
+                : line.substr(begin, end - begin));
+            if (end == std::wstring::npos)
+                break;
+            begin = end + separator.size();
+        }
+
+        if (cells.size() <= openPlColumn)
+            return escapeHtml(line);
+
+        double profit = 0.0;
+        if (!ParseLocalizedNumber(cells[openPlColumn], profit) ||
+            std::fabs(profit) < 0.0000001)
+        {
+            return escapeHtml(line);
+        }
+
+        const std::wstring& cell = cells[openPlColumn];
+        const std::size_t contentBegin = cell.find_first_not_of(L" \t");
+        const std::size_t contentEnd = cell.find_last_not_of(L" \t");
+        if (contentBegin == std::wstring::npos || contentEnd == std::wstring::npos)
+            return escapeHtml(line);
+
+        std::wstring coloredCell;
+        coloredCell += escapeHtml(cell.substr(0, contentBegin));
+        coloredCell += profit > 0.0
+            ? L"<span style=\"color:#15803D;font-weight:600;\">"
+            : L"<span style=\"color:#B4232A;font-weight:600;\">";
+        coloredCell += escapeHtml(cell.substr(contentBegin, contentEnd - contentBegin + 1));
+        coloredCell += L"</span>";
+        coloredCell += escapeHtml(cell.substr(contentEnd + 1));
+
+        std::wstring result;
+        for (std::size_t index = 0; index < cells.size(); ++index)
+        {
+            if (index != 0)
+                result += escapeHtml(separator);
+            result += index == openPlColumn ? coloredCell : escapeHtml(cells[index]);
+        }
+        return result;
+    };
+
     std::vector<std::wstring> lines;
     {
         std::wistringstream input(plainText);
@@ -502,6 +642,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     bool inSystemStatus = false;
     bool systemTableOpen = false;
     bool preOpen = false;
+    bool inOpenPositions = false;
 
     auto openPre = [&]()
     {
@@ -533,6 +674,11 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     for (std::size_t i = 0; i < lines.size(); ++i)
     {
         const std::wstring& line = lines[i];
+
+        if (line == L"OPEN POSITIONS")
+            inOpenPositions = true;
+        else if (line == L"RECENT LOGS")
+            inOpenPositions = false;
 
         if (line == L"OVERALL STATUS")
         {
@@ -618,7 +764,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         // fixed-column readability while keeping one consistent monospaced
         // typeface throughout the entire report.
         openPre();
-        html += escapeHtml(line);
+        html += inOpenPositions ? openPositionLineHtml(line) : escapeHtml(line);
         html += L"\n";
     }
 

@@ -1,53 +1,26 @@
-﻿MCST Research Build Information
-===============================
+MCST Build Information
+======================
 
-MCST-Watchdog
--------------
-Version:             1.114-R3
-Build kind:          Position Currency Dynamic Research
-Base production:     1.114
-Configuration:       Release x64
-Runtime linkage:     Static /MT
-Optimization:        /O2 with production-safe project settings
-Debug configuration: Not included
+MCST-Watchdog version: 1.114-R18
+Base production:       1.114
+Build:                 Release x64, static /MT
+Tracker Bridge:        Product 1.0, internal V171, Protocol V2
+Production change:     Open P/L total placement and profit colors
+Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-MCST Tracker Bridge
--------------------
-Product version:     1.0
-Internal build:      V158
-Protocol:            V2
-DLL:                 MCST-TrackerBridge.dll
-Bridge change:       V158 replaces the rejected fixed +0x10E0 record-root research assumption
-                     with dynamic read-only memory correlation for Position Currency research.
+R18 production method
+---------------------
+1. Retain R17's fail-closed, per-currency Open P/L aggregation.
+2. Put the currency and total amount in the Open P/L column beneath the detail
+   rows, with the label in the preceding column and the row count after it.
+3. In HTML reports, render the complete positive Open P/L cell green and the
+   complete negative Open P/L cell red.
+4. Include currency symbols/codes and explicit signs inside the colored span.
+5. Keep Native Value per row, but omit the former explanatory total notice.
 
-Research action
----------------
-Developer control:   Position CCY
-Bridge command:      CapturePositionCurrencyDirectResearch (command 50, retained for protocol compatibility)
-Reference output:    C:\Temp\MCST_Position_Currency_Reference_<pid>.txt
-Research output:     C:\Temp\MCST_Position_Currency_Dynamic_<pid>.txt
-Read-only:            Yes
-Unknown MC calls:     No
-Process-memory write: No
-UI input simulation:  No
-Research fingerprint: ATOnPTracker 0x6A5694FB / 3534848
+Expected current-capture example
+--------------------------------
+Total Open P/L | EUR +106,68 | [10 rows]
 
-R3 research method
-------------------
-1. Read visible Open Positions rows through the verified production Tracker reader.
-2. Discover readable private/mapped data regions from Tracker object-graph roots.
-3. Search for visible Average Price values.
-4. Retain a candidate only when visible Quantity is found nearby.
-5. Treat a nearby displayed Open P/L value as additional confidence, not as a requirement.
-6. Inspect small integer fields and readable string pointers around each retained candidate.
-7. Scan ATOnPTracker PE sections separately for CurrencyCode/CurrencyLetter/CurrencyLetterRPL
-   diagnostic strings and raw RIP-relative references.
-8. Fall back to bounded process-wide readable data-region scanning when root-reachable regions
-   do not correlate all visible rows.
-9. Never call the unknown internal extractor methods.
-
-Compatibility
--------------
-Production Tracker snapshot minimum Bridge build: V156
-Position Currency R3 research minimum Bridge build: V158
-Bridge protocol: V2 unchanged
+Production Tracker minimum Bridge: V156
+Retained Position Currency R16 research minimum Bridge: V171

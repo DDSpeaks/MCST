@@ -1,0 +1,16 @@
+MCST 1.114-R15 / Tracker Bridge V170 validation
+================================================
+
+Validated in the packaging environment:
+- required dispatch-verification, unique-vtable, and output-pointer ABI source tokens are present;
+- Bridge, Watchdog, resource, PowerLanguage, and release-tool versions agree;
+- delimiter balance check passes for the modified Bridge translation unit;
+- the R15 trivial-getter test rejects the five known R14 false-candidate leaf getters;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts/ATOnPTracker capture.
+
+The Windows operator must build Release|x64 and return the Dynamic report and R15
+checkpoint. The research remains read-only and calls no undocumented function.

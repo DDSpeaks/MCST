@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R3'
-$currentBridgeBuild = 158
+$currentVersion = '1.114-R18'
+$currentBridgeBuild = 171
 $minimumProductionBridgeBuild = 156
 $currentProtocolVersion = 2
 
@@ -27,6 +27,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
+    'BUILD_VALIDATION_R18.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -79,6 +80,9 @@ Get-ChildItem -Path $root -Recurse -Filter *.vcxproj | ForEach-Object {
 }
 
 $watchdogMain = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
+if ($watchdogMain -notmatch [regex]::Escape($currentVersion)) {
+    throw "Watchdog main window does not identify $currentVersion."
+}
 if ($watchdogMain -match 'RECENT ACTIVITY') {
     throw 'The redundant RECENT ACTIVITY Dashboard section must not be present in the production UI.'
 }
@@ -102,24 +106,48 @@ if ($watchdogMain -notmatch 'configRevision' -or
 }
 
 $appConfigSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AppConfig.cpp') -Raw
-if ($appConfigSource -notmatch 'RefreshIniProfileCache' -or
+if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
+    $appConfigSource -notmatch 'RefreshIniProfileCache' -or
     $appConfigSource -notmatch 'WritePrivateProfileStringW\(nullptr, nullptr, nullptr, path\.c_str\(\)\)') {
     throw 'INI profile cache refresh support is missing from AppConfig.'
 }
 
 $statusReportSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\StatusReport.cpp') -Raw
-if ($statusReportSource -notmatch 'AppendAlignedSectionRows' -or
+if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
+    $statusReportSource -notmatch 'AppendAlignedSectionRows' -or
     $statusReportSource -notmatch 'AppendOpenPositionsTable' -or
     $statusReportSource -notmatch 'Native Value' -or
-    $statusReportSource -notmatch 'TOTALS NOT CALCULATED - position and P/L currency normalization is under research' -or
+    $statusReportSource -notmatch 'TryExtractKnownCurrency' -or
+    $statusReportSource -notmatch 'openPlTotalsByCurrency' -or
+    $statusReportSource -notmatch 'Total Open P/L' -or
+    $statusReportSource -notmatch 'openPositionLineHtml' -or
+    $statusReportSource -notmatch '#15803D' -or
+    $statusReportSource -notmatch '#B4232A' -or
     $statusReportSource -notmatch 'row\[7\] = source\.size\(\) > 6 \? source\[6\]' -or
     $statusReportSource -notmatch 'row\[8\] = source\.size\(\) > 7 \? source\[7\]' -or
     $statusReportSource -notmatch 'std::fabs\(quantity\) \* averagePrice' -or
     $statusReportSource -notmatch 'AppendAlignedSectionRows\(out, snapshot\.recentLogs, true\)') {
-    throw 'Research-safe aligned Tracker report formatting or Open Positions field mapping is missing.'
+    throw 'Known-currency Tracker totals or aligned Open Positions field mapping is missing.'
 }
-if ($statusReportSource -match 'totalPositionValue' -or $statusReportSource -match 'totalOpenPl') {
-    throw 'Research build must not aggregate unnormalized multi-currency Open Positions totals.'
+if ($statusReportSource -match 'totalPositionValue') {
+    throw 'Native Position Value must not be aggregated while Average Price currency is unknown.'
+}
+if ($statusReportSource -match 'NATIVE VALUE TOTAL') {
+    throw 'The removed Native Value total notice must not appear in the Status Report.'
+}
+
+$testsSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
+$testsProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\MCST.Tests.vcxproj') -Raw
+if ($testsProject -notmatch 'StatusReport\.cpp' -or
+    $testsSource -notmatch 'EUR \+8,25' -or
+    $testsSource -notmatch 'Total Open P/L' -or
+    $testsSource -notmatch 'OPEN P/L ROWS NOT TOTALLED: 2' -or
+    $testsSource -notmatch '\$ 3,00' -or
+    $testsSource -notmatch 'USD \\u20ac 4,00' -or
+    $testsSource -notmatch '#15803D' -or
+    $testsSource -notmatch '#B4232A' -or
+    $testsSource -notmatch 'EUR \+106,68') {
+    throw 'Known-currency Open P/L placement or color regression test is missing.'
 }
 
 $watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
@@ -144,6 +172,10 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,18,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,18,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R18.'
+}
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
 if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).parent_path()')) {
@@ -152,17 +184,27 @@ if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).pa
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
-if ($bridgeSource -notmatch 'WritePositionCurrencyDirectResearch' -or
-    $bridgeSource -notmatch 'DiscoverPositionResearchRegions' -or
-    $bridgeSource -notmatch 'EnumerateFallbackPositionResearchRegions' -or
-    $bridgeSource -notmatch 'FindAsciiSignatureInPeSections' -or
-    $bridgeSource -notmatch 'MCST_Position_Currency_Dynamic' -or
+if ($bridgeSource -notmatch 'bool WritePositionCurrencyDirectResearch\(' -or
+    $bridgeSource -notmatch 'R16VerifyPositionInterfaceFingerprint' -or
+    $bridgeSource -notmatch 'R16ReadMsvcWstring' -or
+    $bridgeSource -notmatch 'R16ScanDirectVtableValues' -or
+    $bridgeSource -notmatch 'R16ScanPointerReferences' -or
+    $bridgeSource -notmatch 'R16MatchRowsToObjects' -or
+    $bridgeSource -notmatch 'kExpectedAtCenterProxySize = 7303168u' -or
+    $bridgeSource -notmatch 'kVtableRva = 0x44D518' -or
+    $bridgeSource -notmatch 'object \+ 0x1A8' -or
+    $bridgeSource -notmatch 'object \+ 0x1B0' -or
+    $bridgeSource -notmatch 'object \+ 0x1B8' -or
+    $bridgeSource -notmatch 'object \+ 0x1C8' -or
+    $bridgeSource -notmatch 'R16ReadMsvcWstring\(object, 0x308\)' -or
+    $bridgeSource -notmatch 'R16ReadMsvcWstring\(object, 0x328\)' -or
+    $bridgeSource -notmatch 'MCST_Position_Currency_R16_Checkpoint' -or
     $bridgeSource -notmatch 'unknown_functions_called=no') {
-    throw 'Position Currency R3 dynamic research implementation is missing.'
+    throw 'Position Currency R16 targeted position-interface verification is missing.'
 }
 if ($bridgeSource -match 'positions_records_10E0=' -or
     $bridgeSource -match 'recordBase \+ 0x68') {
-    throw 'R3 must not retain the rejected fixed +0x10E0/fixed-record correlation implementation.'
+    throw 'R6 must not retain the rejected fixed +0x10E0/fixed-record correlation implementation.'
 }
 if ($bridgeSource -match 'required CATPTTabView or ATOnPTracker module anchor was not found') {
     throw 'Ambiguous legacy Tracker read diagnostic is still present.'
@@ -253,9 +295,9 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Position Currency Dynamic Research" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Targeted Position-Interface Currency Verification" -or
     $releaseNotes -notmatch "Internal build:\s+V$currentBridgeBuild") {
     throw "Research notes do not identify MCST $currentVersion and Tracker Bridge V$currentBridgeBuild."
 }
 
-Write-Host "MCST $currentVersion Position Currency dynamic-research tree validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion targeted position-interface research tree validation passed." -ForegroundColor Green
