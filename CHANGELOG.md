@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.114-R23
+
+- Replaced the wide HTML Open Positions table with normal-width cards after an
+  iOS Mail capture confirmed that it scaled the fixed 1100-pixel table down.
+- Kept every card and field at the report's 15-pixel monospaced size and allowed
+  values to wrap instead of widening the message viewport.
+- Preserved all nine position fields, known-currency Open P/L totals, and full
+  green/red profit-value coloring.
+- Retained R22 Tracker recovery and stale-state corrections unchanged. Tracker
+  Bridge remains internal V174 and Protocol V2 remains unchanged.
+
 ## 1.114-R22
 
 - Scoped Bridge recovery mode to the active bounded exact-profile scan; a

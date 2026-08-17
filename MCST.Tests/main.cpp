@@ -122,28 +122,32 @@ int wmain()
         "Mobile viewport metadata is missing from the Status Report HTML");
     RequireContains(
         reportHtml,
-        L"class=\"mcst-horizontal-scroll\"",
-        "The responsive Open Positions scroll container is missing");
+        L"class=\"mcst-open-position-cards\"",
+        "The responsive Open Positions card container is missing");
     RequireContains(
         reportHtml,
-        L"overflow-x:auto",
-        "The Open Positions table cannot scroll horizontally on a narrow screen");
+        L"class=\"mcst-open-position-card\"",
+        "Individual Open Positions are not rendered as readable cards");
     RequireContains(
         reportHtml,
-        L"class=\"mcst-open-positions\"",
-        "Open Positions is not rendered as a real HTML table");
+        L"width:100%;max-width:100%;box-sizing:border-box",
+        "An Open Positions card can still widen the mobile message viewport");
     RequireContains(
+        reportHtml,
+        L"white-space:normal;overflow-wrap:anywhere",
+        "Open Positions values cannot wrap safely on a narrow screen");
+    RequireNotContains(
         reportHtml,
         L"width=\"1100\"",
-        "Open Positions does not retain a readable fixed width in iOS Mail");
-    RequireContains(
+        "The iOS-shrunk 1100-pixel Open Positions table is still present");
+    RequireNotContains(
         reportHtml,
-        L"width:1100px;min-width:1100px;max-width:none",
-        "Open Positions can still be shrunk to the mobile viewport width");
-    RequireContains(
+        L"mcst-horizontal-scroll",
+        "Open Positions still relies on an iOS Mail overflow container");
+    RequireNotContains(
         reportHtml,
-        L"white-space:nowrap;overflow-wrap:normal",
-        "Open Positions cells can still collapse or wrap unexpectedly");
+        L"<table class=\"mcst-open-positions\"",
+        "Open Positions is still rendered as one wide HTML table");
     RequireContains(
         reportHtml,
         L"font-size:15px !important",
@@ -192,19 +196,28 @@ int wmain()
         L"mcst-stale-critical",
         "The HTML report does not render an expired stale Tracker snapshot as Critical");
 
-    const std::size_t openPositionsTableBegin =
-        reportHtml.find(L"<table class=\"mcst-open-positions\"");
-    const std::size_t openPositionsTableEnd =
-        reportHtml.find(L"</table>", openPositionsTableBegin);
-    const std::size_t openPositionsHeader = reportHtml.find(L">Profile</th>");
-    if (openPositionsTableBegin == std::wstring::npos ||
-        openPositionsTableEnd == std::wstring::npos ||
-        openPositionsHeader == std::wstring::npos ||
-        openPositionsHeader < openPositionsTableBegin ||
-        openPositionsHeader > openPositionsTableEnd)
+    RequireContains(
+        reportHtml,
+        L"AAOI:xnas &middot; Long &middot; <span",
+        "The compact position identity line is missing");
+    RequireContains(
+        reportHtml,
+        L"<span style=\"font-weight:600;\">Open P/L:</span>",
+        "The position Open P/L field is not labelled in the card layout");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-open-position-total\"",
+        "Known-currency Open P/L totals are missing from the card layout");
+    if (CountOccurrences(reportHtml, L"class=\"mcst-open-position-card\"") !=
+        snapshot.openPositions.rows.size())
     {
-        throw std::runtime_error("Open Positions header is still preformatted text instead of an HTML table row");
+        throw std::runtime_error("One or more Open Positions rows are missing from the card layout");
     }
+    RequireContains(reportHtml, L"Profile:</span> Saxo", "Profile is missing from a position card");
+    RequireContains(reportHtml, L"Account:</span> A", "Account is missing from a position card");
+    RequireContains(reportHtml, L"Average Price:</span> 139,97", "Average Price is missing from a position card");
+    RequireContains(reportHtml, L"Native Value:</span> 419,91", "Native Value is missing from a position card");
+    RequireContains(reportHtml, L"Last Update:</span> now", "Last Update is missing from a position card");
     RequireContains(
         reportHtml,
         L"<span style=\"color:#15803D;font-weight:600;\">\u20ac 10,50</span>",

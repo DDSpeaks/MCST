@@ -1,0 +1,27 @@
+MCST 1.114-R23 / Tracker Bridge V174 validation
+================================================
+
+Validated in the packaging environment:
+- HTML Open Positions contains no fixed 1100-pixel table;
+- HTML Open Positions contains no horizontal-scroll dependency;
+- every position is emitted as a normal-width semantic card;
+- cards and totals enforce 15-pixel monospaced typography;
+- fields may wrap and cannot widen the message viewport;
+- all nine source fields remain present in each card;
+- known-currency totals and positive/negative full-value coloring pass tests;
+- R22 stale-state, timestamp, retry, and Bridge recovery tests remain included;
+- R21 extended Broker-history regression remains included;
+- Bridge stays V174 and Protocol V2 remains unchanged;
+- Watchdog source, resource, documentation, and release-tool versions agree;
+- portable C++ regression tests and delimiter checks pass;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts Tracker reading;
+- visual iOS Mail rendering of a newly generated R23 production email.
+
+The Windows operator must build Release|x64 and replace MCST-Watchdog.exe. If
+Bridge V174 is already installed from R22, the unchanged Bridge DLL does not
+need to be replaced. Verify the next HTML Status Report in iOS Mail: every
+position should use the same apparent text size as Accounts and Recent Logs.

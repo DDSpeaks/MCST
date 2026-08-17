@@ -69,7 +69,7 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R22 production Tracker snapshots require Bridge V156 or newer, bounded self-recovery requires V172 or newer, extended Broker history requires V173 or newer, and non-sticky recovery requires the V174 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R23 production Tracker snapshots require Bridge V156 or newer, bounded self-recovery requires V172 or newer, extended Broker history requires V173 or newer, and non-sticky recovery requires the V174 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. If V174 is already installed from R22, the R23 mobile-report correction requires replacing only the Watchdog executable.
 
 ## First Watchdog start
 

@@ -453,7 +453,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R22\n"
+        << L"Watchdog version       1.114-R23\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -652,7 +652,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     bool systemTableOpen = false;
     bool preOpen = false;
     bool inOpenPositions = false;
-    bool openPositionsTableOpen = false;
+    bool openPositionCardsOpen = false;
 
     auto openPre = [&]()
     {
@@ -681,26 +681,31 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         }
     };
 
-    auto openOpenPositionsTable = [&]()
+    auto openOpenPositionCards = [&]()
     {
-        if (openPositionsTableOpen)
+        if (openPositionCardsOpen)
             return;
         closePre();
-        html += L"<div class=\"mcst-horizontal-scroll\" style=\"display:block;width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 2px 0;\">\r\n";
-        // iOS Mail does not reliably support min-width:max-content and may
-        // shrink a width:100% data table until its text is unreadable. The
-        // explicit HTML/CSS width keeps the same 15 px font as the report and
-        // delegates narrow-screen handling to the horizontal-scroll wrapper.
-        html += L"<table class=\"mcst-open-positions\" role=\"table\" width=\"1100\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"display:inline-table;border-collapse:collapse;width:1100px;min-width:1100px;max-width:none;table-layout:auto;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\"><tbody>\r\n";
-        openPositionsTableOpen = true;
+        // iOS Mail scales a wide table as one visual object even when the table
+        // sits inside an overflow container. Render each position as a normal-
+        // width block instead. Every value may wrap, so no child can force the
+        // message viewport wider or trigger automatic text shrinking.
+        html += L"<div class=\"mcst-open-position-cards\" role=\"list\" style=\"display:block;width:100%;max-width:100%;margin:0 0 4px 0;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.35 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">\r\n";
+        openPositionCardsOpen = true;
     };
 
-    auto closeOpenPositionsTable = [&]()
+    auto closeOpenPositionCards = [&]()
     {
-        if (!openPositionsTableOpen)
+        if (!openPositionCardsOpen)
             return;
-        html += L"</tbody></table>\r\n</div>\r\n";
-        openPositionsTableOpen = false;
+        html += L"</div>\r\n";
+        openPositionCardsOpen = false;
+    };
+
+    auto positionFieldHtml = [&](const std::wstring& label, const std::wstring& valueHtml)
+    {
+        return L"<span style=\"white-space:normal;overflow-wrap:anywhere;\"><span style=\"font-weight:600;\">" +
+            escapeHtml(label) + L":</span> " + valueHtml + L"</span>";
     };
 
     for (std::size_t i = 0; i < lines.size(); ++i)
@@ -711,7 +716,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             inOpenPositions = true;
         else if (line == L"RECENT LOGS")
         {
-            closeOpenPositionsTable();
+            closeOpenPositionCards();
             inOpenPositions = false;
         }
 
@@ -814,54 +819,64 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             const std::vector<std::wstring> cells = splitAlignedTableRow(line);
             if (cells.size() == 9)
             {
-                openOpenPositionsTable();
                 const bool headerRow = trim(cells[0]) == L"Profile" &&
                     trim(cells[7]) == L"Open P/L";
                 const bool totalRow = trim(cells[6]) == L"Total Open P/L";
-                html += totalRow
-                    ? L"<tr style=\"border-top:1px solid #A8A8A8;font-weight:600;\">"
-                    : L"<tr>";
-                for (std::size_t column = 0; column < cells.size(); ++column)
+                if (headerRow)
                 {
-                    const bool rightAligned = column >= 4 && column <= 7;
-                    const wchar_t* tag = headerRow ? L"th" : L"td";
-                    html += L"<";
-                    html += tag;
-                    if (headerRow)
-                        html += L" scope=\"col\"";
-                    html += L" style=\"padding:2px 10px 2px 0;vertical-align:top;text-align:";
-                    html += rightAligned ? L"right" : L"left";
-                    html += L";white-space:nowrap;overflow-wrap:normal;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;";
-                    if (headerRow)
-                        html += L"font-weight:600;border-bottom:1px solid #A8A8A8;";
-                    html += L"\">";
-                    html += openPositionCellHtml(cells[column], column);
-                    html += L"</";
-                    html += tag;
-                    html += L">";
+                    openOpenPositionCards();
+                    continue;
                 }
-                html += L"</tr>\r\n";
+
+                openOpenPositionCards();
+                if (totalRow)
+                {
+                    html += L"<div class=\"mcst-open-position-total\" style=\"display:block;width:100%;max-width:100%;box-sizing:border-box;border-top:1px solid #A8A8A8;padding:7px 0 3px 0;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:600;line-height:1.35 !important;white-space:normal;overflow-wrap:anywhere;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
+                    html += positionFieldHtml(trim(cells[6]), openPositionCellHtml(cells[7], 7));
+                    if (!trim(cells[8]).empty())
+                        html += L" <span style=\"font-weight:400;\">" + escapeHtml(trim(cells[8])) + L"</span>";
+                    html += L"</div>\r\n";
+                    continue;
+                }
+
+                html += L"<div class=\"mcst-open-position-card\" role=\"listitem\" style=\"display:block;width:100%;max-width:100%;box-sizing:border-box;border-top:1px solid #D6D6D6;padding:7px 0 6px 0;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.35 !important;white-space:normal;overflow-wrap:anywhere;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
+                html += L"<div style=\"font-size:15px !important;font-weight:600;white-space:normal;overflow-wrap:anywhere;\">" +
+                    escapeHtml(trim(cells[2]));
+                if (!trim(cells[3]).empty())
+                    html += L" &middot; " + escapeHtml(trim(cells[3]));
+                if (!trim(cells[4]).empty())
+                    html += L" &middot; " + positionFieldHtml(L"Qty", escapeHtml(trim(cells[4])));
+                html += L"</div>";
+                html += L"<div style=\"font-size:15px !important;white-space:normal;overflow-wrap:anywhere;\">" +
+                    positionFieldHtml(L"Profile", escapeHtml(trim(cells[0]))) + L" &middot; " +
+                    positionFieldHtml(L"Account", escapeHtml(trim(cells[1]))) + L"</div>";
+                html += L"<div style=\"font-size:15px !important;white-space:normal;overflow-wrap:anywhere;\">" +
+                    positionFieldHtml(L"Average Price", escapeHtml(trim(cells[5]))) + L" &middot; " +
+                    positionFieldHtml(L"Native Value", escapeHtml(trim(cells[6]))) + L"</div>";
+                html += L"<div style=\"font-size:15px !important;white-space:normal;overflow-wrap:anywhere;\">" +
+                    positionFieldHtml(L"Open P/L", openPositionCellHtml(cells[7], 7)) + L" &middot; " +
+                    positionFieldHtml(L"Last Update", escapeHtml(trim(cells[8]))) + L"</div>";
+                html += L"</div>\r\n";
                 continue;
             }
 
             const bool separatorLine = !line.empty() &&
                 std::all_of(line.begin(), line.end(), [](wchar_t ch) { return ch == L'-'; });
-            if (openPositionsTableOpen && separatorLine)
+            if (openPositionCardsOpen && separatorLine)
                 continue;
-            if (openPositionsTableOpen)
-                closeOpenPositionsTable();
+            if (openPositionCardsOpen)
+                closeOpenPositionCards();
         }
 
         // Keep data-heavy sections such as SYSTEM RESOURCES, ACCOUNTS,
-        // and RECENT LOGS monospaced. OPEN POSITIONS is rendered as a real HTML
-        // table above so mobile mail clients cannot shrink a wide preformatted
-        // line to fit the viewport.
+        // and RECENT LOGS monospaced. OPEN POSITIONS uses normal-width semantic
+        // blocks above so mobile mail clients cannot shrink one wide object.
         openPre();
         html += escapeHtml(line);
         html += L"\n";
     }
 
-    closeOpenPositionsTable();
+    closeOpenPositionCards();
     closeSystemTable();
     closePre();
     html += L"</body></html>\r\n";

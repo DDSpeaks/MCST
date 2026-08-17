@@ -1,21 +1,21 @@
 ﻿# MCST
 
-## Package: 1.114-R22 Tracker Recovery and Readable Reports
+## Package: 1.114-R23 Mobile Position Cards
 
-This source package fixes the long-lived CATPTTabView recovery state observed while the visible Order and Position Tracker was still open. Bridge V174 scopes recovery mode to one bounded exact-profile scan, re-enables normal discovery after failure, and caches positive and negative normal-scan results for 30 seconds to avoid repeated heavy scans. Watchdog keeps all retry outcomes, treats recent last-good Tracker data as Attention for a configurable 10-minute interval, and reports the real attempt/complete-snapshot timestamps. The HTML Open Positions table now retains an explicit readable width in iOS Mail. R21 extended Broker history and earlier corrections remain included.
+This source package replaces the wide HTML Open Positions table with normal-width position cards. iOS Mail had continued to scale the fixed 1100-pixel table as one visual object, making only that section much smaller than the rest of the report. Each position now uses wrapping 15-pixel fields that cannot widen the message viewport. Known-currency Open P/L totals and complete green/red profit coloring remain included. R22 Tracker recovery, stale-state handling, timestamps, R21 extended Broker history, and earlier corrections are retained.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R22**
+- MCST-Watchdog: **1.114-R23**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V174**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V173 added the optional `monitoring_logs` payload section, and V174 corrects non-sticky Tracker recovery without changing Protocol V2. The retained R16 `Position CCY` action requires V171 or newer. R22 behavior requires the V174 DLL included in this package.
+The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V173 added the optional `monitoring_logs` payload section, and V174 corrects non-sticky Tracker recovery without changing Protocol V2. The retained R16 `Position CCY` action requires V171 or newer. R22/R23 recovery behavior requires the V174 DLL included in this package; the R23 position-card change itself is Watchdog-only.
 
 ## Runtime installation
 

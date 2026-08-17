@@ -1,9 +1,11 @@
 ﻿# MCST Developer Guide
 
 
-## Tracker recovery and readable reports build
+## Mobile Position Cards build
 
-MCST-Watchdog 1.114-R22 retains the bounded 200-row monitoring history introduced in R21 and pairs it with Bridge V174's non-sticky recovery. Bridge reads the Logs grid once, derives the ten-row display section and the monitoring section, and leaves Protocol V2 unchanged. BrokerMonitor and LogAlertEngine use only the current live monitoring history; reports continue to show ten rows.
+MCST-Watchdog 1.114-R23 replaces the wide HTML Open Positions table with normal-width position cards. An iOS Mail capture showed that the R22 overflow container was ignored for sizing and the fixed 1100-pixel table was scaled down as one object. R23 therefore contains no wide Open Positions child: each 15-pixel field may wrap within a 100-percent-width card.
+
+R23 retains the bounded 200-row monitoring history introduced in R21 and Bridge V174's non-sticky recovery. Bridge reads the Logs grid once, derives the ten-row display section and the monitoring section, and leaves Protocol V2 unchanged. BrokerMonitor and LogAlertEngine use only the current live monitoring history; reports continue to show ten rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
@@ -11,7 +13,7 @@ The bounded recovery remains read-only. Bridge clears only its own CATPTTabView 
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R22 gives the HTML Open Positions table an explicit 1100-pixel width, keeps every cell on one line, preserves the report's 15-pixel monospaced typography, and provides horizontal scrolling on narrow screens. R18's known-currency Open P/L totals and green/red full-cell styling are retained.
+R23 renders each HTML position as four compact lines: symbol/side/quantity, profile/account, Average Price/Native Value, and Open P/L/Last Update. Known-currency totals follow the cards at the same 15-pixel size. R18's green/red full-value styling is retained.
 
 The earlier R16 `Position CCY` Developer action is retained. Bridge V171 or newer verifies the exact ATCenterProxy position vtable and machine-code signatures discovered by R15, finds its live objects, correlates Quantity and Average Price with the visible rows, and decodes the bounded currency strings at object offsets `+0x308` and `+0x328`. No candidate target is called. R20 production reporting does not depend on running this research action.
 

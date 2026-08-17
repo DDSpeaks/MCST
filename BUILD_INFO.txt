@@ -1,36 +1,34 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R22
+MCST-Watchdog version: 1.114-R23
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V174, Protocol V2
-Production change:     Non-sticky Tracker recovery and readable mobile tables
+Production change:     Normal-width mobile Open Positions cards
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R22 production method
+R23 production method
 ---------------------
-1. Make recovery mode live only for the executing bounded exact-profile scan.
-2. After any failed recovery, allow the next Watchdog retry to run normal RTTI
-   discovery again.
-3. Cache positive and negative normal-discovery results for 30 seconds so the
-   recovery path cannot create continuous process-wide memory scans.
-4. Preserve all configured Watchdog retry outcomes in the final diagnostic.
-5. Use recent last-complete Tracker tables as Attention for the configurable
-   stale_critical_after_minutes interval (default 10), then escalate to Critical.
-6. Report Last Tracker attempt and Last complete snapshot separately.
-7. Render Open Positions at an explicit 1100-pixel, 15-pixel-font table width
-   inside a horizontal-scroll container.
+1. Keep the aligned nine-column Open Positions table in the plain-text report.
+2. Convert each HTML position to a 100-percent-width four-line card.
+3. Allow every field to wrap instead of creating a viewport-widening child.
+4. Keep 15-pixel monospaced typography on the card, every line, and totals.
+5. Preserve known-currency Open P/L totals and complete profit-value coloring.
+6. Remove the fixed 1100-pixel table and horizontal-scroll wrapper rejected by
+   observed iOS Mail rendering.
 
 Retained production behavior
 ----------------------------
+- non-sticky V174 Tracker recovery and bounded 30-second candidate caching;
+- configurable stale-data Attention-to-Critical escalation;
+- separate Tracker-attempt and last-complete-snapshot timestamps;
 - up to 200 live monitoring_logs rows for BrokerMonitor and LogAlertEngine;
 - ten display/report Recent Logs rows;
-- known-currency Open P/L totals and complete positive/negative coloring;
 - read-only Tracker recovery and compatibility gates.
 
 Production Tracker minimum Bridge: V156
 Retained Position Currency R16 research minimum Bridge: V171
 R20 initial self-recovery Bridge: V172
 R21 extended monitoring history Bridge: V173
-R22 non-sticky recovery Bridge: V174
+R22/R23 non-sticky recovery Bridge: V174
