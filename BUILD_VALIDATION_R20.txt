@@ -1,0 +1,31 @@
+MCST 1.114-R20 / Tracker Bridge V172 validation
+================================================
+
+Validated in the packaging environment:
+- Bridge recovery clears only Bridge-owned CATPTTabView/candidate caches;
+- an incomplete authorized snapshot receives at most one fresh Bridge scan;
+- expensive fresh scans are limited by a 30-second Bridge-side cooldown;
+- unknown/unmatched Tracker builds do not enter the recovery scan;
+- Watchdog retries parsed-but-incomplete snapshots instead of stopping early;
+- the last complete Tracker tables are marked STALE while current health remains Critical;
+- stale Recent Logs are not passed to BrokerMonitor or LogAlertEngine;
+- the plain-text and HTML reports contain an explicit stale-data warning;
+- the complete R19 mobile report correction is retained: viewport metadata,
+  15-pixel monospaced semantic Open Positions table, text-size protection, and
+  a horizontal-scroll wrapper;
+- R18 Open P/L placement and complete green/red cell styling are retained;
+- Native Value remains per-row only and is not aggregated;
+- Bridge, Watchdog, resource, PowerLanguage, and release-tool versions agree;
+- release static validation and Status Report regression tests pass;
+- delimiter balance checks pass for the modified C++ translation units;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts recovery and Status Report generation.
+
+The Windows operator must build Release|x64, install both the R20 Watchdog and
+V172 Bridge, restart MultiCharts once so the DLL is loaded, and verify one normal
+snapshot plus the mobile report. A future transient Tracker read failure should
+remain Critical while failing, recover on a later refresh without a Watchdog
+restart, and clearly label any retained table rows as STALE.

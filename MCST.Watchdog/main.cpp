@@ -106,6 +106,9 @@ namespace
         AppConfig config;
         mcst::WatchdogSystemStatus status;
         TrackerStatusSnapshot snapshot;
+        TrackerStatusSnapshot lastGoodTrackerSnapshot;
+        std::chrono::system_clock::time_point lastGoodTrackerSnapshotTime{};
+        bool hasLastGoodTrackerSnapshot = false;
         std::mutex mutex;
         std::uint64_t configRevision = 1;
         bool refreshRunning = false;
@@ -569,6 +572,24 @@ namespace
         return rank(right) > rank(left) ? right : left;
     }
 
+    bool IsCompleteTrackerSnapshot(const TrackerStatusSnapshot& snapshot)
+    {
+        return snapshot.trackerFound &&
+            snapshot.trackerSameProcess &&
+            snapshot.trackerCompatibilityMatched &&
+            snapshot.accounts.ok &&
+            snapshot.openPositions.ok &&
+            snapshot.recentLogs.ok;
+    }
+
+    bool IsRecoverableTrackerSnapshotFailure(const TrackerStatusSnapshot& snapshot)
+    {
+        return snapshot.trackerFound &&
+            snapshot.trackerSameProcess &&
+            snapshot.trackerCompatibilityMatched &&
+            !IsCompleteTrackerSnapshot(snapshot);
+    }
+
     void AddActivity(mcst::WatchdogSystemStatus& status, mcst::HealthState state, const std::wstring& text)
     {
         status.activity.insert(status.activity.begin(), { std::chrono::system_clock::now(), state, text });
@@ -686,14 +707,37 @@ namespace
 
         std::wstring diagnostic;
         bool readOk = false;
+        int snapshotAttempts = 0;
         for (int attempt = 1; attempt <= config.snapshotRetryCount; ++attempt)
         {
-            diagnostic.clear();
-            if (ReadTrackerStatusSnapshot(result.snapshot, diagnostic, static_cast<unsigned long>(config.bridgeTimeoutMilliseconds)))
+            snapshotAttempts = attempt;
+            TrackerStatusSnapshot candidate;
+            std::wstring attemptDiagnostic;
+            if (ReadTrackerStatusSnapshot(
+                    candidate,
+                    attemptDiagnostic,
+                    static_cast<unsigned long>(config.bridgeTimeoutMilliseconds)))
             {
                 readOk = true;
-                break;
+                result.snapshot = std::move(candidate);
+                diagnostic = std::move(attemptDiagnostic);
+
+                // A parsed ExtractorCallFailed payload is useful evidence, but it
+                // is not a successful Tracker snapshot. Give transient section
+                // failures time to settle and request a new Bridge-side discovery.
+                if (IsCompleteTrackerSnapshot(result.snapshot) ||
+                    !IsRecoverableTrackerSnapshotFailure(result.snapshot) ||
+                    attempt == config.snapshotRetryCount)
+                {
+                    break;
+                }
+
+                Sleep(static_cast<DWORD>((std::max)(1000, config.snapshotRetryDelayMilliseconds)));
+                continue;
             }
+            readOk = false;
+            result.snapshot = TrackerStatusSnapshot{};
+            diagnostic = std::move(attemptDiagnostic);
             if (attempt < config.snapshotRetryCount)
                 Sleep(static_cast<DWORD>(config.snapshotRetryDelayMilliseconds));
         }
@@ -708,12 +752,18 @@ namespace
                 static_cast<int>(result.snapshot.accounts.ok) +
                 static_cast<int>(result.snapshot.openPositions.ok) +
                 static_cast<int>(result.snapshot.recentLogs.ok);
-            const bool trackerOk = trackerAvailable && readableTrackerSections == 3;
+            const bool trackerOk = IsCompleteTrackerSnapshot(result.snapshot);
             const bool trackerPartial = trackerAvailable && readableTrackerSections > 0 && readableTrackerSections < 3;
             std::wstring trackerDetail = result.snapshot.trackerCompatibilityDiagnostic;
             if (trackerDetail.empty()) trackerDetail = diagnostic;
             if (!result.snapshot.trackerCompatibilityProfile.empty())
                 trackerDetail += L" - Profile: " + result.snapshot.trackerCompatibilityProfile;
+            if (result.snapshot.recoveryAttempted ||
+                (!result.snapshot.recoveryResult.empty() && result.snapshot.recoveryResult != L"not_needed"))
+                trackerDetail += L" - Bridge recovery: " +
+                    (result.snapshot.recoveryResult.empty() ? L"attempted" : result.snapshot.recoveryResult);
+            if (snapshotAttempts > 1)
+                trackerDetail += L" - Snapshot attempts: " + std::to_wstring(snapshotAttempts);
             result.status.trackerCompatibilityProfile = result.snapshot.trackerCompatibilityProfile;
             result.status.trackerSnapshot = {
                 trackerOk ? mcst::HealthState::Healthy : (trackerPartial ? mcst::HealthState::Attention : mcst::HealthState::Critical),
@@ -1184,7 +1234,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R18", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R20", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1464,7 +1514,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R18", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R20", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1584,7 +1634,7 @@ namespace
                         std::to_wstring(kPositionCurrencyResearchBridgeVersion) +
                         L" or newer. The currently loaded Bridge is V" +
                         std::to_wstring(referenceSnapshot.bridgeVersion) +
-                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V171 build from this package and restart MultiCharts.";
+                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V172 build from this package and restart MultiCharts.";
                 }
                 else if (!referenceSnapshot.openPositions.present || !referenceSnapshot.openPositions.ok)
                 {
@@ -1670,16 +1720,71 @@ namespace
 
                 std::lock_guard<std::mutex> lock(g_app.mutex);
                 const auto previousActivity = g_app.status.activity;
+                const bool previouslyShowingStaleTrackerData = g_app.status.trackerDataStale;
                 const int active = result->status.autoTradingActive;
+                TrackerStatusSnapshot liveSnapshot = std::move(result->snapshot);
+                const bool liveTrackerSnapshotComplete = IsCompleteTrackerSnapshot(liveSnapshot);
 
                 g_app.status = std::move(result->status);
-                g_app.snapshot = std::move(result->snapshot);
+                const auto monitorNow = std::chrono::system_clock::now();
+                if (liveTrackerSnapshotComplete)
+                {
+                    g_app.lastGoodTrackerSnapshot = liveSnapshot;
+                    g_app.lastGoodTrackerSnapshotTime = monitorNow;
+                    g_app.hasLastGoodTrackerSnapshot = true;
+                    g_app.snapshot = liveSnapshot;
+                    g_app.status.trackerDataStale = false;
+                    g_app.status.trackerDataTimestamp.clear();
+                    if (previouslyShowingStaleTrackerData)
+                    {
+                        AddActivity(
+                            g_app.status,
+                            mcst::HealthState::Healthy,
+                            L"Live Tracker table data recovered without restarting Watchdog");
+                    }
+                }
+                else if (g_app.hasLastGoodTrackerSnapshot)
+                {
+                    // Preserve every table that is live and replace only failed
+                    // sections with their last complete counterpart.
+                    g_app.snapshot = liveSnapshot;
+                    if (!g_app.snapshot.accounts.ok)
+                        g_app.snapshot.accounts = g_app.lastGoodTrackerSnapshot.accounts;
+                    if (!g_app.snapshot.openPositions.ok)
+                        g_app.snapshot.openPositions = g_app.lastGoodTrackerSnapshot.openPositions;
+                    if (!g_app.snapshot.recentLogs.ok)
+                        g_app.snapshot.recentLogs = g_app.lastGoodTrackerSnapshot.recentLogs;
+                    g_app.status.trackerDataStale = true;
+                    g_app.status.trackerDataTimestamp = FormatLocalTime(g_app.lastGoodTrackerSnapshotTime);
+                    g_app.status.trackerSnapshot.state = mcst::HealthState::Critical;
+                    g_app.status.trackerSnapshot.value = L"Read failed / STALE data";
+                    g_app.status.overall = Worst(g_app.status.overall, mcst::HealthState::Critical);
+                    g_app.status.accountRows = g_app.snapshot.accounts.rows.size();
+                    g_app.status.openPositionRows = g_app.snapshot.openPositions.rows.size();
+                    g_app.status.recentLogRows = g_app.snapshot.recentLogs.rows.size();
+
+                    const std::wstring staleDetail =
+                        L"One or more failed tables use STALE data from " +
+                        g_app.status.trackerDataTimestamp + L"; current Tracker read is incomplete";
+                    if (!g_app.status.trackerSnapshot.detail.empty())
+                        g_app.status.trackerSnapshot.detail += L" - ";
+                    g_app.status.trackerSnapshot.detail += staleDetail;
+                    if (!liveSnapshot.recentLogs.ok)
+                    {
+                        if (!g_app.status.recentLogs.detail.empty())
+                            g_app.status.recentLogs.detail += L" - ";
+                        g_app.status.recentLogs.detail += staleDetail;
+                    }
+                }
+                else
+                {
+                    g_app.snapshot = liveSnapshot;
+                }
                 g_app.status.lastReport = g_app.lastReport;
                 g_app.status.lastAlert = g_app.lastAlert;
 
-                const auto monitorNow = std::chrono::system_clock::now();
                 const BrokerMonitorDecision brokerDecision = g_app.brokerMonitor.Evaluate(
-                    g_app.snapshot.recentLogs, result->brokerAuthentication, g_app.config, monitorNow);
+                    liveSnapshot.recentLogs, result->brokerAuthentication, g_app.config, monitorNow);
                 g_app.status.broker = brokerDecision.status;
                 g_app.status.overall = Worst(g_app.status.overall, g_app.status.broker.state);
                 if (brokerDecision.stateChanged)
@@ -1703,7 +1808,7 @@ namespace
                 }
 
                 const LogAlertEngine::Decision logAlertDecision = g_app.logAlertEngine.Evaluate(
-                    g_app.snapshot.recentLogs, g_app.config, monitorNow);
+                    liveSnapshot.recentLogs, g_app.config, monitorNow);
                 if (logAlertDecision.eventCount > 0)
                 {
                     g_app.status.recentLogs.state = Worst(g_app.status.recentLogs.state, logAlertDecision.state);
@@ -1875,7 +1980,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R18 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R20 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -1945,7 +2050,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R18 - Open P/L Totals",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R20 - Tracker Self-Recovery",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

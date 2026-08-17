@@ -1,11 +1,15 @@
 ﻿# MCST Developer Guide
 
 
-## Position Currency research build
+## Tracker snapshot recovery build
 
-MCST-Watchdog 1.114-R18 places the known-currency Open P/L totals in the Open P/L table column and adds green/red semantic styling to the full profit cells in HTML reports. Totals are still calculated from the visible Open Positions cells, grouped by an unambiguous currency, and never mixed across currencies. Native Value remains per-row only, and its former explanatory total line is no longer printed.
+MCST-Watchdog 1.114-R20 retries Tracker responses whose protocol payload parsed correctly but whose authorized table sections are incomplete. Bridge V172 performs one bounded recovery pass by clearing only its own CATPTTabView discovery caches, taking a fresh read-only snapshot, and rescanning. It does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
 
-The earlier R16 `Position CCY` Developer action is retained. Bridge V171 verifies the exact ATCenterProxy position vtable and machine-code signatures discovered by R15, finds its live objects, correlates Quantity and Average Price with the visible rows, and decodes the bounded currency strings at object offsets `+0x308` and `+0x328`. No candidate target is called. R18 production totals do not depend on running this research action.
+If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Current Tracker health remains Critical and the Dashboard/status report identify the retained tables as STALE with their timestamp. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
+
+R19's semantic mobile HTML table is included unchanged: the table and every cell use the report's 15-pixel monospaced typography, mobile text scaling is disabled, and a horizontal-scroll wrapper prevents tiny text. R18's known-currency Open P/L totals and green/red full-cell styling are also retained.
+
+The earlier R16 `Position CCY` Developer action is retained. Bridge V171 or newer verifies the exact ATCenterProxy position vtable and machine-code signatures discovered by R15, finds its live objects, correlates Quantity and Average Price with the visible rows, and decodes the bounded currency strings at object offsets `+0x308` and `+0x328`. No candidate target is called. R20 production reporting does not depend on running this research action.
 
 Use at least two simultaneously open positions with different native currencies when practical. See `POSITION_CURRENCY_RESEARCH.md` for the capture files and analysis workflow.
 
@@ -34,11 +38,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V171
+Internal build:  V172
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility-profile consumption and fingerprint metadata. V157 introduced the Position Currency research command. V171 preserves Protocol V2 and production behavior while replacing only that research command implementation with R16 targeted position-interface verification.
+V156 added Tracker compatibility-profile consumption and fingerprint metadata. V157 introduced the Position Currency research command. V171 added R16 targeted position-interface verification. V172 preserves Protocol V2 and adds bounded Bridge-local cache refresh for incomplete production snapshots.
 
 ### MCST.TrackerBridge
 

@@ -89,6 +89,10 @@ Matching is case-insensitive and keywords are separated with `|`. The Log Alert 
 
 Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs. Tracker tables use calculated column widths so values remain vertically aligned. The final Recent Logs message field may extend freely after its aligned starting position. Open Positions includes a derived per-row `Native Value`, but no Native Value total or explanatory total line. Open P/L is totaled separately for every currency identified unambiguously from the displayed cell; ambiguous rows are excluded and counted below the table. Each total amount is shown directly below the individual Open P/L values. In HTML email reports, complete positive Open P/L cells are green and complete negative cells are red, including their currency symbols/codes and signs.
 
+The HTML Open Positions section uses the same 15-pixel monospaced font as the rest of the report. On a narrow phone screen the table retains that readable size and can be panned horizontally instead of being automatically reduced to tiny text. Profile and Last Update may wrap to reduce unnecessary width; numeric columns remain unbroken.
+
+If a current Tracker table read fails after the bounded automatic retries, the system remains **CRITICAL**. When a complete earlier snapshot exists, its Accounts, Open Positions, and Recent Logs may remain visible for context, but the Dashboard detail and Status Report show a prominent **STALE** warning and the last-good timestamp. These retained Recent Logs are display-only and do not generate new broker or log alerts. A later successful refresh automatically replaces the stale tables; restarting Watchdog should not normally be required.
+
 Heartbeat messages are routine proof-of-life messages and use the report recipient rather than the alert recipient.
 
 ## MultiCharts version and compatibility

@@ -1,9 +1,10 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R18'
-$currentBridgeBuild = 171
+$currentVersion = '1.114-R20'
+$currentBridgeBuild = 172
 $minimumProductionBridgeBuild = 156
+$positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
 
 $required = @(
@@ -27,7 +28,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R18.txt',
+    'BUILD_VALIDATION_R20.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -104,6 +105,19 @@ if ($watchdogMain -notmatch 'configRevision' -or
     $watchdogMain -notmatch 'CollectStatus\(configSnapshot, configRevision, forceAutoTradingRefresh\)') {
     throw 'Configuration-generation reload protection is missing from the Watchdog refresh path.'
 }
+foreach ($recoveryToken in @(
+    'IsCompleteTrackerSnapshot',
+    'IsRecoverableTrackerSnapshotFailure',
+    'lastGoodTrackerSnapshot',
+    'trackerDataStale',
+    'liveSnapshot.recentLogs',
+    'Bridge recovery:',
+    'Snapshot attempts:'
+)) {
+    if ($watchdogMain -notmatch [regex]::Escape($recoveryToken)) {
+        throw "Watchdog Tracker recovery token is missing: $recoveryToken"
+    }
+}
 
 $appConfigSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AppConfig.cpp') -Raw
 if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
@@ -120,7 +134,16 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'TryExtractKnownCurrency' -or
     $statusReportSource -notmatch 'openPlTotalsByCurrency' -or
     $statusReportSource -notmatch 'Total Open P/L' -or
-    $statusReportSource -notmatch 'openPositionLineHtml' -or
+    $statusReportSource -notmatch 'splitAlignedTableRow' -or
+    $statusReportSource -notmatch 'openPositionCellHtml' -or
+    $statusReportSource -notmatch 'mcst-horizontal-scroll' -or
+    $statusReportSource -notmatch 'mcst-open-positions' -or
+    $statusReportSource -notmatch 'width=device-width,initial-scale=1.0' -or
+    $statusReportSource -notmatch 'overflow-x:auto' -or
+    $statusReportSource -notmatch '-webkit-text-size-adjust:100%' -or
+    $statusReportSource -notmatch 'font-size:15px !important' -or
+    $statusReportSource -notmatch 'mcst-stale-tracker-warning' -or
+    $statusReportSource -notmatch 'WARNING: STALE TRACKER TABLE DATA' -or
     $statusReportSource -notmatch '#15803D' -or
     $statusReportSource -notmatch '#B4232A' -or
     $statusReportSource -notmatch 'row\[7\] = source\.size\(\) > 6 \? source\[6\]' -or
@@ -146,8 +169,15 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'USD \\u20ac 4,00' -or
     $testsSource -notmatch '#15803D' -or
     $testsSource -notmatch '#B4232A' -or
+    $testsSource -notmatch 'mcst-horizontal-scroll' -or
+    $testsSource -notmatch 'mcst-open-positions' -or
+    $testsSource -notmatch 'width=device-width,initial-scale=1\.0' -or
+    $testsSource -notmatch 'overflow-x:auto' -or
+    $testsSource -notmatch 'font-size:15px !important' -or
+    $testsSource -notmatch 'mcst-stale-tracker-warning' -or
+    $testsSource -notmatch 'WARNING: STALE TRACKER TABLE DATA' -or
     $testsSource -notmatch 'EUR \+106,68') {
-    throw 'Known-currency Open P/L placement or color regression test is missing.'
+    throw 'Responsive Open Positions placement, size, or color regression test is missing.'
 }
 
 $watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
@@ -172,9 +202,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,18,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,18,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R18.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,20,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,20,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R20.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -183,6 +213,20 @@ if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).pa
 }
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
+}
+foreach ($recoveryToken in @(
+    'InvalidateTabViewCaches',
+    'forceFreshScan',
+    'BuildV172StatusReportSnapshotWithRecovery',
+    'recovery_attempted',
+    'recovery_result',
+    'kTabViewRecoveryCooldownMs = 30000',
+    'g_tabViewRecoveryModeActive',
+    'pagesRead < 3'
+)) {
+    if ($bridgeSource -notmatch [regex]::Escape($recoveryToken)) {
+        throw "Tracker Bridge recovery token is missing: $recoveryToken"
+    }
 }
 if ($bridgeSource -notmatch 'bool WritePositionCurrencyDirectResearch\(' -or
     $bridgeSource -notmatch 'R16VerifyPositionInterfaceFingerprint' -or
@@ -239,8 +283,8 @@ $readerHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\Tr
 if ($readerHeader -notmatch "kTrackerBridgeInternalBuildVersion = $minimumProductionBridgeBuild") {
     throw "TrackerBridgeReader production minimum is not V$minimumProductionBridgeBuild."
 }
-if ($readerHeader -notmatch "kPositionCurrencyResearchBridgeVersion = $currentBridgeBuild") {
-    throw "Position Currency research Bridge requirement is not V$currentBridgeBuild."
+if ($readerHeader -notmatch "kPositionCurrencyResearchBridgeVersion = $positionCurrencyResearchBridgeBuild") {
+    throw "Position Currency research Bridge requirement is not V$positionCurrencyResearchBridgeBuild."
 }
 
 $readerSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
@@ -250,6 +294,10 @@ if ($readerSource -notmatch 'snapshot\.bridgeVersion < kTrackerBridgeInternalBui
 if ($readerSource -notmatch 'CapturePositionCurrencyResearch' -or
     $readerSource -notmatch 'CapturePositionCurrencyDirectResearch') {
     throw 'Position Currency direct-research Bridge wrapper is missing.'
+}
+if ($readerSource -notmatch 'recovery_attempted' -or
+    $readerSource -notmatch 'recovery_result') {
+    throw 'Tracker Bridge recovery metadata parsing is missing.'
 }
 
 $protocolHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
@@ -295,9 +343,10 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Targeted Position-Interface Currency Verification" -or
-    $releaseNotes -notmatch "Internal build:\s+V$currentBridgeBuild") {
-    throw "Research notes do not identify MCST $currentVersion and Tracker Bridge V$currentBridgeBuild."
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Tracker Snapshot Self-Recovery" -or
+    $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
+    $releaseNotes -notmatch 'mobile Status Report correction') {
+    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, and the retained mobile report correction."
 }
 
-Write-Host "MCST $currentVersion targeted position-interface research tree validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion Tracker self-recovery release validation passed." -ForegroundColor Green

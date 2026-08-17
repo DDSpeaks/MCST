@@ -50,11 +50,13 @@ The Bridge runs inside MultiCharts and provides a stable Tracker snapshot bounda
 
 ```text
 Product version: 1.0
-Internal build:  V171
+Internal build:  V172
 Protocol:        V2
 ```
 
-The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling. V157 introduced the additive Position Currency research command, and V171 keeps the same Protocol V2 command while implementing fingerprint-scoped, bounded, read-only verification of the R15 position interface.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling. V157 introduced the additive Position Currency research command, V171 added fingerprint-scoped currency verification, and V172 adds one bounded fresh-scan recovery pass for incomplete authorized Tracker snapshots. Protocol V2 remains unchanged.
+
+R20 recovery is deliberately read-only. It clears Bridge-owned object-discovery caches, captures current window/module state again, and repeats the same validated grid read once. Watchdog may then request additional snapshots according to its configured retry limit. If live data is still incomplete, health remains Critical; only the last complete tables may be displayed, with an explicit stale timestamp. Stale Recent Logs are never sent to broker or log-alert evaluation.
 
 ### MCST-Watchdog
 

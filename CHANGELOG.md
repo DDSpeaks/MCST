@@ -1,5 +1,31 @@
 ﻿# Changelog
 
+## 1.114-R20
+
+- Added one bounded Bridge-local cache refresh and fresh scan for incomplete,
+  compatibility-authorized Tracker snapshots; Bridge internal build is V172.
+- Changed Watchdog retry handling so parsed partial snapshots no longer count as
+  completed reads.
+- Added in-memory last-good Tracker tables with explicit STALE timestamping while
+  preserving current Critical health.
+- Prevented stale Recent Logs from entering broker and log-alert engines.
+- Added a prominent stale-data warning to plain-text and HTML reports.
+- Retained the complete R19 mobile Open Positions table appearance correction,
+  R18 Open P/L placement/colors, Protocol V2, and the R16 diagnostic.
+
+## 1.114-R19
+
+- Replaced the Open Positions `<pre>` block in HTML emails with a real HTML
+  table to prevent mobile clients from shrinking a wide fixed-width line.
+- Enforced the report's 15-pixel monospaced font on the table and every cell.
+- Added mobile viewport metadata and disabled automatic mobile text resizing.
+- Added a width-constrained horizontal-scroll container around the table.
+- Allowed Profile and Last Update cells to wrap while preserving non-wrapping
+  numeric cells and column alignment.
+- Retained R18 Open P/L placement and green/red coloring unchanged.
+- Added mobile table structure and typography regression tests.
+- Retained Bridge V171 and Protocol V2.
+
 ## 1.114-R18
 
 - Moved every known-currency Open P/L total into the Open Positions table so

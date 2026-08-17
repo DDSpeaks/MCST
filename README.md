@@ -1,21 +1,21 @@
 ﻿# MCST
 
-## Package: 1.114-R18 Open P/L Placement and Colors
+## Package: 1.114-R20 Tracker Snapshot Self-Recovery
 
-This source package places the known-currency Open P/L totals directly below the individual Open P/L values and colors complete positive values green and complete negative values red in HTML reports. The unnecessary Native Value total explanation line has been removed. R17's fail-closed currency aggregation remains unchanged. The earlier R16 Position CCY diagnostic remains available; see `Docs/POSITION_CURRENCY_RESEARCH.md`.
+This source package adds bounded self-recovery for transient Tracker snapshot failures. The Bridge discards only its own discovery caches and performs one fresh, read-only scan when an authorized Tracker read is incomplete, with a 30-second cooldown between expensive scans. Watchdog also retries parsed-but-incomplete snapshots and keeps the last complete table snapshot visible with an explicit **STALE** warning while current health remains Critical. R19's mobile-safe Open Positions table, R18's Open P/L placement/colors, and the earlier R16 Position CCY diagnostic are retained.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R18**
+- MCST-Watchdog: **1.114-R20**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V171**
+- Tracker Bridge internal build: **V172**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. Internal build V171 preserves the production Tracker reader and Protocol V2 command 50. The retained R16 `Position CCY` action requires V171; normal production Tracker snapshots and the R18 known-currency total still require only V156 or newer.
+The Tracker Bridge product version, internal build, and protocol version are separate identifiers. Internal build V172 adds Bridge-local cache invalidation and one bounded fresh production read without changing Protocol V2. The retained R16 `Position CCY` action still requires V171 or newer; normal production Tracker snapshots require V156 or newer. R20's new self-recovery behavior requires the V172 DLL included in this package.
 
 ## Runtime installation
 

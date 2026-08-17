@@ -453,7 +453,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R18\n"
+        << L"Watchdog version       1.114-R20\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -490,6 +490,15 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
 
     if (!status.lastError.empty())
         out << L"\nLATEST ERROR\n------------\n" << status.lastError << L'\n';
+
+    if (status.trackerDataStale)
+    {
+        out << L"\nTRACKER TABLE DATA\n"
+            << L"------------------\n"
+            << L"WARNING: STALE TRACKER TABLE DATA - one or more failed sections use the last complete snapshot from "
+            << (status.trackerDataTimestamp.empty() ? L"an earlier update" : status.trackerDataTimestamp)
+            << L" because the current Tracker read failed. Current health remains CRITICAL.\n";
+    }
 
     out << L"\nACCOUNTS\n--------\n";
     AppendAlignedSectionRows(out, snapshot.accounts, false);
@@ -572,9 +581,8 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         return escapeHtml(trim(stateCell));
     };
 
-    auto openPositionLineHtml = [&](const std::wstring& line)
+    auto splitAlignedTableRow = [](const std::wstring& line)
     {
-        constexpr std::size_t openPlColumn = 7;
         const std::wstring separator = L" | ";
         std::vector<std::wstring> cells;
         std::size_t begin = 0;
@@ -588,39 +596,31 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
                 break;
             begin = end + separator.size();
         }
+        return cells;
+    };
 
-        if (cells.size() <= openPlColumn)
-            return escapeHtml(line);
+    auto openPositionCellHtml = [&](const std::wstring& rawCell, std::size_t column)
+    {
+        constexpr std::size_t openPlColumn = 7;
+        const std::wstring cell = trim(rawCell);
+        if (cell.empty())
+            return std::wstring(L"&nbsp;");
+
+        if (column != openPlColumn)
+            return escapeHtml(cell);
 
         double profit = 0.0;
-        if (!ParseLocalizedNumber(cells[openPlColumn], profit) ||
+        if (!ParseLocalizedNumber(cell, profit) ||
             std::fabs(profit) < 0.0000001)
         {
-            return escapeHtml(line);
+            return escapeHtml(cell);
         }
 
-        const std::wstring& cell = cells[openPlColumn];
-        const std::size_t contentBegin = cell.find_first_not_of(L" \t");
-        const std::size_t contentEnd = cell.find_last_not_of(L" \t");
-        if (contentBegin == std::wstring::npos || contentEnd == std::wstring::npos)
-            return escapeHtml(line);
-
-        std::wstring coloredCell;
-        coloredCell += escapeHtml(cell.substr(0, contentBegin));
-        coloredCell += profit > 0.0
+        std::wstring result = profit > 0.0
             ? L"<span style=\"color:#15803D;font-weight:600;\">"
             : L"<span style=\"color:#B4232A;font-weight:600;\">";
-        coloredCell += escapeHtml(cell.substr(contentBegin, contentEnd - contentBegin + 1));
-        coloredCell += L"</span>";
-        coloredCell += escapeHtml(cell.substr(contentEnd + 1));
-
-        std::wstring result;
-        for (std::size_t index = 0; index < cells.size(); ++index)
-        {
-            if (index != 0)
-                result += escapeHtml(separator);
-            result += index == openPlColumn ? coloredCell : escapeHtml(cells[index]);
-        }
+        result += escapeHtml(cell);
+        result += L"</span>";
         return result;
     };
 
@@ -635,14 +635,18 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     std::wstring html;
     html += L"<!doctype html>\r\n";
     html += L"<html><head><meta charset=\"utf-8\">";
-    html += L"<style>body,table,tbody,tr,td,th,div,span,pre,p{font-family:Consolas,\'Courier New\',monospace !important;}</style></head>\r\n";
-    html += L"<body style=\"margin:0;padding:16px;background:#ffffff;color:#202020;font-family:Consolas,'Courier New',monospace;\">\r\n";
+    html += L"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">";
+    html += L"<style>body,table,tbody,tr,td,th,div,span,pre,p{font-family:Consolas,\'Courier New\',monospace !important;}";
+    html += L"body,table,td,th,pre{-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;}";
+    html += L"</style></head>\r\n";
+    html += L"<body style=\"margin:0;padding:16px;background:#ffffff;color:#202020;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.28;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\r\n";
 
     bool inOverall = false;
     bool inSystemStatus = false;
     bool systemTableOpen = false;
     bool preOpen = false;
     bool inOpenPositions = false;
+    bool openPositionsTableOpen = false;
 
     auto openPre = [&]()
     {
@@ -671,6 +675,24 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         }
     };
 
+    auto openOpenPositionsTable = [&]()
+    {
+        if (openPositionsTableOpen)
+            return;
+        closePre();
+        html += L"<div class=\"mcst-horizontal-scroll\" style=\"display:block;width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 2px 0;\">\r\n";
+        html += L"<table class=\"mcst-open-positions\" role=\"table\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;width:100%;min-width:max-content;table-layout:auto;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\"><tbody>\r\n";
+        openPositionsTableOpen = true;
+    };
+
+    auto closeOpenPositionsTable = [&]()
+    {
+        if (!openPositionsTableOpen)
+            return;
+        html += L"</tbody></table>\r\n</div>\r\n";
+        openPositionsTableOpen = false;
+    };
+
     for (std::size_t i = 0; i < lines.size(); ++i)
     {
         const std::wstring& line = lines[i];
@@ -678,7 +700,10 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         if (line == L"OPEN POSITIONS")
             inOpenPositions = true;
         else if (line == L"RECENT LOGS")
+        {
+            closeOpenPositionsTable();
             inOpenPositions = false;
+        }
 
         if (line == L"OVERALL STATUS")
         {
@@ -759,15 +784,71 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             continue;
         }
 
+        if (line.rfind(L"WARNING: STALE TRACKER TABLE DATA", 0) == 0)
+        {
+            closePre();
+            html += L"<div class=\"mcst-stale-tracker-warning\" style=\"margin:10px 0 14px 0;padding:10px 12px;border:1px solid #D13438;background:#FFF1F1;color:#B4232A;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:600;line-height:1.32;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
+            html += escapeHtml(line);
+            html += L"</div>\r\n";
+            continue;
+        }
+
+        if (inOpenPositions)
+        {
+            const std::vector<std::wstring> cells = splitAlignedTableRow(line);
+            if (cells.size() == 9)
+            {
+                openOpenPositionsTable();
+                const bool headerRow = trim(cells[0]) == L"Profile" &&
+                    trim(cells[7]) == L"Open P/L";
+                const bool totalRow = trim(cells[6]) == L"Total Open P/L";
+                html += totalRow
+                    ? L"<tr style=\"border-top:1px solid #A8A8A8;font-weight:600;\">"
+                    : L"<tr>";
+                for (std::size_t column = 0; column < cells.size(); ++column)
+                {
+                    const bool rightAligned = column >= 4 && column <= 7;
+                    const bool wrapCell = column == 0 || column == 8;
+                    const wchar_t* tag = headerRow ? L"th" : L"td";
+                    html += L"<";
+                    html += tag;
+                    if (headerRow)
+                        html += L" scope=\"col\"";
+                    html += L" style=\"padding:2px 10px 2px 0;vertical-align:top;text-align:";
+                    html += rightAligned ? L"right" : L"left";
+                    html += L";white-space:";
+                    html += wrapCell ? L"normal" : L"nowrap";
+                    html += L";overflow-wrap:anywhere;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;";
+                    if (headerRow)
+                        html += L"font-weight:600;border-bottom:1px solid #A8A8A8;";
+                    html += L"\">";
+                    html += openPositionCellHtml(cells[column], column);
+                    html += L"</";
+                    html += tag;
+                    html += L">";
+                }
+                html += L"</tr>\r\n";
+                continue;
+            }
+
+            const bool separatorLine = !line.empty() &&
+                std::all_of(line.begin(), line.end(), [](wchar_t ch) { return ch == L'-'; });
+            if (openPositionsTableOpen && separatorLine)
+                continue;
+            if (openPositionsTableOpen)
+                closeOpenPositionsTable();
+        }
+
         // Keep data-heavy sections such as SYSTEM RESOURCES, ACCOUNTS,
-        // OPEN POSITIONS and RECENT LOGS monospaced. This retains the proven
-        // fixed-column readability while keeping one consistent monospaced
-        // typeface throughout the entire report.
+        // and RECENT LOGS monospaced. OPEN POSITIONS is rendered as a real HTML
+        // table above so mobile mail clients cannot shrink a wide preformatted
+        // line to fit the viewport.
         openPre();
-        html += inOpenPositions ? openPositionLineHtml(line) : escapeHtml(line);
+        html += escapeHtml(line);
         html += L"\n";
     }
 
+    closeOpenPositionsTable();
     closeSystemTable();
     closePre();
     html += L"</body></html>\r\n";

@@ -66,6 +66,12 @@ namespace mcst
         std::wstring multiChartsCompatibilityProfile;
         std::wstring trackerCompatibilityProfile;
 
+        // When a current Tracker read fails, the dashboard/report may retain the
+        // last complete table snapshot for operational context. It must always be
+        // identified as stale; current health remains Critical.
+        bool trackerDataStale = false;
+        std::wstring trackerDataTimestamp;
+
         unsigned long processId = 0;
         std::size_t accountRows = 0;
         std::size_t openPositionRows = 0;

@@ -81,7 +81,7 @@ int wmain()
 
     mcst::WatchdogSystemStatus status;
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 171;
+    snapshot.bridgeVersion = 172;
     snapshot.protocolVersion = 2;
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
@@ -115,6 +115,57 @@ int wmain()
         "The removed Native Value total notice is still present");
 
     const std::wstring reportHtml = BuildStatusReportHtml(report);
+    RequireContains(
+        reportHtml,
+        L"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">",
+        "Mobile viewport metadata is missing from the Status Report HTML");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-horizontal-scroll\"",
+        "The responsive Open Positions scroll container is missing");
+    RequireContains(
+        reportHtml,
+        L"overflow-x:auto",
+        "The Open Positions table cannot scroll horizontally on a narrow screen");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-open-positions\"",
+        "Open Positions is not rendered as a real HTML table");
+    RequireContains(
+        reportHtml,
+        L"font-size:15px !important",
+        "The Open Positions HTML table does not enforce the report font size");
+    RequireContains(
+        reportHtml,
+        L"-webkit-text-size-adjust:100% !important",
+        "Mobile automatic text shrinking is not disabled");
+
+    mcst::WatchdogSystemStatus staleStatus = status;
+    staleStatus.trackerDataStale = true;
+    staleStatus.trackerDataTimestamp = L"2026-08-17 16:55";
+    const std::wstring staleReport = BuildStatusReport(staleStatus, snapshot);
+    RequireContains(
+        staleReport,
+        L"WARNING: STALE TRACKER TABLE DATA - one or more failed sections use the last complete snapshot from 2026-08-17 16:55",
+        "A retained last-good Tracker snapshot is not visibly marked stale");
+    RequireContains(
+        BuildStatusReportHtml(staleReport),
+        L"class=\"mcst-stale-tracker-warning\"",
+        "The HTML report does not render the stale Tracker warning prominently");
+
+    const std::size_t openPositionsTableBegin =
+        reportHtml.find(L"<table class=\"mcst-open-positions\"");
+    const std::size_t openPositionsTableEnd =
+        reportHtml.find(L"</table>", openPositionsTableBegin);
+    const std::size_t openPositionsHeader = reportHtml.find(L">Profile</th>");
+    if (openPositionsTableBegin == std::wstring::npos ||
+        openPositionsTableEnd == std::wstring::npos ||
+        openPositionsHeader == std::wstring::npos ||
+        openPositionsHeader < openPositionsTableBegin ||
+        openPositionsHeader > openPositionsTableEnd)
+    {
+        throw std::runtime_error("Open Positions header is still preformatted text instead of an HTML table row");
+    }
     RequireContains(
         reportHtml,
         L"<span style=\"color:#15803D;font-weight:600;\">\u20ac 10,50</span>",

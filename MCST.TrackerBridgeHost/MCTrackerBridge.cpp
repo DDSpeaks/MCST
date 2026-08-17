@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 171;
+    constexpr int kBridgeVersion = 172;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -1165,6 +1165,45 @@ namespace
     std::string g_cachedCandidateScanDiagnostic;
     std::uintptr_t g_candidateCacheAtonpBase = 0;
     HWND g_candidateCacheTrackerWindow = nullptr;
+    std::atomic<ULONGLONG> g_lastTabViewRecoveryTick{ 0 };
+    std::atomic<bool> g_tabViewRecoveryModeActive{ false };
+    constexpr ULONGLONG kTabViewRecoveryCooldownMs = 30000;
+
+    void InvalidateTabViewCaches()
+    {
+        // These are Bridge-owned, read-only discovery caches. Clearing them does
+        // not write to MultiCharts memory or invoke an unknown target function.
+        // Keep the two locks independent so cache invalidation cannot introduce
+        // a lock-order dependency into the live Tracker read path.
+        AcquireSRWLockExclusive(&g_tabViewCacheLock);
+        g_cachedTabView = 0;
+        g_cachedAtonpBase = 0;
+        g_cachedTrackerWindow = nullptr;
+        ReleaseSRWLockExclusive(&g_tabViewCacheLock);
+
+        AcquireSRWLockExclusive(&g_candidateCacheLock);
+        g_cachedCandidates.clear();
+        g_cachedCandidateScanDiagnostic.clear();
+        g_candidateCacheAtonpBase = 0;
+        g_candidateCacheTrackerWindow = nullptr;
+        ReleaseSRWLockExclusive(&g_candidateCacheLock);
+    }
+
+    bool TryBeginTabViewRecovery()
+    {
+        const ULONGLONG now = GetTickCount64();
+        ULONGLONG previous = g_lastTabViewRecoveryTick.load();
+        for (;;)
+        {
+            if (previous != 0 && now - previous < kTabViewRecoveryCooldownMs)
+                return false;
+            if (g_lastTabViewRecoveryTick.compare_exchange_weak(previous, now))
+            {
+                g_tabViewRecoveryModeActive.store(true);
+                return true;
+            }
+        }
+    }
 
     constexpr UINT kUiExtractorDispatchMessage = WM_APP + 0x4B3;
     constexpr DWORD kUiExtractorDispatchTimeoutMs = 15000;
@@ -1313,16 +1352,15 @@ DWORD sehCode = 0;
         const Snapshot& snapshot,
         std::uintptr_t tabViewVtableRva,
         std::uint64_t expectedImageSize,
-        std::string& scanDiagnostic)
+        std::string& scanDiagnostic,
+        ULONGLONG timeBudgetMs = 30000,
+        std::size_t maxTotalInspectedBytes = 32ull * 1024ull * 1024ull)
     {
-        // V147 diagnostic change: keep the targeted scan bounded, but allow up to 30 seconds. Build a small set
-        // of live ATL/WTL object anchors from Tracker-owned window thunks and scan
-        // only their allocation neighborhoods for the exact known CATPTTabView
-        // vtable. Every read is validated, the diagnostic work is time-bounded, and candidate
-        // growth is capped before any extractor call can be considered.
-        constexpr ULONGLONG kTimeBudgetMs = 30000;
+        // Build a small set of live ATL/WTL object anchors from Tracker-owned
+        // window thunks and scan only their allocation neighborhoods for the exact
+        // known CATPTTabView vtable. Callers choose the time/byte budget (the
+        // diagnostic default is 30 seconds; production recovery uses 1.5 seconds).
         constexpr std::size_t kMaxAllocationBytes = 8ull * 1024ull * 1024ull;
-        constexpr std::size_t kMaxTotalInspectedBytes = 32ull * 1024ull * 1024ull;
         constexpr std::size_t kMaxCandidates = 64;
 
         const std::uintptr_t targetVtable = snapshot.atonpTrackerBase + tabViewVtableRva;
@@ -1413,8 +1451,8 @@ DWORD sehCode = 0;
 
         for (const AllocationRange& range : ranges)
         {
-            if (GetTickCount64() - started >= kTimeBudgetMs ||
-                inspectedBytes >= kMaxTotalInspectedBytes)
+            if (GetTickCount64() - started >= timeBudgetMs ||
+                inspectedBytes >= maxTotalInspectedBytes)
             {
                 timedOut = true;
                 break;
@@ -1442,7 +1480,7 @@ DWORD sehCode = 0;
                          address <= scanEnd - sizeof(std::uintptr_t);
                          address += sizeof(std::uintptr_t))
                     {
-                        if ((address & 0x3FFFu) == 0 && GetTickCount64() - started >= kTimeBudgetMs)
+                        if ((address & 0x3FFFu) == 0 && GetTickCount64() - started >= timeBudgetMs)
                         {
                             timedOut = true;
                             break;
@@ -1476,7 +1514,7 @@ DWORD sehCode = 0;
                         }
                     }
                 }
-                if (timedOut || candidateLimitHit || inspectedBytes >= kMaxTotalInspectedBytes)
+                if (timedOut || candidateLimitHit || inspectedBytes >= maxTotalInspectedBytes)
                     break;
                 cursor = regionEnd;
             }
@@ -2349,8 +2387,70 @@ DWORD sehCode = 0;
     std::uintptr_t FindTabViewObject(
         const Snapshot& snapshot,
         std::string& diagnostic,
-        const TrackerCompatibilityProfile* trackerProfile = nullptr)
+        const TrackerCompatibilityProfile* trackerProfile = nullptr,
+        bool forceFreshScan = false)
     {
+        if (forceFreshScan)
+        {
+            InvalidateTabViewCaches();
+
+            if (!trackerProfile || !trackerProfile->matched || trackerProfile->tabViewVtableRva == 0)
+            {
+                diagnostic = "bounded fresh scan blocked because no verified Tracker profile is authorized";
+                return 0;
+            }
+
+            // Recovery must fit inside the normal Bridge request deadline. Use
+            // the exact verified vtable and Tracker-window allocation anchors;
+            // do not run the unbounded process-wide research scan here.
+            std::string profileScanDiagnostic;
+            std::vector<TabViewCandidate> profileCandidates = FindProfileTabViewVtableObjects(
+                snapshot,
+                trackerProfile->tabViewVtableRva,
+                trackerProfile->atonpTrackerImageSize,
+                profileScanDiagnostic,
+                1500,
+                16ull * 1024ull * 1024ull);
+
+            std::uintptr_t freshAccepted = 0;
+            if (profileCandidates.size() == 1)
+            {
+                freshAccepted = profileCandidates.front().object;
+            }
+            else if (profileCandidates.size() > 1)
+            {
+                const TabViewCandidate& best = profileCandidates[0];
+                const TabViewCandidate& second = profileCandidates[1];
+                const int bestReferences =
+                    best.trackerWindowReferences +
+                    best.pageWindowReferences +
+                    best.flexGridReferences;
+                if (bestReferences > 0 && best.score >= second.score + 20)
+                    freshAccepted = best.object;
+            }
+
+            diagnostic = "bounded exact-profile recovery scan: " + profileScanDiagnostic;
+            if (!freshAccepted)
+            {
+                diagnostic += "; no unique current CATPTTabView object";
+                return 0;
+            }
+
+            AcquireSRWLockExclusive(&g_tabViewCacheLock);
+            g_cachedTabView = freshAccepted;
+            g_cachedAtonpBase = snapshot.atonpTrackerBase;
+            g_cachedTrackerWindow = snapshot.trackerWindow;
+            ReleaseSRWLockExclusive(&g_tabViewCacheLock);
+            diagnostic += "; unique current CATPTTabView object accepted=" + HexValue(freshAccepted);
+            return freshAccepted;
+        }
+
+        if (g_tabViewRecoveryModeActive.load() && trackerProfile && trackerProfile->matched)
+        {
+            diagnostic = "normal discovery deferred while bounded recovery mode is active";
+            return 0;
+        }
+
         std::string rttiDiagnostic;
         const std::vector<RttiVtableRecord> vtables = ResolveRttiVtables(
             snapshot, ".?AVCATPTTabView@ATOnPTracker@@", rttiDiagnostic);
@@ -2477,7 +2577,9 @@ DWORD sehCode = 0;
                 snapshot,
                 trackerProfile->tabViewVtableRva,
                 trackerProfile->atonpTrackerImageSize,
-                profileScanDiagnostic);
+                profileScanDiagnostic,
+                1500,
+                16ull * 1024ull * 1024ull);
             out << "; profile_vtable_scan=" << profileScanDiagnostic;
             if (!profileCandidates.empty())
             {
@@ -12493,7 +12595,14 @@ DWORD sehCode = 0;
         out << "ENDSECTION\t" << section.name << "\n";
     }
 
-    bool BuildV153StatusReportSnapshot(const Snapshot& snapshot, std::string& payload)
+    bool BuildV153StatusReportSnapshot(
+        const Snapshot& snapshot,
+        std::string& payload,
+        bool forceFreshScan,
+        bool& tabViewFound,
+        bool& compatibilityMatched,
+        std::size_t& pagesRead,
+        std::size_t& sehFailures)
     {
         V153GridReadLockGuard lock;
 
@@ -12508,8 +12617,9 @@ DWORD sehCode = 0;
         }
         std::string tabViewDiagnostic;
         const std::uintptr_t tabView = trackerProfile.matched
-            ? FindTabViewObject(snapshot, tabViewDiagnostic, &trackerProfile)
+            ? FindTabViewObject(snapshot, tabViewDiagnostic, &trackerProfile, forceFreshScan)
             : 0;
+        tabViewFound = tabView != 0;
 
         std::string flexGridRttiDiagnostic;
         const std::vector<RttiVtableRecord> flexGridRttiVtables = trackerProfile.matched
@@ -12519,6 +12629,7 @@ DWORD sehCode = 0;
 
         if (!trackerProfile.matched && tabViewDiagnostic.empty())
             tabViewDiagnostic = "Tracker reader blocked before CATPTTabView lookup because no compatibility profile is authorized.";
+        compatibilityMatched = trackerProfile.matched;
 
         V153GridSectionResult accounts = ReadV153GridSection(
             snapshot, flexGridRttiVtables, tabView, trackerProfile, "accounts",
@@ -12535,6 +12646,8 @@ DWORD sehCode = 0;
             static_cast<std::size_t>(positions.ok) +
             static_cast<std::size_t>(logs.ok);
         const std::size_t totalSeh = accounts.sehFailures + positions.sehFailures + logs.sehFailures;
+        pagesRead = pagesOk;
+        sehFailures = totalSeh;
 
         std::ostringstream out;
         out << "MC_TRACKER_STATUS_V1\n";
@@ -12565,6 +12678,92 @@ DWORD sehCode = 0;
         out << "END\n";
         payload = out.str();
         return pagesOk > 0 && totalSeh == 0;
+    }
+
+    void AppendV172RecoveryMetadata(
+        std::string& payload,
+        bool attempted,
+        bool tabViewFound,
+        std::size_t pagesRead,
+        std::size_t sehFailures,
+        const char* explicitResult = nullptr)
+    {
+        const std::size_t markerEnd = payload.find('\n');
+        if (markerEnd == std::string::npos)
+            return;
+
+        std::ostringstream metadata;
+        metadata << "META\trecovery_attempted\t" << (attempted ? "true" : "false") << "\n";
+        const char* result = explicitResult ? explicitResult :
+            (!attempted ? "not_needed" :
+                (tabViewFound && pagesRead == 3 && sehFailures == 0 ? "complete" : "incomplete"));
+        metadata << "META\trecovery_result\t" << result << "\n";
+        payload.insert(markerEnd + 1, metadata.str());
+    }
+
+    bool BuildV172StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    {
+        bool tabViewFound = false;
+        bool compatibilityMatched = false;
+        std::size_t pagesRead = 0;
+        std::size_t sehFailures = 0;
+        const bool initialBuilt = BuildV153StatusReportSnapshot(
+            initialSnapshot,
+            payload,
+            false,
+            tabViewFound,
+            compatibilityMatched,
+            pagesRead,
+            sehFailures);
+
+        // A complete snapshot needs no extra work. An unmatched/unknown build is
+        // deliberately not retried because compatibility authorization is absent.
+        const bool recoveryEligible =
+            initialSnapshot.trackerFound &&
+            initialSnapshot.trackerInSameProcess &&
+            initialSnapshot.atonpTrackerBase != 0 &&
+            compatibilityMatched &&
+            pagesRead < 3;
+        if (!recoveryEligible)
+        {
+            if (pagesRead == 3 && sehFailures == 0)
+                g_tabViewRecoveryModeActive.store(false);
+            AppendV172RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            return initialBuilt;
+        }
+
+        // One production refresh can issue several Watchdog retries. Do not turn
+        // a persistent failure into repeated process scans; one recovery scan is
+        // allowed per 30-second window and ordinary snapshot reads continue.
+        if (!TryBeginTabViewRecovery())
+        {
+            AppendV172RecoveryMetadata(
+                payload, false, tabViewFound, pagesRead, sehFailures, "cooldown");
+            return initialBuilt;
+        }
+
+        // Release of V153GridReadLockGuard is guaranteed before this bounded pause
+        // and the second pass. The retry only refreshes Bridge-local discovery and
+        // performs another read-only capture; it does not manipulate Tracker UI.
+        Sleep(250);
+        const Snapshot freshSnapshot = CaptureSnapshot();
+        bool freshTabViewFound = false;
+        bool freshCompatibilityMatched = false;
+        std::size_t freshPagesRead = 0;
+        std::size_t freshSehFailures = 0;
+        const bool recovered = BuildV153StatusReportSnapshot(
+            freshSnapshot,
+            payload,
+            true,
+            freshTabViewFound,
+            freshCompatibilityMatched,
+            freshPagesRead,
+            freshSehFailures);
+        AppendV172RecoveryMetadata(
+            payload, true, freshTabViewFound, freshPagesRead, freshSehFailures);
+        if (freshPagesRead == 3 && freshSehFailures == 0)
+            g_tabViewRecoveryModeActive.store(false);
+        return recovered && freshCompatibilityMatched;
     }
 
 
@@ -12776,7 +12975,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV153StatusReportSnapshot(snapshot, responsePayload);
+            const bool built = BuildV172StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 

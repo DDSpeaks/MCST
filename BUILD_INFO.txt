@@ -1,22 +1,23 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R18
+MCST-Watchdog version: 1.114-R20
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V171, Protocol V2
-Production change:     Open P/L total placement and profit colors
+Tracker Bridge:        Product 1.0, internal V172, Protocol V2
+Production change:     Bounded Tracker snapshot self-recovery and stale-data labeling
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R18 production method
+R20 production method
 ---------------------
-1. Retain R17's fail-closed, per-currency Open P/L aggregation.
-2. Put the currency and total amount in the Open P/L column beneath the detail
-   rows, with the label in the preceding column and the row count after it.
-3. In HTML reports, render the complete positive Open P/L cell green and the
-   complete negative Open P/L cell red.
-4. Include currency symbols/codes and explicit signs inside the colored span.
-5. Keep Native Value per row, but omit the former explanatory total notice.
+1. Retain R19's semantic, mobile-safe Open Positions HTML table and all R18 totals.
+2. When an authorized Bridge snapshot is incomplete, clear only Bridge-owned
+   CATPTTabView discovery caches and perform one fresh, read-only scan.
+3. Retry parsed-but-incomplete Tracker snapshots in Watchdog instead of treating
+   them as a completed retry attempt.
+4. Retain the last complete Tracker tables for context while marking them STALE
+   in both the Dashboard status detail and the plain-text/HTML Status Report.
+5. Never feed stale Recent Logs to BrokerMonitor or LogAlertEngine.
 
 Expected current-capture example
 --------------------------------
@@ -24,3 +25,4 @@ Total Open P/L | EUR +106,68 | [10 rows]
 
 Production Tracker minimum Bridge: V156
 Retained Position Currency R16 research minimum Bridge: V171
+R20 self-recovery Bridge: V172

@@ -8,12 +8,12 @@ MCST Tracker Bridge is the MultiCharts-side runtime component that provides Orde
 Public product name: MCST Tracker Bridge
 Product version:     1.0
 DLL file:            MCST-TrackerBridge.dll
-Internal build:      V171
+Internal build:      V172
 Bridge protocol:     V2
 Runtime location:    C:\MCExtras\MCST-TrackerBridge.dll
 ```
 
-The internal V171 identifier describes this Bridge implementation. It is separate from the public product version and from the exact MultiCharts module fingerprints used by the compatibility framework. Production Tracker snapshots still require V156 or newer. V171 retains Protocol V2 command 50 and changes only its research implementation: the exact R15 ATCenterProxy position interface is verified, its live objects are correlated with visible rows, and its two bounded currency strings are decoded.
+The internal V172 identifier describes this Bridge implementation. It is separate from the public product version and from the exact MultiCharts module fingerprints used by the compatibility framework. Production Tracker snapshots still have a V156 minimum. V172 adds one bounded recovery pass for incomplete, compatibility-authorized snapshots: Bridge-owned CATPTTabView discovery caches are cleared, current window/module state is captured again, and the same read-only grid scan is repeated. The retained Position Currency command remains available from V171 onward.
 
 ## How the Bridge is loaded
 
@@ -68,4 +68,6 @@ This design allows a newly verified `Profile.*` section to be activated with a f
 
 ## Protocol stability
 
-Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Command 50 was introduced in V157 and is retained unchanged at the protocol level; V171 changes only its bounded, read-only research implementation. The message header and production snapshot payload remain unchanged. Internal layout discovery and profile selection stay inside the Bridge.
+Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Command 50 was introduced in V157 and is retained unchanged. V172 adds only ignorable recovery metadata to the production snapshot payload; older parsers ignore unknown META keys. The message header and command set remain unchanged. Internal layout discovery, recovery, and profile selection stay inside the Bridge.
+
+The recovery path never writes MultiCharts memory, changes Tracker UI state, sends synthetic input, or calls an unknown function. It is attempted at most once per snapshot request and only when a same-process Tracker has an authorized compatibility profile but fewer than all three table sections were read.
