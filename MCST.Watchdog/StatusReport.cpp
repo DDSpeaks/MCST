@@ -453,7 +453,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R21\n"
+        << L"Watchdog version       1.114-R22\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -480,8 +480,8 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
         << MonitorLine(L"Heartbeat", status.heartbeat)
         << L"\nLATEST ACTIVITY\n"
         << L"---------------\n"
-        << std::left << std::setw(22) << L"Last system update" << status.lastSnapshot << L'\n'
-        << std::left << std::setw(22) << L"Last Snapshot" << status.lastSnapshot << L'\n'
+        << std::left << std::setw(24) << L"Last Tracker attempt" << status.lastTrackerAttempt << L'\n'
+        << std::left << std::setw(24) << L"Last complete snapshot" << status.lastCompleteTrackerSnapshot << L'\n'
         << std::left << std::setw(22) << L"Last AutoTrading Read" << (status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead) << L'\n'
         << std::left << std::setw(22) << L"Last Status Report" << status.lastReport << L'\n'
         << std::left << std::setw(22) << L"Last Alert" << status.lastAlert << L"\n\n";
@@ -495,9 +495,15 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     {
         out << L"\nTRACKER TABLE DATA\n"
             << L"------------------\n"
-            << L"WARNING: STALE TRACKER TABLE DATA - one or more failed sections use the last complete snapshot from "
+            << (status.trackerDataStaleCritical
+                ? L"CRITICAL: STALE TRACKER TABLE DATA - "
+                : L"ATTENTION: STALE TRACKER TABLE DATA - ")
+            << L"one or more failed sections use the last complete snapshot from "
             << (status.trackerDataTimestamp.empty() ? L"an earlier update" : status.trackerDataTimestamp)
-            << L" because the current Tracker read failed. Current health remains CRITICAL.\n";
+            << L" because the current Tracker read failed. Stale age is "
+            << status.trackerDataStaleAgeMinutes << L" min; current monitoring health is "
+            << (status.trackerDataStaleCritical ? L"CRITICAL" : L"ATTENTION")
+            << L" (CRITICAL threshold " << status.trackerDataStaleCriticalAfterMinutes << L" min).\n";
     }
 
     out << L"\nACCOUNTS\n--------\n";
@@ -681,7 +687,11 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             return;
         closePre();
         html += L"<div class=\"mcst-horizontal-scroll\" style=\"display:block;width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 2px 0;\">\r\n";
-        html += L"<table class=\"mcst-open-positions\" role=\"table\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;width:100%;min-width:max-content;table-layout:auto;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\"><tbody>\r\n";
+        // iOS Mail does not reliably support min-width:max-content and may
+        // shrink a width:100% data table until its text is unreadable. The
+        // explicit HTML/CSS width keeps the same 15 px font as the report and
+        // delegates narrow-screen handling to the horizontal-scroll wrapper.
+        html += L"<table class=\"mcst-open-positions\" role=\"table\" width=\"1100\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"display:inline-table;border-collapse:collapse;width:1100px;min-width:1100px;max-width:none;table-layout:auto;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\"><tbody>\r\n";
         openPositionsTableOpen = true;
     };
 
@@ -784,10 +794,16 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             continue;
         }
 
-        if (line.rfind(L"WARNING: STALE TRACKER TABLE DATA", 0) == 0)
+        if (line.rfind(L"ATTENTION: STALE TRACKER TABLE DATA", 0) == 0 ||
+            line.rfind(L"CRITICAL: STALE TRACKER TABLE DATA", 0) == 0)
         {
             closePre();
-            html += L"<div class=\"mcst-stale-tracker-warning\" style=\"margin:10px 0 14px 0;padding:10px 12px;border:1px solid #D13438;background:#FFF1F1;color:#B4232A;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:600;line-height:1.32;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
+            const bool staleCritical = line.rfind(L"CRITICAL:", 0) == 0;
+            html += L"<div class=\"mcst-stale-tracker-warning ";
+            html += staleCritical ? L"mcst-stale-critical" : L"mcst-stale-attention";
+            html += L"\" style=\"margin:10px 0 14px 0;padding:10px 12px;border:1px solid ";
+            html += staleCritical ? L"#D13438;background:#FFF1F1;color:#B4232A;" : L"#D99A00;background:#FFF8E1;color:#8A5A00;";
+            html += L"font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:600;line-height:1.32;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
             html += escapeHtml(line);
             html += L"</div>\r\n";
             continue;
@@ -808,7 +824,6 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
                 for (std::size_t column = 0; column < cells.size(); ++column)
                 {
                     const bool rightAligned = column >= 4 && column <= 7;
-                    const bool wrapCell = column == 0 || column == 8;
                     const wchar_t* tag = headerRow ? L"th" : L"td";
                     html += L"<";
                     html += tag;
@@ -816,9 +831,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
                         html += L" scope=\"col\"";
                     html += L" style=\"padding:2px 10px 2px 0;vertical-align:top;text-align:";
                     html += rightAligned ? L"right" : L"left";
-                    html += L";white-space:";
-                    html += wrapCell ? L"normal" : L"nowrap";
-                    html += L";overflow-wrap:anywhere;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;";
+                    html += L";white-space:nowrap;overflow-wrap:normal;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.28 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;";
                     if (headerRow)
                         html += L"font-weight:600;border-bottom:1px solid #A8A8A8;";
                     html += L"\">";

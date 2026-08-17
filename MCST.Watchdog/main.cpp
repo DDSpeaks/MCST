@@ -572,6 +572,26 @@ namespace
         return rank(right) > rank(left) ? right : left;
     }
 
+    void RecalculateOverallStatus(
+        mcst::WatchdogSystemStatus& status,
+        const AppConfig& config,
+        bool includeBroker)
+    {
+        status.overall = mcst::HealthState::Healthy;
+        status.overall = Worst(status.overall, status.bridge.state);
+        status.overall = Worst(status.overall, status.trackerSnapshot.state);
+        status.overall = Worst(status.overall, status.recentLogs.state);
+        status.overall = Worst(status.overall, status.autoTrading.state);
+        if (includeBroker)
+            status.overall = Worst(status.overall, status.broker.state);
+        if (config.statusReportsEnabled)
+            status.overall = Worst(status.overall, status.statusReports.state);
+        if (!(config.emailEnabledSettingPresent && !config.emailEnabled))
+            status.overall = Worst(status.overall, status.email.state);
+        if (config.heartbeatEnabled)
+            status.overall = Worst(status.overall, status.heartbeat.state);
+    }
+
     bool IsCompleteTrackerSnapshot(const TrackerStatusSnapshot& snapshot)
     {
         return snapshot.trackerFound &&
@@ -592,7 +612,7 @@ namespace
 
     const TrackerBridgeSection& MonitoringLogs(const TrackerStatusSnapshot& snapshot)
     {
-        // Bridge V173 supplies up to 200 rows for state engines while the
+        // Bridge V173 or newer supplies up to 200 rows for state engines while the
         // report-facing Recent Logs section remains at ten rows. Retain a safe
         // fallback for older compatible Bridge builds.
         return snapshot.monitoringLogs.present && snapshot.monitoringLogs.ok
@@ -712,12 +732,16 @@ namespace
             result.status.lastReport = g_app.lastReport;
             result.status.lastAlert = g_app.lastAlert;
         }
-        result.status.lastSnapshot = L"Never";
+        result.status.lastTrackerAttempt = L"Never";
+        result.status.lastCompleteTrackerSnapshot = L"Never";
         result.status.autoTradingMinimum = config.autoTradingMinimum;
+        result.status.trackerDataStaleCriticalAfterMinutes = config.trackerStaleCriticalAfterMinutes;
 
         std::wstring diagnostic;
         bool readOk = false;
         int snapshotAttempts = 0;
+        bool anyBridgeRecoveryAttempted = false;
+        std::vector<std::wstring> bridgeRecoveryAttempts;
         for (int attempt = 1; attempt <= config.snapshotRetryCount; ++attempt)
         {
             snapshotAttempts = attempt;
@@ -728,6 +752,14 @@ namespace
                     attemptDiagnostic,
                     static_cast<unsigned long>(config.bridgeTimeoutMilliseconds)))
             {
+                if (candidate.recoveryAttempted ||
+                    (!candidate.recoveryResult.empty() && candidate.recoveryResult != L"not_needed"))
+                {
+                    anyBridgeRecoveryAttempted = anyBridgeRecoveryAttempted || candidate.recoveryAttempted;
+                    bridgeRecoveryAttempts.push_back(
+                        L"attempt " + std::to_wstring(attempt) + L"=" +
+                        (candidate.recoveryResult.empty() ? L"attempted" : candidate.recoveryResult));
+                }
                 readOk = true;
                 result.snapshot = std::move(candidate);
                 diagnostic = std::move(attemptDiagnostic);
@@ -753,8 +785,21 @@ namespace
         }
 
         const auto now = std::chrono::system_clock::now();
+        result.status.lastTrackerAttempt = FormatLocalTime(now);
         if (readOk)
         {
+            if (!bridgeRecoveryAttempts.empty())
+            {
+                std::wstring combined;
+                for (const std::wstring& item : bridgeRecoveryAttempts)
+                {
+                    if (!combined.empty())
+                        combined += L"; ";
+                    combined += item;
+                }
+                result.snapshot.recoveryAttempted = anyBridgeRecoveryAttempted;
+                result.snapshot.recoveryResult = std::move(combined);
+            }
             result.status.bridge = { mcst::HealthState::Healthy, L"Connected",
                 L"MCST Tracker Bridge 1.0 - internal V" + std::to_wstring(result.snapshot.bridgeVersion) + L" - Protocol V" + std::to_wstring(result.snapshot.protocolVersion) };
             const bool trackerAvailable = result.snapshot.trackerFound && result.snapshot.trackerSameProcess;
@@ -792,7 +837,6 @@ namespace
                 result.status.multiChartsExecutable = result.multiChartsVersionInfo.executableName;
             }
             result.status.lastSuccessfulUpdate = now;
-            result.status.lastSnapshot = FormatLocalTime(now);
 
             if (result.snapshot.recentLogs.ok && !result.snapshot.recentLogs.rows.empty())
                 result.status.recentLogs = { mcst::HealthState::Healthy, std::to_wstring(result.snapshot.recentLogs.rows.size()) + L" rows", L"Updating" };
@@ -803,12 +847,6 @@ namespace
 
             std::wstring rawDiagnostic;
             WriteTrackerStatusRawPayload(result.snapshot, config.rawSnapshotPath, rawDiagnostic);
-            if (trackerOk)
-                AddActivity(result.status, mcst::HealthState::Healthy, L"Tracker snapshot read successfully");
-            else if (trackerPartial)
-                AddActivity(result.status, mcst::HealthState::Attention, L"Tracker snapshot partially readable");
-            else
-                AddActivity(result.status, mcst::HealthState::Critical, L"Tracker snapshot reader is unavailable for the detected build");
         }
         else
         {
@@ -904,17 +942,7 @@ namespace
             };
         }
 
-        result.status.overall = mcst::HealthState::Healthy;
-        result.status.overall = Worst(result.status.overall, result.status.bridge.state);
-        result.status.overall = Worst(result.status.overall, result.status.trackerSnapshot.state);
-        result.status.overall = Worst(result.status.overall, result.status.recentLogs.state);
-        result.status.overall = Worst(result.status.overall, result.status.autoTrading.state);
-        if (config.statusReportsEnabled)
-            result.status.overall = Worst(result.status.overall, result.status.statusReports.state);
-        if (!(config.emailEnabledSettingPresent && !config.emailEnabled))
-            result.status.overall = Worst(result.status.overall, result.status.email.state);
-        if (config.heartbeatEnabled)
-            result.status.overall = Worst(result.status.overall, result.status.heartbeat.state);
+        RecalculateOverallStatus(result.status, config, false);
 
         // Browser authentication is sampled on the refresh worker thread. The
         // resulting signal is applied by BrokerMonitor on the UI thread, where
@@ -1244,7 +1272,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R21", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R22", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1298,8 +1326,11 @@ namespace
         constexpr int latestLabelLeft = 34;
         constexpr int latestLabelRight = 184;
         constexpr int latestValueLeft = 194;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last Snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += 32;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 28 }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += 32;
         DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -1524,7 +1555,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R21", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R22", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1644,7 +1675,7 @@ namespace
                         std::to_wstring(kPositionCurrencyResearchBridgeVersion) +
                         L" or newer. The currently loaded Bridge is V" +
                         std::to_wstring(referenceSnapshot.bridgeVersion) +
-                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V173 build from this package and restart MultiCharts.";
+                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V174 build from this package and restart MultiCharts.";
                 }
                 else if (!referenceSnapshot.openPositions.present || !referenceSnapshot.openPositions.ok)
                 {
@@ -1731,6 +1762,8 @@ namespace
                 std::lock_guard<std::mutex> lock(g_app.mutex);
                 const auto previousActivity = g_app.status.activity;
                 const bool previouslyShowingStaleTrackerData = g_app.status.trackerDataStale;
+                const bool previouslyCriticalStaleTrackerData = g_app.status.trackerDataStaleCritical;
+                const mcst::HealthState previousTrackerState = g_app.status.trackerSnapshot.state;
                 const int active = result->status.autoTradingActive;
                 TrackerStatusSnapshot liveSnapshot = std::move(result->snapshot);
                 const bool liveTrackerSnapshotComplete = IsCompleteTrackerSnapshot(liveSnapshot);
@@ -1744,7 +1777,10 @@ namespace
                     g_app.hasLastGoodTrackerSnapshot = true;
                     g_app.snapshot = liveSnapshot;
                     g_app.status.trackerDataStale = false;
+                    g_app.status.trackerDataStaleCritical = false;
+                    g_app.status.trackerDataStaleAgeMinutes = 0;
                     g_app.status.trackerDataTimestamp.clear();
+                    g_app.status.lastCompleteTrackerSnapshot = g_app.status.lastTrackerAttempt;
                     if (previouslyShowingStaleTrackerData)
                     {
                         AddActivity(
@@ -1766,29 +1802,79 @@ namespace
                         g_app.snapshot.recentLogs = g_app.lastGoodTrackerSnapshot.recentLogs;
                     g_app.status.trackerDataStale = true;
                     g_app.status.trackerDataTimestamp = FormatLocalTime(g_app.lastGoodTrackerSnapshotTime);
-                    g_app.status.trackerSnapshot.state = mcst::HealthState::Critical;
-                    g_app.status.trackerSnapshot.value = L"Read failed / STALE data";
-                    g_app.status.overall = Worst(g_app.status.overall, mcst::HealthState::Critical);
+                    g_app.status.lastCompleteTrackerSnapshot = g_app.status.trackerDataTimestamp;
+                    const long long staleAgeSeconds = (std::max)(0LL, static_cast<long long>(
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            monitorNow - g_app.lastGoodTrackerSnapshotTime).count()));
+                    const long long criticalAfterSeconds =
+                        static_cast<long long>((std::max)(1, g_app.config.trackerStaleCriticalAfterMinutes)) * 60LL;
+                    const bool staleCritical = staleAgeSeconds >= criticalAfterSeconds;
+                    const mcst::HealthState staleState = staleCritical
+                        ? mcst::HealthState::Critical
+                        : mcst::HealthState::Attention;
+                    g_app.status.trackerDataStaleCritical = staleCritical;
+                    g_app.status.trackerDataStaleAgeMinutes = static_cast<int>(staleAgeSeconds / 60LL);
+                    g_app.status.trackerDataStaleCriticalAfterMinutes =
+                        g_app.config.trackerStaleCriticalAfterMinutes;
+                    g_app.status.trackerSnapshot.state = staleState;
+                    g_app.status.trackerSnapshot.value = staleCritical
+                        ? L"Read failed / STALE data"
+                        : L"STALE data / retrying";
                     g_app.status.accountRows = g_app.snapshot.accounts.rows.size();
                     g_app.status.openPositionRows = g_app.snapshot.openPositions.rows.size();
                     g_app.status.recentLogRows = g_app.snapshot.recentLogs.rows.size();
 
-                    const std::wstring staleDetail =
+                    std::wstring staleDetail =
                         L"One or more failed tables use STALE data from " +
-                        g_app.status.trackerDataTimestamp + L"; current Tracker read is incomplete";
+                        g_app.status.trackerDataTimestamp + L"; current Tracker read is incomplete; stale age " +
+                        std::to_wstring(g_app.status.trackerDataStaleAgeMinutes) + L" min";
+                    if (!staleCritical)
+                    {
+                        const long long remainingMinutes =
+                            (criticalAfterSeconds - staleAgeSeconds + 59LL) / 60LL;
+                        staleDetail += L"; CRITICAL in " + std::to_wstring(remainingMinutes) + L" min if reading does not recover";
+                    }
                     if (!g_app.status.trackerSnapshot.detail.empty())
                         g_app.status.trackerSnapshot.detail += L" - ";
                     g_app.status.trackerSnapshot.detail += staleDetail;
                     if (!liveSnapshot.recentLogs.ok)
                     {
+                        g_app.status.recentLogs.state = staleState;
+                        g_app.status.recentLogs.value = staleCritical
+                            ? L"Read failed / STALE data"
+                            : L"STALE data / retrying";
                         if (!g_app.status.recentLogs.detail.empty())
                             g_app.status.recentLogs.detail += L" - ";
                         g_app.status.recentLogs.detail += staleDetail;
+                    }
+                    if (!previouslyShowingStaleTrackerData)
+                    {
+                        AddActivity(
+                            g_app.status,
+                            staleState,
+                            staleCritical
+                                ? L"Live Tracker read failed; the last complete snapshot is already beyond the CRITICAL threshold"
+                                : L"Live Tracker read failed; using the last complete snapshot during the stale-data grace interval");
+                    }
+                    else if (staleCritical && !previouslyCriticalStaleTrackerData)
+                    {
+                        AddActivity(
+                            g_app.status,
+                            mcst::HealthState::Critical,
+                            L"Tracker stale-data interval reached the CRITICAL threshold");
                     }
                 }
                 else
                 {
                     g_app.snapshot = liveSnapshot;
+                    g_app.status.lastCompleteTrackerSnapshot = L"Never";
+                    if (g_app.status.trackerSnapshot.state != previousTrackerState)
+                    {
+                        AddActivity(
+                            g_app.status,
+                            g_app.status.trackerSnapshot.state,
+                            L"Tracker snapshot state changed to " + g_app.status.trackerSnapshot.value);
+                    }
                 }
                 g_app.status.lastReport = g_app.lastReport;
                 g_app.status.lastAlert = g_app.lastAlert;
@@ -1796,7 +1882,7 @@ namespace
                 const BrokerMonitorDecision brokerDecision = g_app.brokerMonitor.Evaluate(
                     MonitoringLogs(liveSnapshot), result->brokerAuthentication, g_app.config, monitorNow);
                 g_app.status.broker = brokerDecision.status;
-                g_app.status.overall = Worst(g_app.status.overall, g_app.status.broker.state);
+                RecalculateOverallStatus(g_app.status, g_app.config, true);
                 if (brokerDecision.stateChanged)
                 {
                     if (brokerDecision.status.state == mcst::HealthState::Healthy)
@@ -1823,6 +1909,7 @@ namespace
                 {
                     g_app.status.recentLogs.state = Worst(g_app.status.recentLogs.state, logAlertDecision.state);
                     g_app.status.recentLogs.detail = std::to_wstring(logAlertDecision.eventCount) + L" new alert match(es)";
+                    RecalculateOverallStatus(g_app.status, g_app.config, true);
                     g_app.lastAlert = FormatLocalTime(monitorNow) + L" - " + logAlertDecision.eventText;
                     g_app.status.lastAlert = g_app.lastAlert;
                     AddActivity(g_app.status, logAlertDecision.state, logAlertDecision.eventText);
@@ -1990,7 +2077,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R21 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R22 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2030,7 +2117,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         g_app.status.statusReports = { mcst::HealthState::Unknown, L"Waiting", L"" };
         g_app.status.email = { mcst::HealthState::Unknown, L"Waiting", L"" };
         g_app.status.heartbeat = { mcst::HealthState::Unknown, L"Waiting", L"" };
-        g_app.status.lastSnapshot = L"Never";
+        g_app.status.lastTrackerAttempt = L"Never";
+        g_app.status.lastCompleteTrackerSnapshot = L"Never";
         g_app.status.lastAutoTradingRead = L"Never";
         g_app.status.lastReport = L"Never";
         g_app.status.lastAlert = L"None";
@@ -2060,7 +2148,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R21 - Extended Broker History",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R22 - Tracker Recovery and Readable Reports",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

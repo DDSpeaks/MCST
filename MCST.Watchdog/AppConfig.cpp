@@ -292,13 +292,14 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.114-R21");
+    WriteValue(path, L"General", L"version", L"1.114-R22");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
     EnsureIntKey(path, L"Bridge", L"timeout_milliseconds", 5000, 500, 60000, changes);
     EnsureIntKey(path, L"Bridge", L"snapshot_retry_count", 3, 1, 10, changes);
     EnsureIntKey(path, L"Bridge", L"snapshot_retry_delay_milliseconds", 250, 0, 10000, changes);
+    EnsureIntKey(path, L"TrackerMonitor", L"stale_critical_after_minutes", 10, 1, 1440, changes);
 
     EnsureBoolKey(path, L"AutoTrading", L"enabled", true, changes);
     EnsureIntKey(path, L"AutoTrading", L"minimum_active_strategies", 65, 0, 10000, changes);
@@ -407,6 +408,8 @@ AppConfig LoadAppConfig()
     config.bridgeTimeoutMilliseconds = ReadInt(path, L"Bridge", L"timeout_milliseconds", 5000, 500, 60000);
     config.snapshotRetryCount = ReadInt(path, L"Bridge", L"snapshot_retry_count", 3, 1, 10);
     config.snapshotRetryDelayMilliseconds = ReadInt(path, L"Bridge", L"snapshot_retry_delay_milliseconds", 250, 0, 10000);
+    config.trackerStaleCriticalAfterMinutes = ReadInt(
+        path, L"TrackerMonitor", L"stale_critical_after_minutes", 10, 1, 1440);
     config.autoTradingMonitoringEnabled = ReadBool(path, L"AutoTrading", L"enabled", true);
     config.autoTradingMinimum = ReadInt(path, L"AutoTrading", L"minimum_active_strategies", 65, 0, 10000);
     config.autoTradingCheckMinutes = ReadInt(path, L"AutoTrading", L"check_interval_minutes", 5, 1, 1440);

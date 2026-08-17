@@ -25,6 +25,7 @@ struct AppConfig
     int bridgeTimeoutMilliseconds = 5000;
     int snapshotRetryCount = 3;
     int snapshotRetryDelayMilliseconds = 250;
+    int trackerStaleCriticalAfterMinutes = 10;
 
     bool autoTradingMonitoringEnabled = true;
     int autoTradingMinimum = 65;

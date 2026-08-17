@@ -1,28 +1,36 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R21
+MCST-Watchdog version: 1.114-R22
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V173, Protocol V2
-Production change:     Extended monitoring-only log history for Broker state
+Tracker Bridge:        Product 1.0, internal V174, Protocol V2
+Production change:     Non-sticky Tracker recovery and readable mobile tables
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R21 production method
+R22 production method
 ---------------------
-1. Read the Logs grid once, up to 200 non-empty rows.
-2. Emit the first ten rows as the existing report-facing Recent Logs section.
-3. Emit the full bounded set as the optional monitoring_logs section.
-4. Let BrokerMonitor and LogAlertEngine use monitoring_logs while all visible
-   reports remain limited to ten Recent Logs rows.
-5. Process the monitoring rows oldest-to-newest so the newest Broker-specific
-   connection or disconnection evidence determines the final state.
+1. Make recovery mode live only for the executing bounded exact-profile scan.
+2. After any failed recovery, allow the next Watchdog retry to run normal RTTI
+   discovery again.
+3. Cache positive and negative normal-discovery results for 30 seconds so the
+   recovery path cannot create continuous process-wide memory scans.
+4. Preserve all configured Watchdog retry outcomes in the final diagnostic.
+5. Use recent last-complete Tracker tables as Attention for the configurable
+   stale_critical_after_minutes interval (default 10), then escalate to Critical.
+6. Report Last Tracker attempt and Last complete snapshot separately.
+7. Render Open Positions at an explicit 1100-pixel, 15-pixel-font table width
+   inside a horizontal-scroll container.
 
-Expected current-capture example
---------------------------------
-Total Open P/L | EUR +106,68 | [10 rows]
+Retained production behavior
+----------------------------
+- up to 200 live monitoring_logs rows for BrokerMonitor and LogAlertEngine;
+- ten display/report Recent Logs rows;
+- known-currency Open P/L totals and complete positive/negative coloring;
+- read-only Tracker recovery and compatibility gates.
 
 Production Tracker minimum Bridge: V156
 Retained Position Currency R16 research minimum Bridge: V171
-R20 self-recovery Bridge: V172
+R20 initial self-recovery Bridge: V172
 R21 extended monitoring history Bridge: V173
+R22 non-sticky recovery Bridge: V174

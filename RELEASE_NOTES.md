@@ -1,45 +1,53 @@
-# MCST 1.114-R21 Extended Broker History
+# MCST 1.114-R22 Tracker Recovery and Readable Reports
 
-Tracker Bridge internal build: V173  
+Tracker Bridge internal build: V174
 Bridge protocol: V2
 
-R21 fixes a Broker status error observed after Watchdog was started later than
-the Order and Position Tracker. The Tracker's newest successful Saxo connection
-event could already be below Watchdog's ten displayed log rows. Watchdog then
-reported Broker as UNKNOWN even though the Tracker showed a newer successful
-connection after an older disconnect event.
+R22 addresses the observed long-lived state where Order and Position Tracker
+and its Logs grid were visible, but Watchdog repeatedly reported that the
+CATPTTabView object was not found. It also corrects stale-state severity,
+snapshot timestamps, and the tiny Open Positions table in iOS Mail.
 
-## R21 changes
+## Tracker recovery
 
-- Bridge V173 reads the Logs grid once, bounded to 200 rows.
-- The existing `recent_logs` section remains capped at ten rows for the
-  Dashboard and Status Report.
-- A new optional `monitoring_logs` section carries the same live capture up to
-  200 rows for BrokerMonitor and LogAlertEngine.
-- Broker events are still processed oldest to newest, so the latest relevant
-  connection or disconnection event wins. Unrelated newer warnings do not erase
-  the last confirmed state.
-- Monitoring uses only the current live snapshot. R20's retained stale snapshot
-  remains display-only and cannot create false Broker or log-alert decisions.
-- Protocol V2 and the existing command set are unchanged; older readers ignore
-  the optional section.
+- Recovery is now non-sticky: a failed pass cannot disable later normal
+  discovery.
+- Bridge recovery mode now exists only while one bounded exact-profile scan is
+  executing. Its scope guard releases the mode after both success and failure.
+- A failed exact-profile scan therefore cannot suppress normal RTTI discovery
+  on later Watchdog requests.
+- Normal candidate discovery caches both positive and empty results for 30
+  seconds. This restores recovery opportunities without producing continuous
+  process-wide memory scans.
+- The existing exact-profile recovery scan remains limited to one per 30-second
+  window and remains read-only.
+- Watchdog preserves the recovery result from every configured retry, so a
+  first `incomplete` scan is not hidden by a final `cooldown` response.
 
-## Regression covered
+## Stale-data severity and timestamps
 
-The automated test reproduces the reported ordering: an older “No connection”
-event, a newer successful Saxo connection, and more than ten still newer
-unrelated UIC warnings. The expected Broker result is Connected.
+- When a complete earlier snapshot exists, a failed current read starts as
+  Attention rather than immediately making the whole system Critical.
+- The new `[TrackerMonitor] stale_critical_after_minutes` setting defaults to
+  10 minutes and may be configured from 1 to 1440 minutes.
+- The state escalates to Critical when that interval expires. A Bridge outage,
+  wholly unreadable current Tracker snapshot with no last-good data,
+  AutoTrading failure, Broker failure, or actual critical Log Alert remains
+  immediately Critical.
+- Dashboard and Status Report now distinguish Last Tracker attempt from Last
+  complete snapshot.
+- The stale warning is amber during Attention and red after Critical escalation.
 
-## Retained corrections
+## Open Positions email layout
 
-- R20 Tracker snapshot self-recovery, retry, cooldown, and visible stale-data
-  warning remain included.
-- R19's mobile Status Report correction remains included: semantic Open
-  Positions table, 15-pixel monospaced text, text-size protection, and
-  horizontal scrolling.
-- R18 Open P/L total placement and complete green/red value styling remain
-  included.
+- The HTML table no longer uses `width:100%` or unsupported
+  `min-width:max-content` sizing.
+- It has an explicit 1100-pixel width, 15-pixel monospaced text, and non-wrapping
+  cells inside the existing horizontal-scroll container.
+- This prevents iOS Mail from shrinking the table to tiny text while retaining
+  desktop readability and horizontal panning on narrow screens.
 
-Normal production snapshots still have a V156 protocol minimum. R21's extended
-Broker history requires the included V173 Bridge. After replacing the DLL,
-MultiCharts must be restarted once so that V173 is loaded.
+R21's 200-row live Broker/log-alert history, R20 retry foundations, R18 Open P/L
+placement/colors, and the retained R16 Position CCY diagnostic remain included.
+R22 requires the V174 Bridge from this package. Restart MultiCharts once after
+replacing the DLL so V174 is loaded.

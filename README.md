@@ -1,21 +1,21 @@
 ﻿# MCST
 
-## Package: 1.114-R21 Extended Broker History
+## Package: 1.114-R22 Tracker Recovery and Readable Reports
 
-This source package fixes Broker state initialization when the latest relevant connection event has moved outside the ten rows displayed in Status Reports. Bridge V173 returns up to 200 rows in a separate monitoring-only history while preserving the normal ten-row Recent Logs section. BrokerMonitor and LogAlertEngine use the extended history; Dashboard and reports remain compact. R20 Tracker self-recovery, R19 mobile report layout, R18 Open P/L styling, and the R16 Position CCY diagnostic are retained.
+This source package fixes the long-lived CATPTTabView recovery state observed while the visible Order and Position Tracker was still open. Bridge V174 scopes recovery mode to one bounded exact-profile scan, re-enables normal discovery after failure, and caches positive and negative normal-scan results for 30 seconds to avoid repeated heavy scans. Watchdog keeps all retry outcomes, treats recent last-good Tracker data as Attention for a configurable 10-minute interval, and reports the real attempt/complete-snapshot timestamps. The HTML Open Positions table now retains an explicit readable width in iOS Mail. R21 extended Broker history and earlier corrections remain included.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R21**
+- MCST-Watchdog: **1.114-R22**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V173**
+- Tracker Bridge internal build: **V174**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. Internal build V173 adds the optional `monitoring_logs` payload section without changing Protocol V2; older parsers safely ignore it. The retained R16 `Position CCY` action requires V171 or newer, R20 self-recovery requires V172 or newer, and the R21 extended Broker history requires the V173 DLL included in this package.
+The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V173 added the optional `monitoring_logs` payload section, and V174 corrects non-sticky Tracker recovery without changing Protocol V2. The retained R16 `Position CCY` action requires V171 or newer. R22 behavior requires the V174 DLL included in this package.
 
 ## Runtime installation
 

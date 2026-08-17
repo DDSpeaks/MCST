@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R21'
-$currentBridgeBuild = 173
+$currentVersion = '1.114-R22'
+$currentBridgeBuild = 174
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -28,7 +28,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R21.txt',
+    'BUILD_VALIDATION_R22.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -110,6 +110,13 @@ foreach ($recoveryToken in @(
     'IsRecoverableTrackerSnapshotFailure',
     'lastGoodTrackerSnapshot',
     'trackerDataStale',
+    'trackerDataStaleCritical',
+    'trackerStaleCriticalAfterMinutes',
+    'lastTrackerAttempt',
+    'lastCompleteTrackerSnapshot',
+    'RecalculateOverallStatus',
+    'bridgeRecoveryAttempts',
+    'L"attempt " + std::to_wstring(attempt)',
     'MonitoringLogs(liveSnapshot)',
     'Bridge recovery:',
     'Snapshot attempts:'
@@ -122,6 +129,8 @@ foreach ($recoveryToken in @(
 $appConfigSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AppConfig.cpp') -Raw
 if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
     $appConfigSource -notmatch 'RefreshIniProfileCache' -or
+    $appConfigSource -notmatch 'TrackerMonitor' -or
+    $appConfigSource -notmatch 'stale_critical_after_minutes' -or
     $appConfigSource -notmatch 'WritePrivateProfileStringW\(nullptr, nullptr, nullptr, path\.c_str\(\)\)') {
     throw 'INI profile cache refresh support is missing from AppConfig.'
 }
@@ -142,8 +151,15 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'overflow-x:auto' -or
     $statusReportSource -notmatch '-webkit-text-size-adjust:100%' -or
     $statusReportSource -notmatch 'font-size:15px !important' -or
-    $statusReportSource -notmatch 'mcst-stale-tracker-warning' -or
-    $statusReportSource -notmatch 'WARNING: STALE TRACKER TABLE DATA' -or
+    $statusReportSource -notmatch 'mcst-stale-attention' -or
+    $statusReportSource -notmatch 'mcst-stale-critical' -or
+    $statusReportSource -notmatch 'ATTENTION: STALE TRACKER TABLE DATA' -or
+    $statusReportSource -notmatch 'CRITICAL: STALE TRACKER TABLE DATA' -or
+    $statusReportSource -notmatch [regex]::Escape('width=\"1100\"') -or
+    $statusReportSource -notmatch 'width:1100px;min-width:1100px;max-width:none' -or
+    $statusReportSource -notmatch 'white-space:nowrap' -or
+    $statusReportSource -notmatch 'Last Tracker attempt' -or
+    $statusReportSource -notmatch 'Last complete snapshot' -or
     $statusReportSource -notmatch '#15803D' -or
     $statusReportSource -notmatch '#B4232A' -or
     $statusReportSource -notmatch 'row\[7\] = source\.size\(\) > 6 \? source\[6\]' -or
@@ -175,8 +191,15 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'width=device-width,initial-scale=1\.0' -or
     $testsSource -notmatch 'overflow-x:auto' -or
     $testsSource -notmatch 'font-size:15px !important' -or
-    $testsSource -notmatch 'mcst-stale-tracker-warning' -or
-    $testsSource -notmatch 'WARNING: STALE TRACKER TABLE DATA' -or
+    $testsSource -notmatch 'mcst-stale-attention' -or
+    $testsSource -notmatch 'mcst-stale-critical' -or
+    $testsSource -notmatch 'ATTENTION: STALE TRACKER TABLE DATA' -or
+    $testsSource -notmatch 'CRITICAL: STALE TRACKER TABLE DATA' -or
+    $testsSource -notmatch [regex]::Escape('width=\"1100\"') -or
+    $testsSource -notmatch 'width:1100px;min-width:1100px;max-width:none' -or
+    $testsSource -notmatch 'white-space:nowrap' -or
+    $testsSource -notmatch 'Last Tracker attempt' -or
+    $testsSource -notmatch 'Last complete snapshot' -or
     $testsSource -notmatch 'EUR \+106,68' -or
     $testsSource -notmatch 'Connection to Saxo Group has been established' -or
     $testsSource -notmatch 'No connection to Saxo Group trading system' -or
@@ -207,9 +230,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,21,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,21,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R21.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,22,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,22,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R22.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -222,7 +245,13 @@ if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV173StatusReportSnapshotWithRecovery',
+    'BuildV174StatusReportSnapshotWithRecovery',
+    'TabViewRecoveryModeScope',
+    '~TabViewRecoveryModeScope',
+    'g_tabViewRecoveryModeActive.store(false)',
+    'g_candidateCacheValid',
+    'g_candidateCacheTick',
+    'kTabViewCandidateCacheTtlMs = 30000',
     'recovery_attempted',
     'recovery_result',
     'kTabViewRecoveryCooldownMs = 30000',
@@ -369,12 +398,12 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Extended Broker History" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Tracker Recovery and Readable Reports" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
-    $releaseNotes -notmatch 'monitoring_logs' -or
-    $releaseNotes -notmatch 'self-recovery' -or
-    $releaseNotes -notmatch 'mobile Status Report correction') {
-    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, extended monitoring history, and retained corrections."
+    $releaseNotes -notmatch 'non-sticky recovery' -or
+    $releaseNotes -notmatch 'stale_critical_after_minutes' -or
+    $releaseNotes -notmatch '1100-pixel width') {
+    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, recovery, stale-state, and readable-report corrections."
 }
 
-Write-Host "MCST $currentVersion extended Broker-history release validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion Tracker-recovery and readable-report release validation passed." -ForegroundColor Green

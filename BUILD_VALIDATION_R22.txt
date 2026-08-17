@@ -1,0 +1,32 @@
+MCST 1.114-R22 / Tracker Bridge V174 validation
+================================================
+
+Validated in the packaging environment:
+- recovery mode is released by scope after success or failure;
+- a failed exact-profile scan no longer leaves normal discovery deferred;
+- positive and empty normal candidate results have a 30-second cache lifetime;
+- exact-profile recovery retains its 30-second expensive-scan cooldown;
+- Watchdog preserves every retry recovery result in its final diagnostic;
+- recent stale Tracker data uses Attention before the configurable 10-minute
+  threshold and Critical after the threshold;
+- a wholly unreadable current snapshot with no last-good data remains
+  immediately Critical;
+- Last Tracker attempt and Last complete snapshot are reported separately;
+- stale Attention/ Critical warnings use distinct amber/red HTML presentation;
+- Open Positions uses an explicit 1100-pixel table width, 15-pixel text,
+  non-wrapping cells, and a horizontal-scroll wrapper;
+- R21 monitoring_logs Broker regression and R18 Open P/L tests remain included;
+- Bridge, Watchdog, resources, PowerLanguage host, and release-tool versions agree;
+- portable C++ regression tests and delimiter checks pass;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts CATPTTabView recovery;
+- visual iOS Mail rendering of a newly generated production email.
+
+The Windows operator must build Release|x64, install both the R22 Watchdog and
+V174 Bridge, restart MultiCharts once, and verify one normal snapshot. A forced
+or naturally occurring transient Tracker read failure should show Attention
+while recent last-good data is used, recover without restarting Watchdog, and
+escalate to Critical only if the configured interval expires.

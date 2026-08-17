@@ -1,5 +1,21 @@
 ﻿# Changelog
 
+## 1.114-R22
+
+- Scoped Bridge recovery mode to the active bounded exact-profile scan; a
+  failed scan no longer suppresses normal CATPTTabView discovery indefinitely.
+- Added a 30-second positive/negative candidate-cache lifetime so restored
+  normal discovery cannot become a repeated process-wide memory scan.
+- Preserved all Watchdog retry/recovery outcomes instead of reporting only the
+  final `cooldown` result.
+- Added a configurable 10-minute stale-data Attention interval before Tracker
+  monitoring escalates to Critical.
+- Separated Last Tracker attempt from Last complete snapshot in the Dashboard
+  and Status Report.
+- Gave the HTML Open Positions table an explicit 1100-pixel width, non-wrapping
+  cells, and horizontal scrolling so iOS Mail does not shrink its 15-pixel text.
+- Bumped Tracker Bridge internal build to V174; Protocol V2 is unchanged.
+
 ## 1.114-R21
 
 - Added an optional 200-row `monitoring_logs` Bridge section while retaining the

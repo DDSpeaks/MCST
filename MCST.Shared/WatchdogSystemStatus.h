@@ -54,7 +54,8 @@ namespace mcst
 
         std::chrono::system_clock::time_point lastSuccessfulUpdate{};
 
-        std::wstring lastSnapshot;
+        std::wstring lastTrackerAttempt;
+        std::wstring lastCompleteTrackerSnapshot;
         std::wstring lastAutoTradingRead;
         std::wstring lastReport;
         std::wstring lastAlert;
@@ -67,9 +68,12 @@ namespace mcst
         std::wstring trackerCompatibilityProfile;
 
         // When a current Tracker read fails, the dashboard/report may retain the
-        // last complete table snapshot for operational context. It must always be
-        // identified as stale; current health remains Critical.
+        // last complete table snapshot for operational context. It is Attention
+        // during the configured grace interval and Critical after that threshold.
         bool trackerDataStale = false;
+        bool trackerDataStaleCritical = false;
+        int trackerDataStaleAgeMinutes = 0;
+        int trackerDataStaleCriticalAfterMinutes = 10;
         std::wstring trackerDataTimestamp;
 
         unsigned long processId = 0;

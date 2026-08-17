@@ -82,7 +82,7 @@ int wmain()
 
     mcst::WatchdogSystemStatus status;
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 173;
+    snapshot.bridgeVersion = 174;
     snapshot.protocolVersion = 2;
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
@@ -134,6 +134,18 @@ int wmain()
         "Open Positions is not rendered as a real HTML table");
     RequireContains(
         reportHtml,
+        L"width=\"1100\"",
+        "Open Positions does not retain a readable fixed width in iOS Mail");
+    RequireContains(
+        reportHtml,
+        L"width:1100px;min-width:1100px;max-width:none",
+        "Open Positions can still be shrunk to the mobile viewport width");
+    RequireContains(
+        reportHtml,
+        L"white-space:nowrap;overflow-wrap:normal",
+        "Open Positions cells can still collapse or wrap unexpectedly");
+    RequireContains(
+        reportHtml,
         L"font-size:15px !important",
         "The Open Positions HTML table does not enforce the report font size");
     RequireContains(
@@ -143,16 +155,42 @@ int wmain()
 
     mcst::WatchdogSystemStatus staleStatus = status;
     staleStatus.trackerDataStale = true;
+    staleStatus.trackerDataStaleCritical = false;
+    staleStatus.trackerDataStaleAgeMinutes = 4;
+    staleStatus.trackerDataStaleCriticalAfterMinutes = 10;
     staleStatus.trackerDataTimestamp = L"2026-08-17 16:55";
+    staleStatus.lastTrackerAttempt = L"2026-08-17 16:59";
+    staleStatus.lastCompleteTrackerSnapshot = L"2026-08-17 16:55";
     const std::wstring staleReport = BuildStatusReport(staleStatus, snapshot);
     RequireContains(
         staleReport,
-        L"WARNING: STALE TRACKER TABLE DATA - one or more failed sections use the last complete snapshot from 2026-08-17 16:55",
-        "A retained last-good Tracker snapshot is not visibly marked stale");
+        L"ATTENTION: STALE TRACKER TABLE DATA - one or more failed sections use the last complete snapshot from 2026-08-17 16:55",
+        "A recent retained Tracker snapshot is not visibly marked Attention");
+    RequireContains(
+        staleReport,
+        L"Last Tracker attempt    2026-08-17 16:59",
+        "The report does not distinguish the last Tracker attempt");
+    RequireContains(
+        staleReport,
+        L"Last complete snapshot  2026-08-17 16:55",
+        "The report does not identify the last complete snapshot");
     RequireContains(
         BuildStatusReportHtml(staleReport),
-        L"class=\"mcst-stale-tracker-warning\"",
-        "The HTML report does not render the stale Tracker warning prominently");
+        L"mcst-stale-attention",
+        "The HTML report does not render a recent stale Tracker snapshot as Attention");
+
+    mcst::WatchdogSystemStatus criticalStaleStatus = staleStatus;
+    criticalStaleStatus.trackerDataStaleCritical = true;
+    criticalStaleStatus.trackerDataStaleAgeMinutes = 10;
+    const std::wstring criticalStaleReport = BuildStatusReport(criticalStaleStatus, snapshot);
+    RequireContains(
+        criticalStaleReport,
+        L"CRITICAL: STALE TRACKER TABLE DATA",
+        "A stale Tracker snapshot does not escalate at the configured threshold");
+    RequireContains(
+        BuildStatusReportHtml(criticalStaleReport),
+        L"mcst-stale-critical",
+        "The HTML report does not render an expired stale Tracker snapshot as Critical");
 
     const std::size_t openPositionsTableBegin =
         reportHtml.find(L"<table class=\"mcst-open-positions\"");

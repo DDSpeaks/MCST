@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 173;
+    constexpr int kBridgeVersion = 174;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -1165,9 +1165,12 @@ namespace
     std::string g_cachedCandidateScanDiagnostic;
     std::uintptr_t g_candidateCacheAtonpBase = 0;
     HWND g_candidateCacheTrackerWindow = nullptr;
+    bool g_candidateCacheValid = false;
+    ULONGLONG g_candidateCacheTick = 0;
     std::atomic<ULONGLONG> g_lastTabViewRecoveryTick{ 0 };
     std::atomic<bool> g_tabViewRecoveryModeActive{ false };
     constexpr ULONGLONG kTabViewRecoveryCooldownMs = 30000;
+    constexpr ULONGLONG kTabViewCandidateCacheTtlMs = 30000;
 
     void InvalidateTabViewCaches()
     {
@@ -1186,6 +1189,8 @@ namespace
         g_cachedCandidateScanDiagnostic.clear();
         g_candidateCacheAtonpBase = 0;
         g_candidateCacheTrackerWindow = nullptr;
+        g_candidateCacheValid = false;
+        g_candidateCacheTick = 0;
         ReleaseSRWLockExclusive(&g_candidateCacheLock);
     }
 
@@ -1204,6 +1209,17 @@ namespace
             }
         }
     }
+
+    struct TabViewRecoveryModeScope
+    {
+        ~TabViewRecoveryModeScope()
+        {
+            // Recovery mode describes only the currently executing bounded
+            // exact-profile scan. A failed scan must never suppress normal
+            // discovery on later Watchdog requests.
+            g_tabViewRecoveryModeActive.store(false);
+        }
+    };
 
     constexpr UINT kUiExtractorDispatchMessage = WM_APP + 0x4B3;
     constexpr DWORD kUiExtractorDispatchTimeoutMs = 15000;
@@ -2488,10 +2504,13 @@ DWORD sehCode = 0;
         std::string scanDiagnostic;
         std::vector<TabViewCandidate> candidates;
         bool candidateCacheHit = false;
+        const ULONGLONG candidateCacheNow = GetTickCount64();
         AcquireSRWLockShared(&g_candidateCacheLock);
-        if (g_candidateCacheAtonpBase == snapshot.atonpTrackerBase &&
+        if (g_candidateCacheValid &&
+            candidateCacheNow - g_candidateCacheTick < kTabViewCandidateCacheTtlMs &&
+            g_candidateCacheAtonpBase == snapshot.atonpTrackerBase &&
             g_candidateCacheTrackerWindow == snapshot.trackerWindow &&
-            !g_cachedCandidates.empty())
+            snapshot.trackerWindow != nullptr)
         {
             candidates = g_cachedCandidates;
             scanDiagnostic = g_cachedCandidateScanDiagnostic;
@@ -2506,6 +2525,8 @@ DWORD sehCode = 0;
             g_cachedCandidateScanDiagnostic = scanDiagnostic;
             g_candidateCacheAtonpBase = snapshot.atonpTrackerBase;
             g_candidateCacheTrackerWindow = snapshot.trackerWindow;
+            g_candidateCacheValid = true;
+            g_candidateCacheTick = GetTickCount64();
             ReleaseSRWLockExclusive(&g_candidateCacheLock);
             WriteCatptCandidateReport(snapshot, vtables, candidates, rttiDiagnostic, scanDiagnostic);
         }
@@ -12688,7 +12709,7 @@ DWORD sehCode = 0;
         return pagesOk > 0 && totalSeh == 0;
     }
 
-    void AppendV173RecoveryMetadata(
+    void AppendV174RecoveryMetadata(
         std::string& payload,
         bool attempted,
         bool tabViewFound,
@@ -12709,7 +12730,7 @@ DWORD sehCode = 0;
         payload.insert(markerEnd + 1, metadata.str());
     }
 
-    bool BuildV173StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    bool BuildV174StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
     {
         bool tabViewFound = false;
         bool compatibilityMatched = false;
@@ -12736,7 +12757,7 @@ DWORD sehCode = 0;
         {
             if (pagesRead == 3 && sehFailures == 0)
                 g_tabViewRecoveryModeActive.store(false);
-            AppendV173RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            AppendV174RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
             return initialBuilt;
         }
 
@@ -12745,10 +12766,12 @@ DWORD sehCode = 0;
         // allowed per 30-second window and ordinary snapshot reads continue.
         if (!TryBeginTabViewRecovery())
         {
-            AppendV173RecoveryMetadata(
+            AppendV174RecoveryMetadata(
                 payload, false, tabViewFound, pagesRead, sehFailures, "cooldown");
             return initialBuilt;
         }
+
+        TabViewRecoveryModeScope recoveryModeScope;
 
         // Release of V153GridReadLockGuard is guaranteed before this bounded pause
         // and the second pass. The retry only refreshes Bridge-local discovery and
@@ -12767,10 +12790,8 @@ DWORD sehCode = 0;
             freshCompatibilityMatched,
             freshPagesRead,
             freshSehFailures);
-        AppendV173RecoveryMetadata(
+        AppendV174RecoveryMetadata(
             payload, true, freshTabViewFound, freshPagesRead, freshSehFailures);
-        if (freshPagesRead == 3 && freshSehFailures == 0)
-            g_tabViewRecoveryModeActive.store(false);
         return recovered && freshCompatibilityMatched;
     }
 
@@ -12983,7 +13004,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV173StatusReportSnapshotWithRecovery(snapshot, responsePayload);
+            const bool built = BuildV174StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 
