@@ -1,42 +1,45 @@
-# MCST 1.114-R20 Tracker Snapshot Self-Recovery
+# MCST 1.114-R21 Extended Broker History
 
-Tracker Bridge internal build: V172  
+Tracker Bridge internal build: V173  
 Bridge protocol: V2
 
-R20 addresses a long-lived state in which Bridge, AutoTrading, and Broker were
-healthy but Tracker Snapshot and Recent Logs stayed Critical until Watchdog was
-restarted. R19's mobile Status Report correction is included in full.
+R21 fixes a Broker status error observed after Watchdog was started later than
+the Order and Position Tracker. The Tracker's newest successful Saxo connection
+event could already be below Watchdog's ten displayed log rows. Watchdog then
+reported Broker as UNKNOWN even though the Tracker showed a newer successful
+connection after an older disconnect event.
 
-## R20 changes
+## R21 changes
 
-- Bridge V172 clears only its own CATPTTabView discovery caches when an
-  authorized production snapshot is incomplete, captures current process/window
-  state again, and performs one bounded fresh read-only scan.
-- Expensive fresh scans have a 30-second Bridge-side cooldown; normal lightweight
-  snapshot requests and Watchdog retries continue during that interval.
-- Watchdog retries parsed-but-incomplete Tracker responses; previously such a
-  response ended the retry loop even when all table sections had failed.
-- The retry is restricted to a same-process Tracker with a matched compatibility
-  profile. An unknown build remains blocked and is not scanned repeatedly.
-- Watchdog stores the last complete Tracker snapshot in memory. If the current
-  read fails, those tables remain available for context but are explicitly marked
-  **STALE** with their timestamp while the current health stays **CRITICAL**.
-- Stale Recent Logs are display-only. BrokerMonitor and LogAlertEngine continue
-  to evaluate only the current live read result.
-- A later complete snapshot automatically clears the stale state and records a
-  recovery activity; a Watchdog restart should not normally be necessary.
-- The Bridge recovery path does not write MultiCharts memory, manipulate Tracker
-  windows, generate input, or invoke unknown functions.
+- Bridge V173 reads the Logs grid once, bounded to 200 rows.
+- The existing `recent_logs` section remains capped at ten rows for the
+  Dashboard and Status Report.
+- A new optional `monitoring_logs` section carries the same live capture up to
+  200 rows for BrokerMonitor and LogAlertEngine.
+- Broker events are still processed oldest to newest, so the latest relevant
+  connection or disconnection event wins. Unrelated newer warnings do not erase
+  the last confirmed state.
+- Monitoring uses only the current live snapshot. R20's retained stale snapshot
+  remains display-only and cannot create false Broker or log-alert decisions.
+- Protocol V2 and the existing command set are unchanged; older readers ignore
+  the optional section.
 
-## Included report appearance correction
+## Regression covered
 
-- Open Positions remains a semantic HTML table with the same explicit 15-pixel
-  monospaced font as the rest of the report.
-- Mobile viewport and text-size-adjust protections remain enabled.
-- The wide table remains inside a horizontal-scroll container.
-- R18's Open P/L total placement and complete green/red profit styling remain.
-- Stale table data receives a prominent red warning in HTML reports.
+The automated test reproduces the reported ordering: an older “No connection”
+event, a newer successful Saxo connection, and more than ten still newer
+unrelated UIC warnings. The expected Broker result is Connected.
 
-The retained R16 Position CCY diagnostic requires Bridge V171 or newer. Normal
-production snapshots still have a V156 protocol minimum, while this R20
-self-recovery behavior requires the included V172 Bridge.
+## Retained corrections
+
+- R20 Tracker snapshot self-recovery, retry, cooldown, and visible stale-data
+  warning remain included.
+- R19's mobile Status Report correction remains included: semantic Open
+  Positions table, 15-pixel monospaced text, text-size protection, and
+  horizontal scrolling.
+- R18 Open P/L total placement and complete green/red value styling remain
+  included.
+
+Normal production snapshots still have a V156 protocol minimum. R21's extended
+Broker history requires the included V173 Bridge. After replacing the DLL,
+MultiCharts must be restarted once so that V173 is loaded.

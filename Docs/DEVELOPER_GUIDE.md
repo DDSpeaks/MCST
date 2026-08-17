@@ -1,9 +1,13 @@
 ﻿# MCST Developer Guide
 
 
-## Tracker snapshot recovery build
+## Extended Broker history build
 
-MCST-Watchdog 1.114-R20 retries Tracker responses whose protocol payload parsed correctly but whose authorized table sections are incomplete. Bridge V172 performs one bounded recovery pass by clearing only its own CATPTTabView discovery caches, taking a fresh read-only snapshot, and rescanning. It does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
+MCST-Watchdog 1.114-R21 separates the ten Recent Logs rows shown to users from a bounded 200-row monitoring history. Bridge V173 reads the grid once, derives both payload sections, and leaves Protocol V2 unchanged. BrokerMonitor and LogAlertEngine use only the current live monitoring history; reports continue to show ten rows.
+
+The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
+
+R20's bounded recovery remains unchanged. Bridge clears only its own CATPTTabView discovery caches, takes a fresh read-only snapshot, and rescans. It does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Current Tracker health remains Critical and the Dashboard/status report identify the retained tables as STALE with their timestamp. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
@@ -38,11 +42,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V172
+Internal build:  V173
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility-profile consumption and fingerprint metadata. V157 introduced the Position Currency research command. V171 added R16 targeted position-interface verification. V172 preserves Protocol V2 and adds bounded Bridge-local cache refresh for incomplete production snapshots.
+V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, and V173 adds extended monitoring history without changing Protocol V2.
 
 ### MCST.TrackerBridge
 

@@ -44,6 +44,9 @@ struct TrackerStatusSnapshot
     TrackerBridgeSection accounts;
     TrackerBridgeSection openPositions;
     TrackerBridgeSection recentLogs;
+    // Optional R21 extended history used by state/alert engines. The normal
+    // Recent Logs section remains limited to ten display rows.
+    TrackerBridgeSection monitoringLogs;
     std::size_t pagesOk = 0;
     std::size_t pagesFailed = 0;
     std::size_t sehFailures = 0;
@@ -52,7 +55,8 @@ struct TrackerStatusSnapshot
 
 // Requests one production snapshot from MCTrackerBridge V156 or newer.
 // The Bridge response contains Accounts, Open Positions and at most ten newest
-// Logs rows. A parsed partial response is returned even when one section failed.
+// display Logs rows. V173 or newer also supplies an optional bounded monitoring
+// history. A parsed partial response is returned even when one section failed.
 bool ReadTrackerStatusSnapshot(
     TrackerStatusSnapshot& snapshot,
     std::wstring& diagnostic,

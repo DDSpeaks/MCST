@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 172;
+    constexpr int kBridgeVersion = 173;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -12637,15 +12637,22 @@ DWORD sehCode = 0;
         V153GridSectionResult positions = ReadV153GridSection(
             snapshot, flexGridRttiVtables, tabView, trackerProfile, "open_positions",
             trackerProfile.openPositionsPageOffset, 1, 8, 1000, 1000, 3);
-        V153GridSectionResult logs = ReadV153GridSection(
+        V153GridSectionResult monitoringLogs = ReadV153GridSection(
             snapshot, flexGridRttiVtables, tabView, trackerProfile, "recent_logs",
-            trackerProfile.logsPageOffset, 1, 6, 200, 10, 3);
+            trackerProfile.logsPageOffset, 1, 6, 200, 200, 3);
+        V153GridSectionResult logs = monitoringLogs;
+        logs.name = "recent_logs";
+        if (logs.rows.size() > 10)
+            logs.rows.resize(10);
+        monitoringLogs.name = "monitoring_logs";
+        logs.diagnostic += L"; display_rows=" + std::to_wstring(logs.rows.size()) +
+            L"; monitoring_rows=" + std::to_wstring(monitoringLogs.rows.size());
 
         const std::size_t pagesOk =
             static_cast<std::size_t>(accounts.ok) +
             static_cast<std::size_t>(positions.ok) +
-            static_cast<std::size_t>(logs.ok);
-        const std::size_t totalSeh = accounts.sehFailures + positions.sehFailures + logs.sehFailures;
+            static_cast<std::size_t>(monitoringLogs.ok);
+        const std::size_t totalSeh = accounts.sehFailures + positions.sehFailures + monitoringLogs.sehFailures;
         pagesRead = pagesOk;
         sehFailures = totalSeh;
 
@@ -12672,6 +12679,7 @@ DWORD sehCode = 0;
         AppendV153Section(out, accounts, 12);
         AppendV153Section(out, positions, 8);
         AppendV153Section(out, logs, 6);
+        AppendV153Section(out, monitoringLogs, 6);
         out << "SUMMARY\tpages_ok\t" << pagesOk
             << "\tpages_failed\t" << (3 - pagesOk)
             << "\tseh_failures\t" << totalSeh << "\n";
@@ -12680,7 +12688,7 @@ DWORD sehCode = 0;
         return pagesOk > 0 && totalSeh == 0;
     }
 
-    void AppendV172RecoveryMetadata(
+    void AppendV173RecoveryMetadata(
         std::string& payload,
         bool attempted,
         bool tabViewFound,
@@ -12701,7 +12709,7 @@ DWORD sehCode = 0;
         payload.insert(markerEnd + 1, metadata.str());
     }
 
-    bool BuildV172StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    bool BuildV173StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
     {
         bool tabViewFound = false;
         bool compatibilityMatched = false;
@@ -12728,7 +12736,7 @@ DWORD sehCode = 0;
         {
             if (pagesRead == 3 && sehFailures == 0)
                 g_tabViewRecoveryModeActive.store(false);
-            AppendV172RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            AppendV173RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
             return initialBuilt;
         }
 
@@ -12737,7 +12745,7 @@ DWORD sehCode = 0;
         // allowed per 30-second window and ordinary snapshot reads continue.
         if (!TryBeginTabViewRecovery())
         {
-            AppendV172RecoveryMetadata(
+            AppendV173RecoveryMetadata(
                 payload, false, tabViewFound, pagesRead, sehFailures, "cooldown");
             return initialBuilt;
         }
@@ -12759,7 +12767,7 @@ DWORD sehCode = 0;
             freshCompatibilityMatched,
             freshPagesRead,
             freshSehFailures);
-        AppendV172RecoveryMetadata(
+        AppendV173RecoveryMetadata(
             payload, true, freshTabViewFound, freshPagesRead, freshSehFailures);
         if (freshPagesRead == 3 && freshSehFailures == 0)
             g_tabViewRecoveryModeActive.store(false);
@@ -12975,7 +12983,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV172StatusReportSnapshotWithRecovery(snapshot, responsePayload);
+            const bool built = BuildV173StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 

@@ -192,7 +192,7 @@ bool BrokerMonitor::IsNewEvent(const std::wstring& eventText)
 }
 
 BrokerMonitorDecision BrokerMonitor::Evaluate(
-    const TrackerBridgeSection& recentLogs,
+    const TrackerBridgeSection& monitoringLogs,
     const BrokerAuthenticationDetection& authentication,
     const AppConfig& config,
     std::chrono::system_clock::time_point now)
@@ -206,12 +206,12 @@ BrokerMonitorDecision BrokerMonitor::Evaluate(
     }
 
     // A current broker authentication page is stronger evidence than historical
-    // Recent Logs. While it is visible, no old "connection established" line is
+    // monitoring history. While it is visible, no old "connection established" line is
     // allowed to make the Broker row green.
     if (authentication.detected)
     {
         const bool newAuthenticationEpisode =
-            state_ != State::AuthenticationGrace && state_ != State::AuthenticationRequired
+            (state_ != State::AuthenticationGrace && state_ != State::AuthenticationRequired)
             || authenticationProfile_ != authentication.profileName;
 
         if (newAuthenticationEpisode)
@@ -227,7 +227,8 @@ BrokerMonitorDecision BrokerMonitor::Evaluate(
 
         const auto elapsed = authenticationDetectedAt_.time_since_epoch().count() == 0
             ? 0LL
-            : (std::max)(0LL, std::chrono::duration_cast<std::chrono::seconds>(now - authenticationDetectedAt_).count());
+            : (std::max)(0LL, static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::seconds>(now - authenticationDetectedAt_).count()));
         const int threshold = (std::max)(3, authentication.alertAfterSeconds);
 
         if (elapsed >= threshold)
@@ -279,11 +280,11 @@ BrokerMonitorDecision BrokerMonitor::Evaluate(
         decision.eventText = L"Broker authentication page disappeared before the alert threshold";
     }
 
-    if (recentLogs.ok)
+    if (monitoringLogs.ok)
     {
         // The Bridge returns newest rows first. Processing them oldest-to-newest
         // ensures that a later recovery event supersedes an earlier disconnect.
-        for (auto it = recentLogs.rows.rbegin(); it != recentLogs.rows.rend(); ++it)
+        for (auto it = monitoringLogs.rows.rbegin(); it != monitoringLogs.rows.rend(); ++it)
         {
             const std::wstring original = FlattenRow(*it);
             if (!IsNewEvent(original))
@@ -381,7 +382,8 @@ BrokerMonitorDecision BrokerMonitor::Evaluate(
     {
         const auto elapsed = disconnectDetectedAt_.time_since_epoch().count() == 0
             ? 0LL
-            : (std::max)(0LL, std::chrono::duration_cast<std::chrono::seconds>(now - disconnectDetectedAt_).count());
+            : (std::max)(0LL, static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::seconds>(now - disconnectDetectedAt_).count()));
         const auto remaining = (std::max)(0LL, static_cast<long long>(config.brokerDisconnectGraceSeconds) - elapsed);
         decision.status = { mcst::HealthState::Attention, L"Reconnecting", L"Alert delayed for " + std::to_wstring(remaining) + L" s" };
         break;

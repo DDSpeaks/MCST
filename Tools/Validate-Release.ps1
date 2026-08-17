@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R20'
-$currentBridgeBuild = 172
+$currentVersion = '1.114-R21'
+$currentBridgeBuild = 173
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -28,7 +28,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R20.txt',
+    'BUILD_VALIDATION_R21.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -110,7 +110,7 @@ foreach ($recoveryToken in @(
     'IsRecoverableTrackerSnapshotFailure',
     'lastGoodTrackerSnapshot',
     'trackerDataStale',
-    'liveSnapshot.recentLogs',
+    'MonitoringLogs(liveSnapshot)',
     'Bridge recovery:',
     'Snapshot attempts:'
 )) {
@@ -162,6 +162,7 @@ if ($statusReportSource -match 'NATIVE VALUE TOTAL') {
 $testsSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
 $testsProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\MCST.Tests.vcxproj') -Raw
 if ($testsProject -notmatch 'StatusReport\.cpp' -or
+    $testsProject -notmatch 'BrokerMonitor\.cpp' -or
     $testsSource -notmatch 'EUR \+8,25' -or
     $testsSource -notmatch 'Total Open P/L' -or
     $testsSource -notmatch 'OPEN P/L ROWS NOT TOTALLED: 2' -or
@@ -176,7 +177,11 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'font-size:15px !important' -or
     $testsSource -notmatch 'mcst-stale-tracker-warning' -or
     $testsSource -notmatch 'WARNING: STALE TRACKER TABLE DATA' -or
-    $testsSource -notmatch 'EUR \+106,68') {
+    $testsSource -notmatch 'EUR \+106,68' -or
+    $testsSource -notmatch 'Connection to Saxo Group has been established' -or
+    $testsSource -notmatch 'No connection to Saxo Group trading system' -or
+    $testsSource -notmatch 'UIC is not valid' -or
+    $testsSource -notmatch 'brokerDecision\.status\.value != L"Connected"') {
     throw 'Responsive Open Positions placement, size, or color regression test is missing.'
 }
 
@@ -202,9 +207,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,20,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,20,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R20.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,21,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,21,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R21.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -217,7 +222,7 @@ if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV172StatusReportSnapshotWithRecovery',
+    'BuildV173StatusReportSnapshotWithRecovery',
     'recovery_attempted',
     'recovery_result',
     'kTabViewRecoveryCooldownMs = 30000',
@@ -227,6 +232,23 @@ foreach ($recoveryToken in @(
     if ($bridgeSource -notmatch [regex]::Escape($recoveryToken)) {
         throw "Tracker Bridge recovery token is missing: $recoveryToken"
     }
+}
+foreach ($historyToken in @(
+    'V153GridSectionResult monitoringLogs',
+    'logs.rows.resize(10)',
+    'monitoringLogs.name = "monitoring_logs"',
+    'L"; display_rows=" + std::to_wstring(logs.rows.size())',
+    'L"; monitoring_rows=" + std::to_wstring(monitoringLogs.rows.size())',
+    'AppendV153Section(out, monitoringLogs, 6)',
+    '200, 200, 3'
+)) {
+    if ($bridgeSource -notmatch [regex]::Escape($historyToken)) {
+        throw "Tracker Bridge extended monitoring-history token is missing: $historyToken"
+    }
+}
+if ($bridgeSource -match 'logs\.diagnostic \+= "; display_rows="' -or
+    $bridgeSource -match 'std::to_string\(monitoringLogs\.rows\.size\(\)\)') {
+    throw 'Tracker Bridge monitoring diagnostics mix narrow strings with std::wstring.'
 }
 if ($bridgeSource -notmatch 'bool WritePositionCurrencyDirectResearch\(' -or
     $bridgeSource -notmatch 'R16VerifyPositionInterfaceFingerprint' -or
@@ -299,6 +321,10 @@ if ($readerSource -notmatch 'recovery_attempted' -or
     $readerSource -notmatch 'recovery_result') {
     throw 'Tracker Bridge recovery metadata parsing is missing.'
 }
+if ($readerSource -notmatch 'name == "monitoring_logs"' -or
+    $readerSource -notmatch 'snapshot\.monitoringLogs') {
+    throw 'Optional monitoring_logs parsing or validation is missing.'
+}
 
 $protocolHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
 if ($protocolHeader -notmatch "kProtocolVersion = $currentProtocolVersion") {
@@ -343,10 +369,12 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Tracker Snapshot Self-Recovery" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Extended Broker History" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
+    $releaseNotes -notmatch 'monitoring_logs' -or
+    $releaseNotes -notmatch 'self-recovery' -or
     $releaseNotes -notmatch 'mobile Status Report correction') {
-    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, and the retained mobile report correction."
+    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, extended monitoring history, and retained corrections."
 }
 
-Write-Host "MCST $currentVersion Tracker self-recovery release validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion extended Broker-history release validation passed." -ForegroundColor Green

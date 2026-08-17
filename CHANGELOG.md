@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## 1.114-R21
+
+- Added an optional 200-row `monitoring_logs` Bridge section while retaining the
+  existing ten-row Recent Logs display section.
+- Changed BrokerMonitor and LogAlertEngine to consume the extended live history.
+- Added a regression test matching the observed Saxo sequence: an older
+  disconnection, a newer successful connection, and more than ten later
+  unrelated UIC warnings must result in Broker `Connected`.
+- Bumped Tracker Bridge internal build to V173; Protocol V2 is unchanged.
+- Retained R20 self-recovery and stale-data labeling plus the complete R19 report
+  appearance correction.
+
 ## 1.114-R20
 
 - Added one bounded Bridge-local cache refresh and fresh scan for incomplete,

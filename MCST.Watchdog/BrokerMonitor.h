@@ -23,7 +23,7 @@ class BrokerMonitor
 {
 public:
     BrokerMonitorDecision Evaluate(
-        const TrackerBridgeSection& recentLogs,
+        const TrackerBridgeSection& monitoringLogs,
         const BrokerAuthenticationDetection& authentication,
         const AppConfig& config,
         std::chrono::system_clock::time_point now);
@@ -33,7 +33,7 @@ public:
     /**
      * @brief Restores a recent last-known CONNECTED state after a Watchdog restart.
      *
-     * Current browser authentication and new Recent Logs always override this
+     * Current browser authentication and new live monitoring Logs always override this
      * cached historical state. Stale cache entries are ignored.
      */
     void LoadConnectedStateCache(

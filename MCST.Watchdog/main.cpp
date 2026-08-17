@@ -590,6 +590,16 @@ namespace
             !IsCompleteTrackerSnapshot(snapshot);
     }
 
+    const TrackerBridgeSection& MonitoringLogs(const TrackerStatusSnapshot& snapshot)
+    {
+        // Bridge V173 supplies up to 200 rows for state engines while the
+        // report-facing Recent Logs section remains at ten rows. Retain a safe
+        // fallback for older compatible Bridge builds.
+        return snapshot.monitoringLogs.present && snapshot.monitoringLogs.ok
+            ? snapshot.monitoringLogs
+            : snapshot.recentLogs;
+    }
+
     void AddActivity(mcst::WatchdogSystemStatus& status, mcst::HealthState state, const std::wstring& text)
     {
         status.activity.insert(status.activity.begin(), { std::chrono::system_clock::now(), state, text });
@@ -1234,7 +1244,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R20", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R21", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1514,7 +1524,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R20", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R21", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1634,7 +1644,7 @@ namespace
                         std::to_wstring(kPositionCurrencyResearchBridgeVersion) +
                         L" or newer. The currently loaded Bridge is V" +
                         std::to_wstring(referenceSnapshot.bridgeVersion) +
-                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V172 build from this package and restart MultiCharts.";
+                        L". Replace C:\\MCExtras\\MCST-TrackerBridge.dll with the V173 build from this package and restart MultiCharts.";
                 }
                 else if (!referenceSnapshot.openPositions.present || !referenceSnapshot.openPositions.ok)
                 {
@@ -1784,7 +1794,7 @@ namespace
                 g_app.status.lastAlert = g_app.lastAlert;
 
                 const BrokerMonitorDecision brokerDecision = g_app.brokerMonitor.Evaluate(
-                    liveSnapshot.recentLogs, result->brokerAuthentication, g_app.config, monitorNow);
+                    MonitoringLogs(liveSnapshot), result->brokerAuthentication, g_app.config, monitorNow);
                 g_app.status.broker = brokerDecision.status;
                 g_app.status.overall = Worst(g_app.status.overall, g_app.status.broker.state);
                 if (brokerDecision.stateChanged)
@@ -1808,7 +1818,7 @@ namespace
                 }
 
                 const LogAlertEngine::Decision logAlertDecision = g_app.logAlertEngine.Evaluate(
-                    liveSnapshot.recentLogs, g_app.config, monitorNow);
+                    MonitoringLogs(liveSnapshot), g_app.config, monitorNow);
                 if (logAlertDecision.eventCount > 0)
                 {
                     g_app.status.recentLogs.state = Worst(g_app.status.recentLogs.state, logAlertDecision.state);
@@ -1980,7 +1990,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R20 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R21 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2050,7 +2060,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R20 - Tracker Self-Recovery",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R21 - Extended Broker History",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

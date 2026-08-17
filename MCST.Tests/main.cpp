@@ -4,6 +4,7 @@
 #include <type_traits>
 #include "../MCST.Shared/MCBridgeProtocol.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
+#include "../MCST.Watchdog/BrokerMonitor.h"
 #include "../MCST.Watchdog/StatusReport.h"
 
 namespace
@@ -81,7 +82,7 @@ int wmain()
 
     mcst::WatchdogSystemStatus status;
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 172;
+    snapshot.bridgeVersion = 173;
     snapshot.protocolVersion = 2;
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
@@ -215,6 +216,49 @@ int wmain()
     }
     if (currentCaptureReport.find(L"OPEN P/L ROWS NOT TOTALLED") != std::wstring::npos)
         throw std::runtime_error("Current Saxo capture unexpectedly excluded an Open P/L row");
+
+    // Exact regression from the R20 screenshot: rows are newest first. More
+    // than ten unrelated warnings follow a successful Saxo connection, while
+    // the older event says that no connection existed. The newest broker-state
+    // evidence must win even though it is outside the ten-row display window.
+    TrackerBridgeSection monitoringHistory;
+    monitoringHistory.present = true;
+    monitoringHistory.ok = true;
+    monitoringHistory.expectedColumns = 6;
+    for (int index = 0; index < 20; ++index)
+    {
+        monitoringHistory.rows.push_back({
+            L"17/08/2026 17:" + std::to_wstring(39 - index) + L".00",
+            L"Warning", L"", L"Saxo Group live", L"-",
+            L"REAL-TIME CHART REQUEST - UIC is not valid"
+        });
+    }
+    monitoringHistory.rows.push_back({
+        L"17/08/2026 16.20.37", L"Information", L"", L"Saxo Group live", L"-",
+        L"Connection to Saxo Group has been established. [ AccountType : Live ]"
+    });
+    monitoringHistory.rows.push_back({
+        L"17/08/2026 16.20.03", L"Warning", L"", L"Saxo Group live", L"-",
+        L"No connection to Saxo Group trading system"
+    });
+    monitoringHistory.declaredRows = monitoringHistory.rows.size();
+
+    AppConfig brokerConfig;
+    brokerConfig.brokerMonitoringEnabled = true;
+    brokerConfig.brokerConnectedPatterns = { L"connection established" };
+    brokerConfig.brokerDisconnectPatterns = { L"no connection to saxo group trading system" };
+    BrokerAuthenticationDetection noAuthentication;
+    BrokerMonitor brokerMonitor;
+    const BrokerMonitorDecision brokerDecision = brokerMonitor.Evaluate(
+        monitoringHistory,
+        noAuthentication,
+        brokerConfig,
+        std::chrono::system_clock::now());
+    if (brokerDecision.status.state != mcst::HealthState::Healthy ||
+        brokerDecision.status.value != L"Connected")
+    {
+        throw std::runtime_error("The newest broker-state event outside the ten-row display window did not win");
+    }
 
     std::wcout << L"MCST foundation smoke tests passed.\n";
     return 0;

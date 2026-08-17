@@ -1,0 +1,30 @@
+MCST 1.114-R21 / Tracker Bridge V173 validation
+================================================
+
+Validated in the packaging environment:
+- Bridge reads the Logs grid once with a bounded maximum of 200 rows;
+- Bridge display/monitoring diagnostics use std::wstring-compatible literals
+  and std::to_wstring, preventing the Visual C++ C2679 build failure;
+- Recent Logs displayed on the Dashboard and in reports remain capped at 10;
+- optional monitoring_logs carries the live history used by BrokerMonitor and
+  LogAlertEngine, with fallback to recent_logs for an older Bridge;
+- the reported event sequence (older disconnect, newer successful connection,
+  and more than 10 still newer unrelated UIC warnings) resolves to Connected;
+- Broker events are processed oldest to newest so the latest relevant evidence wins;
+- stale retained logs are not used for Broker or log-alert state decisions;
+- R20 bounded Tracker recovery, retry, cooldown, and stale-data warning remain;
+- the R19 mobile report correction and R18 Open P/L placement/colors remain;
+- Bridge, Watchdog, resource, PowerLanguage, and release-tool versions agree;
+- release static validation and C++ regression tests pass;
+- delimiter balance checks pass for the modified C++ translation units;
+- package ZIP integrity passes.
+
+Not executed in this Linux packaging environment:
+- Visual Studio Release|x64 compilation;
+- live MultiCharts Tracker and Broker-state verification.
+
+The Windows operator must build Release|x64, install both the R21 Watchdog and
+V173 Bridge, and restart MultiCharts once so the DLL is loaded. Verify that the
+Dashboard still shows at most 10 Recent Logs and that Broker becomes Connected
+when the newest relevant event within the extended live history is a successful
+Saxo connection.

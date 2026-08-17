@@ -93,6 +93,8 @@ The HTML Open Positions section uses the same 15-pixel monospaced font as the re
 
 If a current Tracker table read fails after the bounded automatic retries, the system remains **CRITICAL**. When a complete earlier snapshot exists, its Accounts, Open Positions, and Recent Logs may remain visible for context, but the Dashboard detail and Status Report show a prominent **STALE** warning and the last-good timestamp. These retained Recent Logs are display-only and do not generate new broker or log alerts. A later successful refresh automatically replaces the stale tables; restarting Watchdog should not normally be required.
 
+Broker monitoring uses up to 200 current live Logs rows even though the Dashboard and Status Report show only the ten newest rows. This lets Watchdog find the newest Broker-specific connection state after startup even when later unrelated warnings have pushed that event outside the visible ten-row report window.
+
 Heartbeat messages are routine proof-of-life messages and use the report recipient rather than the alert recipient.
 
 ## MultiCharts version and compatibility
