@@ -16,6 +16,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="../MCST.Watchdog/StatusReport.cpp" />
+    <ClCompile Include="../MCST.Watchdog/TrackerDateParser.cpp" />
     <ClCompile Include="../MCST.Watchdog/BrokerMonitor.cpp" />
   </ItemGroup>
   <ItemGroup>

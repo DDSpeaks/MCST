@@ -19,6 +19,7 @@
     <ClCompile Include="AutoTradingReader.cpp" />
     <ClCompile Include="CompatibilityManager.cpp" />
     <ClCompile Include="StatusReport.cpp" />
+    <ClCompile Include="TrackerDateParser.cpp" />
     <ClCompile Include="Email.cpp" />
     <ClCompile Include="AlertService.cpp" />
     <ClCompile Include="ScheduleService.cpp" />
@@ -33,6 +34,7 @@
     <ClInclude Include="AutoTradingReader.h" />
     <ClInclude Include="CompatibilityManager.h" />
     <ClInclude Include="StatusReport.h" />
+    <ClInclude Include="TrackerDateParser.h" />
     <ClInclude Include="Email.h" />
     <ClInclude Include="AlertService.h" />
     <ClInclude Include="ScheduleService.h" />

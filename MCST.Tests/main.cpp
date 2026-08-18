@@ -1,4 +1,7 @@
 #include <iostream>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -6,6 +9,7 @@
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 #include "../MCST.Watchdog/BrokerMonitor.h"
 #include "../MCST.Watchdog/StatusReport.h"
+#include "../MCST.Watchdog/TrackerDateParser.h"
 
 namespace
 {
@@ -73,6 +77,21 @@ namespace
         }
         return count;
     }
+
+    void RequireDate(
+        const std::wstring& text,
+        TrackerDateOrder order,
+        int year,
+        int month,
+        int day)
+    {
+        TrackerCalendarDate parsed;
+        if (!TryParseTrackerCalendarDate(text, order, parsed) ||
+            parsed.year != year || parsed.month != month || parsed.day != day)
+        {
+            throw std::runtime_error("Localized Tracker date was not parsed as expected");
+        }
+    }
 }
 
 int wmain()
@@ -82,7 +101,7 @@ int wmain()
 
     mcst::WatchdogSystemStatus status;
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 174;
+    snapshot.bridgeVersion = 175;
     snapshot.protocolVersion = 2;
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
@@ -137,6 +156,22 @@ int wmain()
         reportHtml,
         L"class=\"mcst-open-positions-lines\"",
         "The one-line Open Positions preformatted section is missing");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-overall-status-lines\"",
+        "Overall Status is not rendered in a protected one-line flow");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-system-status-lines\"",
+        "System Status is not rendered in a protected one-line flow");
+    RequireContains(
+        reportHtml,
+        L"display:inline-block;width:4ch;text-align:center",
+        "Status dots do not preserve the fixed character column");
+    RequireNotContains(
+        reportHtml,
+        L"<table role=\"presentation\"",
+        "Status sections still use an independently shrinkable semantic table");
     RequireContains(
         reportHtml,
         L"font-size:15px !important;line-height:1.28 !important;white-space:pre",
@@ -258,6 +293,93 @@ int wmain()
     }
     if (currentCaptureReport.find(L"OPEN P/L ROWS NOT TOTALLED") != std::wstring::npos)
         throw std::runtime_error("Current Saxo capture unexpectedly excluded an Open P/L row");
+
+    RequireDate(L"18/08/2026 18.00.38", TrackerDateOrder::DayMonthYear, 2026, 8, 18);
+    RequireDate(L"08/18/2026 6:00:38 PM", TrackerDateOrder::MonthDayYear, 2026, 8, 18);
+    RequireDate(L"2026-08-18T18:00:38", TrackerDateOrder::YearMonthDay, 2026, 8, 18);
+    RequireDate(L"18.8.2026", TrackerDateOrder::DayMonthYear, 2026, 8, 18);
+    RequireDate(L"18 08 2026 18:00", TrackerDateOrder::DayMonthYear, 2026, 8, 18);
+    if (DetectTrackerDateOrder({ L"18/08/2026", L"17/08/2026" }, TrackerDateOrder::MonthDayYear) !=
+        TrackerDateOrder::DayMonthYear)
+    {
+        throw std::runtime_error("DMY order was not inferred from unambiguous Tracker rows");
+    }
+    if (DetectTrackerDateOrder({ L"08/18/2026", L"08/17/2026" }, TrackerDateOrder::DayMonthYear) !=
+        TrackerDateOrder::MonthDayYear)
+    {
+        throw std::runtime_error("MDY order was not inferred from unambiguous Tracker rows");
+    }
+    if (DetectTrackerDateOrder({ L"2026-08-18" }, TrackerDateOrder::DayMonthYear) !=
+        TrackerDateOrder::YearMonthDay)
+    {
+        throw std::runtime_error("YMD order was not inferred from Tracker rows");
+    }
+    TrackerCalendarDate invalidDate;
+    if (TryParseTrackerCalendarDate(
+            L"29/02/2025", TrackerDateOrder::DayMonthYear, invalidDate))
+    {
+        throw std::runtime_error("Invalid calendar date was accepted");
+    }
+
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    auto dmyDate = [](int year, int month, int day)
+    {
+        std::wostringstream value;
+        value << std::setfill(L'0') << std::setw(2) << day << L'/'
+              << std::setw(2) << month << L'/' << std::setw(4) << year
+              << L" 18.00.38";
+        return value.str();
+    };
+    int previousMonth = local.tm_mon;
+    int previousMonthYear = local.tm_year + 1900;
+    if (previousMonth == 0)
+    {
+        previousMonth = 12;
+        --previousMonthYear;
+    }
+    snapshot.positionHistory.present = true;
+    snapshot.positionHistory.ok = true;
+    snapshot.positionHistory.expectedColumns = 8;
+    snapshot.positionHistory.rows = {
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"A", L"IONQ:xnys", L"Flat", L"0", L"", L"EUR +5,60" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 17), L"Saxo", L"A", L"APLD:xnas", L"Flat", L"0", L"", L"\u20ac -18,78" },
+        { dmyDate(previousMonthYear, previousMonth, 15), L"Saxo", L"A", L"OLD:xnas", L"Flat", L"0", L"", L"EUR +100,00" }
+    };
+    status.trackerDateOrder = L"dmy";
+    const std::wstring historyReport = BuildStatusReport(status, snapshot);
+    RequireContains(
+        historyReport,
+        L"Current month Realized P/L",
+        "Current-month Position History total is missing");
+    RequireContains(
+        historyReport,
+        L"EUR -13,18",
+        "Current-month realized P/L included the wrong rows or amount");
+    const std::wstring realizedLine = FindLineContaining(historyReport, L"EUR -13,18");
+    if (DelimitedField(realizedLine, 0) != L"Current month Realized P/L" ||
+        DelimitedField(realizedLine, 1) != L"EUR -13,18" ||
+        DelimitedField(realizedLine, 2) != L"[2 rows]")
+    {
+        throw std::runtime_error("Realized P/L is not aligned below the Open P/L column");
+    }
+    RequireContains(
+        BuildStatusReportHtml(historyReport),
+        L"<span style=\"color:#B4232A;font-weight:600;\">EUR -13,18</span>",
+        "Negative current-month realized P/L is not fully red");
+
+    TrackerStatusSnapshot closedOnlySnapshot = snapshot;
+    closedOnlySnapshot.openPositions.rows.clear();
+    const std::wstring closedOnlyReport = BuildStatusReport(status, closedOnlySnapshot);
+    RequireContains(
+        closedOnlyReport,
+        L"EUR -13,18",
+        "Current-month realized P/L disappeared when there were no open positions");
 
     // Exact regression from the R20 screenshot: rows are newest first. More
     // than ten unrelated warnings follow a successful Saxo connection, while

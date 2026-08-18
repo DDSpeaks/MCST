@@ -106,6 +106,7 @@ namespace
     {
         if (name == "accounts") return &snapshot.accounts;
         if (name == "open_positions") return &snapshot.openPositions;
+        if (name == "position_history") return &snapshot.positionHistory;
         if (name == "recent_logs") return &snapshot.recentLogs;
         if (name == "monitoring_logs") return &snapshot.monitoringLogs;
         return nullptr;
@@ -306,11 +307,17 @@ namespace
         {
             return false;
         }
+        if (snapshot.positionHistory.present &&
+            !validateRows(snapshot.positionHistory, 8, L"Position History"))
+        {
+            return false;
+        }
 
         std::wostringstream out;
         out << L"Bridge V" << snapshot.bridgeVersion
             << L" payload parsed; accounts=" << snapshot.accounts.rows.size()
             << L" positions=" << snapshot.openPositions.rows.size()
+            << L" position_history=" << snapshot.positionHistory.rows.size()
             << L" recent_logs=" << snapshot.recentLogs.rows.size()
             << L" monitoring_logs=" << snapshot.monitoringLogs.rows.size()
             << L" pages_ok=" << snapshot.pagesOk

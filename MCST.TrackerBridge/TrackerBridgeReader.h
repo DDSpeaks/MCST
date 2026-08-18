@@ -43,6 +43,9 @@ struct TrackerStatusSnapshot
     std::wstring recoveryResult;
     TrackerBridgeSection accounts;
     TrackerBridgeSection openPositions;
+    // Optional V175 Position History capture. It is report enrichment only and
+    // is not part of the three-section Tracker health/recovery decision.
+    TrackerBridgeSection positionHistory;
     TrackerBridgeSection recentLogs;
     // Optional R21 extended history used by state/alert engines. The normal
     // Recent Logs section remains limited to ten display rows.
@@ -56,7 +59,8 @@ struct TrackerStatusSnapshot
 // Requests one production snapshot from MCTrackerBridge V156 or newer.
 // The Bridge response contains Accounts, Open Positions and at most ten newest
 // display Logs rows. V173 or newer also supplies an optional bounded monitoring
-// history. A parsed partial response is returned even when one section failed.
+// history, and V175 can supply optional Position History rows. A parsed partial
+// response is returned even when one section failed.
 bool ReadTrackerStatusSnapshot(
     TrackerStatusSnapshot& snapshot,
     std::wstring& diagnostic,

@@ -1,21 +1,21 @@
 ﻿# MCST
 
-## Package: 1.114-R24 Aligned Open P/L Lines
+## Package: 1.114-R25 Status Lines and Monthly Realized P/L
 
-This source package presents every Open Position on one non-wrapping line using the same 15-pixel preformatted typography as Accounts and Recent Logs. The selected order is Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Open P/L is the second column and each known-currency total is directly below that same column for fast visual comparison. The line may continue to the right instead of being wrapped or scaled as a separate HTML table. Complete green/red profit coloring remains included. R22 Tracker recovery, stale-state handling, timestamps, R21 extended Broker history, and earlier corrections are retained.
+This source package renders Overall Status, System Status, and Open Positions as the same protected, non-wrapping 15-pixel monospaced flow. Mobile mail clients can let long lines continue to the right, but may not independently shrink these sections. Open P/L stays in the second column, its total remains directly below it, and the current month's known-currency Realized P/L from Positions History is aligned in that same column. Complete green/red profit coloring is retained.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R24**
+- MCST-Watchdog: **1.114-R25**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V174**
+- Tracker Bridge internal build: **V175**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V173 added the optional `monitoring_logs` payload section, and V174 corrects non-sticky Tracker recovery without changing Protocol V2. The retained R16 `Position CCY` action requires V171 or newer. R22/R23/R24 recovery behavior requires the V174 DLL included in this package; the R24 one-line report change itself is Watchdog-only.
+The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V173 added optional `monitoring_logs`, V174 made Tracker recovery non-sticky, and V175 adds the optional `position_history` section. Protocol V2 is unchanged, so older readers ignore the additive section. The current-month total requires the V175 DLL in this package and a verified Position History page offset. The retained R16 `Position CCY` action still requires V171 or newer.
 
 ## Runtime installation
 
@@ -53,6 +53,15 @@ MCST-Watchdog does not load this DLL as a normal EXE dependency. The Bridge runs
 `MCST-Watchdog.ini` follows a **self-documenting configuration** model. When a known setting is missing, Watchdog writes the setting with its safe built-in default. Invalid Boolean or bounded numeric values are normalized where the configuration contract defines a valid range. This makes the installed INI file a practical reference for the settings supported by that MCST version.
 
 User-specific values and secrets are never invented. Addresses, account identifiers, SMTP usernames, passwords, and App Passwords must be supplied by the user when required.
+
+Position History dates are read with an automatic DMY/MDY/YMD detector. Ambiguous rows fall back to the Windows user locale. A deployment can override that decision explicitly:
+
+```ini
+[Tracker]
+date_order=auto
+```
+
+Accepted values are `auto`, `dmy`, `mdy`, and `ymd`. Invalid or unparseable dates are excluded rather than guessed.
 
 Watchdog also maintains generated diagnostic information such as:
 

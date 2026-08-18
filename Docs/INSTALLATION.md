@@ -69,7 +69,7 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R24 production Tracker snapshots require Bridge V156 or newer, bounded self-recovery requires V172 or newer, extended Broker history requires V173 or newer, and non-sticky recovery requires the V174 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. If V174 is already installed from R22, the R24 one-line report correction requires replacing only the Watchdog executable.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R25 production Tracker snapshots require Bridge V156 or newer, bounded self-recovery requires V172 or newer, extended Broker history requires V173 or newer, and non-sticky recovery requires V174 or newer. The current-month Realized P/L requires the V175 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. R25 therefore requires replacing both Watchdog and the Bridge DLL.
 
 ## First Watchdog start
 
@@ -93,6 +93,17 @@ MCST uses a **self-documenting INI** approach:
 - verified compatibility addresses and offsets are never fabricated as defaults.
 
 As a result, the installed `MCST-Watchdog.ini` becomes a practical reference for the settings supported by the running MCST version.
+
+The default Position History date handling is locale-aware:
+
+```ini
+[Tracker]
+date_order=auto
+```
+
+Use `dmy`, `mdy`, or `ymd` only when an explicit override is needed. With
+`auto`, unambiguous rows are preferred and ambiguous rows fall back to the
+Windows user locale.
 
 ## Configure email
 

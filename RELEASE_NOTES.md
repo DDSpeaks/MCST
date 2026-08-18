@@ -1,35 +1,53 @@
-# MCST 1.114-R24 Aligned Open P/L Lines
+# MCST 1.114-R25 Status Lines and Monthly Realized P/L
 
-Tracker Bridge internal build: V174
+Tracker Bridge internal build: V175  
 Bridge protocol: V2
 
-R24 uses the same preformatted HTML flow for Open Positions as Accounts and
-Recent Logs. This responds to the observed iOS Mail result where both a wide
-HTML table and a later card layout failed the intended at-a-glance presentation.
+## Status Report layout
 
-## Open Positions HTML layout
+- Overall Status and System Status now use the same non-wrapping, preformatted
+  HTML flow as the other report sections.
+- Every status component remains on one logical line and may continue to the
+  right on a narrow display.
+- The colored state dot occupies a fixed four-character cell, so the status and
+  description columns remain vertically aligned.
+- Semantic status tables were removed because iOS Mail could scale them to a
+  much smaller type size.
+- Overall Status, System Status, and Open Positions all enforce the same
+  15-pixel monospaced typography.
 
-- Every position occupies exactly one non-wrapping line and may continue to the
-  right beyond the initially visible message area.
-- The column order is Symbol, Open P/L, Side, Qty, Average Price, Native Value,
-  Account, Profile, and Last Update.
-- Open P/L is the second column. Every known-currency total is printed directly
-  beneath that same column.
-- Open Positions shares the same explicitly protected 15-pixel monospaced
-  `<pre>` styling as the other data-heavy report sections.
-- The rejected multi-line card layout and fixed-width HTML table are absent.
-- Positive profit values remain fully green and negative values fully red,
-  including currency signs/codes and plus/minus signs.
-- The plain-text/local Status Report uses the identical one-line column order.
+## Current-month Realized P/L
 
-## Retained R22 behavior
+- Bridge V175 reads the Positions History grid through the existing validated,
+  read-only FlexGrid path and adds an optional `position_history` payload
+  section.
+- The page offset `0x78` is enabled only for the exact verified V147
+  `ATOnPTracker.dll` fingerprint. External compatibility profiles can provide
+  `tracker_position_history_page_offset`; existing profiles remain valid when
+  the optional key is absent.
+- Watchdog recalculates the current month's Realized P/L from the complete
+  captured history on every report. It never accumulates refreshes, so repeated
+  rows cannot be double-counted across snapshots.
+- Only values with an unambiguous currency sign or ISO code are totalled.
+- The amount is aligned directly below the Open P/L column and uses the same
+  full-value green/red styling, including currency and sign.
+- The monthly total remains visible even when the Open Positions grid has no
+  current rows.
+- A capture that reaches the 5,000-row safety limit is rejected as incomplete;
+  Watchdog never presents a potentially partial monthly total as complete.
+- Position History failure is report enrichment failure only. It does not alter
+  the three existing Tracker health sections, recovery count, Broker state, or
+  overall Critical classification.
 
-- Bridge V174 recovery mode remains non-sticky after both success and failure.
-- Watchdog preserves every configured Tracker retry result.
-- Recent last-good Tracker data begins as Attention and escalates at
-  `[TrackerMonitor] stale_critical_after_minutes` (10 minutes by default).
-- Last Tracker attempt and Last complete snapshot remain separate timestamps.
-- R21's bounded 200-row Broker/log-alert monitoring history is retained.
+## Locale-aware dates
 
-The R24 change is Watchdog-only. If Bridge V174 is already installed from R22
-or R23, only the rebuilt R24 Watchdog executable needs to be replaced.
+- Numeric DMY, MDY, and YMD dates are supported with `/`, `.`, `-`, or spaces.
+- Automatic detection uses unambiguous Position History rows and then the
+  Windows user locale for ambiguous dates.
+- `[Tracker] date_order=auto|dmy|mdy|ymd` provides an explicit override.
+- Invalid dates fail closed and are reported as skipped; time text is ignored.
+
+## Installation note
+
+Both `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll` must be rebuilt and
+replaced. Restart MultiCharts after replacing the DLL. Protocol V2 is retained.

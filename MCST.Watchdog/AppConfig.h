@@ -26,6 +26,7 @@ struct AppConfig
     int snapshotRetryCount = 3;
     int snapshotRetryDelayMilliseconds = 250;
     int trackerStaleCriticalAfterMinutes = 10;
+    std::wstring trackerDateOrder = L"auto";
 
     bool autoTradingMonitoringEnabled = true;
     int autoTradingMinimum = 65;

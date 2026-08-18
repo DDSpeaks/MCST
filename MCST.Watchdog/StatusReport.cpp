@@ -2,8 +2,12 @@
 #include <windows.h>
 
 #include "StatusReport.h"
+#include "TrackerDateParser.h"
 
+#include <chrono>
+#include <ctime>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <vector>
 #include <algorithm>
@@ -352,14 +356,150 @@ namespace
         return false;
     }
 
-    void AppendOpenPositionsTable(std::wostringstream& out, const TrackerBridgeSection& section)
+    TrackerDateOrder WindowsDateOrderFallback()
     {
-        if (section.rows.empty())
+#ifdef _WIN32
+        wchar_t value[8]{};
+        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IDATE, value,
+                static_cast<int>(std::size(value))) > 0)
         {
-            out << L"(no rows)\n";
-            return;
+            if (value[0] == L'0') return TrackerDateOrder::MonthDayYear;
+            if (value[0] == L'1') return TrackerDateOrder::DayMonthYear;
+            if (value[0] == L'2') return TrackerDateOrder::YearMonthDay;
+        }
+#endif
+        return TrackerDateOrder::DayMonthYear;
+    }
+
+    void CurrentLocalYearMonth(int& year, int& month)
+    {
+        const std::time_t now = std::time(nullptr);
+        std::tm local{};
+#ifdef _WIN32
+        localtime_s(&local, &now);
+#else
+        localtime_r(&now, &local);
+#endif
+        year = local.tm_year + 1900;
+        month = local.tm_mon + 1;
+    }
+
+    std::vector<std::vector<std::wstring>> BuildPositionHistoryTotalRows(
+        const TrackerBridgeSection& section,
+        const std::wstring& configuredDateOrder)
+    {
+        constexpr std::size_t outputColumns = 9;
+        std::vector<std::vector<std::wstring>> rows;
+        auto unavailable = [&](const std::wstring& reason)
+        {
+            std::vector<std::wstring> row(outputColumns);
+            row[0] = L"Current month Realized P/L";
+            row[1] = L"not available";
+            row[2] = L"[" + reason + L"]";
+            rows.push_back(std::move(row));
+        };
+
+        if (!section.present)
+        {
+            unavailable(L"Position History was not supplied by the Bridge");
+            return rows;
+        }
+        if (!section.ok)
+        {
+            unavailable(L"Position History read failed");
+            return rows;
         }
 
+        std::vector<std::wstring> dateValues;
+        dateValues.reserve(section.rows.size());
+        for (const auto& row : section.rows)
+        {
+            if (!row.empty())
+                dateValues.push_back(row[0]);
+        }
+
+        const TrackerDateOrder configured = ParseTrackerDateOrder(configuredDateOrder);
+        const TrackerDateOrder order = configured == TrackerDateOrder::Auto
+            ? DetectTrackerDateOrder(dateValues, WindowsDateOrderFallback())
+            : configured;
+        if (order == TrackerDateOrder::Auto)
+        {
+            unavailable(L"date order was ambiguous");
+            return rows;
+        }
+
+        int currentYear = 0;
+        int currentMonth = 0;
+        CurrentLocalYearMonth(currentYear, currentMonth);
+
+        std::map<std::wstring, double> totals;
+        std::map<std::wstring, std::size_t> countedRows;
+        std::size_t currentMonthRowsNotTotaled = 0;
+        std::size_t datesNotParsed = 0;
+        for (const auto& row : section.rows)
+        {
+            if (row.size() < 8)
+                continue;
+            TrackerCalendarDate date;
+            if (!TryParseTrackerCalendarDate(row[0], order, date))
+            {
+                ++datesNotParsed;
+                continue;
+            }
+            if (date.year != currentYear || date.month != currentMonth)
+                continue;
+
+            double realizedPl = 0.0;
+            std::wstring currency;
+            if (ParseLocalizedNumber(row[7], realizedPl) &&
+                TryExtractKnownCurrency(row[7], currency))
+            {
+                totals[currency] += realizedPl;
+                ++countedRows[currency];
+            }
+            else
+            {
+                ++currentMonthRowsNotTotaled;
+            }
+        }
+
+        for (const auto& total : totals)
+        {
+            std::vector<std::wstring> row(outputColumns);
+            row[0] = L"Current month Realized P/L";
+            row[1] = total.first + L" " + FormatReportNumber(total.second, true);
+            row[2] = L"[" + std::to_wstring(countedRows[total.first]) + L" rows";
+            if (currentMonthRowsNotTotaled != 0)
+                row[2] += L"; " + std::to_wstring(currentMonthRowsNotTotaled) + L" not totalled";
+            row[2] += L"]";
+            rows.push_back(std::move(row));
+        }
+
+        if (totals.empty())
+        {
+            std::vector<std::wstring> row(outputColumns);
+            row[0] = L"Current month Realized P/L";
+            row[1] = L"not calculated";
+            row[2] = L"[no current-month row had an unambiguous currency]";
+            rows.push_back(std::move(row));
+        }
+        if (datesNotParsed != 0)
+        {
+            std::vector<std::wstring> row(outputColumns);
+            row[0] = L"Position History dates skipped";
+            row[2] = L"[" + std::to_wstring(datesNotParsed) + L" rows; expected " +
+                std::wstring(TrackerDateOrderName(order)) + L"]";
+            rows.push_back(std::move(row));
+        }
+        return rows;
+    }
+
+    void AppendOpenPositionsTable(
+        std::wostringstream& out,
+        const TrackerBridgeSection& section,
+        const TrackerBridgeSection& positionHistory,
+        const std::wstring& configuredDateOrder)
+    {
         const std::vector<std::wstring> headers = {
             L"Symbol", L"Open P/L", L"Side", L"Qty", L"Average Price",
             L"Native Value", L"Account", L"Profile", L"Last Update"
@@ -422,6 +562,9 @@ namespace
             totalRow[2] = L"[" + std::to_wstring(openPlRowsByCurrency[total.first]) + L" rows]";
             totalRows.push_back(std::move(totalRow));
         }
+        const auto historyTotalRows =
+            BuildPositionHistoryTotalRows(positionHistory, configuredDateOrder);
+        totalRows.insert(totalRows.end(), historyTotalRows.begin(), historyTotalRows.end());
 
         std::vector<std::vector<std::wstring>> rowsForWidth = rows;
         rowsForWidth.insert(rowsForWidth.end(), totalRows.begin(), totalRows.end());
@@ -453,7 +596,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R24\n"
+        << L"Watchdog version       1.114-R25\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -509,7 +652,8 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"\nACCOUNTS\n--------\n";
     AppendAlignedSectionRows(out, snapshot.accounts, false);
     out << L"\nOPEN POSITIONS\n--------------\n";
-    AppendOpenPositionsTable(out, snapshot.openPositions);
+    AppendOpenPositionsTable(
+        out, snapshot.openPositions, snapshot.positionHistory, status.trackerDateOrder);
     out << L"\nRECENT LOGS\n-----------\n";
     AppendAlignedSectionRows(out, snapshot.recentLogs, true);
     return out.str();
@@ -542,16 +686,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         return value;
     };
 
-    auto trim = [&](std::wstring value)
-    {
-        value = trimRight(std::move(value));
-        std::size_t first = 0;
-        while (first < value.size() && (value[first] == L' ' || value[first] == L'\t'))
-            ++first;
-        return value.substr(first);
-    };
-
-    auto stateHtml = [&](const std::wstring& stateCell)
+    auto statusLineHtml = [&](const std::wstring& rawLine)
     {
         struct StateStyle
         {
@@ -570,21 +705,31 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
 
         for (const auto& style : styles)
         {
-            if (stateCell.find(style.marker) != std::wstring::npos)
+            const std::size_t marker = rawLine.find(style.marker);
+            if (marker != std::wstring::npos)
             {
-                std::wstring result =
-                    L"<span style=\"display:inline-block;width:10px;height:10px;background-color:";
+                const std::size_t afterMarker = marker + std::wcslen(style.marker);
+                const std::size_t label = rawLine.find(style.label, afterMarker);
+                std::wstring result = escapeHtml(rawLine.substr(0, marker));
+                // Replace the four-character plain marker with an equally wide
+                // monospaced dot cell. Every later field therefore keeps its
+                // exact character column while the whole line remains nowrap.
+                result += L"<span style=\"display:inline-block;width:4ch;text-align:center;color:";
                 result += style.dotColor;
-                result += L";border-radius:50%;margin-right:7px;vertical-align:middle;\"></span>";
-                result += L"<span style=\"color:";
-                result += style.textColor;
-                result += L";font-weight:600;vertical-align:middle;\">";
-                result += style.label;
-                result += L"</span>";
+                result += L";font-weight:700;\">&#9679;</span>";
+                if (label == std::wstring::npos)
+                {
+                    result += escapeHtml(rawLine.substr(afterMarker));
+                    return result;
+                }
+                result += escapeHtml(rawLine.substr(afterMarker, label - afterMarker));
+                result += L"<span style=\"color:" + std::wstring(style.textColor) +
+                    L";font-weight:600;\">" + style.label + L"</span>";
+                result += escapeHtml(rawLine.substr(label + std::wcslen(style.label)));
                 return result;
             }
         }
-        return escapeHtml(trim(stateCell));
+        return escapeHtml(rawLine);
     };
 
     auto splitAlignedTableRow = [](const std::wstring& line)
@@ -667,9 +812,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     html += L"</style></head>\r\n";
     html += L"<body style=\"margin:0;padding:16px;background:#ffffff;color:#202020;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.28;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\r\n";
 
-    bool inOverall = false;
-    bool inSystemStatus = false;
-    bool systemTableOpen = false;
+    bool inStatusLines = false;
     bool preOpen = false;
     bool inOpenPositions = false;
 
@@ -697,15 +840,6 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         }
     };
 
-    auto closeSystemTable = [&]()
-    {
-        if (systemTableOpen)
-        {
-            html += L"</table>\r\n";
-            systemTableOpen = false;
-        }
-    };
-
     for (std::size_t i = 0; i < lines.size(); ++i)
     {
         const std::wstring& line = lines[i];
@@ -726,79 +860,31 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         if (line == L"OVERALL STATUS")
         {
             closePre();
-            closeSystemTable();
-            inOverall = true;
-            inSystemStatus = false;
-            html += L"<div style=\"font-size:15px;font-weight:600;letter-spacing:.2px;margin-top:18px;margin-bottom:5px;\">OVERALL STATUS</div>";
-            continue;
-        }
-        if (inOverall && line == L"--------------")
-            continue;
-        if (inOverall && !line.empty())
-        {
-            // Size the first two columns by their monospaced content instead of by
-            // percentages. This keeps Component and Status readable on narrow mail
-            // clients while allowing Description to consume and wrap in all remaining
-            // space. The hidden Tracker Snapshot label gives Overall Status exactly the
-            // same Component-column width as the System Status table.
-            html += L"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.32;margin:3px 0 18px 0;width:100%;max-width:100%;table-layout:auto;\">";
-            html += L"<tr>";
-            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;\"><span style=\"visibility:hidden;white-space:nowrap;\">Tracker Snapshot</span></td>";
-            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;\">" + stateHtml(line) + L"</td>";
-            html += L"<td style=\"padding:2px 0;vertical-align:top;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;white-space:normal;\"></td>";
-            html += L"</tr></table>";
-            inOverall = false;
+            inStatusLines = true;
+            html += L"<pre class=\"mcst-overall-status-lines\" style=\"" + preStyle + L"\">";
+            preOpen = true;
+            html += escapeHtml(line) + L"\n";
             continue;
         }
 
         if (line == L"SYSTEM STATUS")
         {
             closePre();
-            closeSystemTable();
-            inSystemStatus = true;
-            inOverall = false;
-            html += L"<div style=\"font-size:15px;font-weight:600;letter-spacing:.2px;margin-top:4px;margin-bottom:7px;\">SYSTEM STATUS</div>";
-            html += L"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.32;margin:0 0 18px 0;width:100%;max-width:100%;table-layout:auto;\">";
-            systemTableOpen = true;
+            inStatusLines = true;
+            html += L"<pre class=\"mcst-system-status-lines\" style=\"" + preStyle + L"\">";
+            preOpen = true;
+            html += escapeHtml(line) + L"\n";
             continue;
         }
-        if (inSystemStatus && line == L"-------------")
-            continue;
 
-        if (inSystemStatus)
+        if (inStatusLines && line == L"LATEST ACTIVITY")
         {
-            if (line.empty())
-            {
-                closeSystemTable();
-                inSystemStatus = false;
-                continue;
-            }
-
-            // BuildStatusReport() formats every monitor row with fixed 22- and
-            // 18-character fields. Preserve that semantic layout here, but use
-            // real HTML columns so OK, WARNING, CRITICAL and UNKNOWN never move
-            // the description column horizontally. Keep the component column wide enough for labels such as Tracker Snapshot,
-            // while the description column may wrap naturally on narrow mail clients.
-            std::wstring component = line.substr(0, std::min<std::size_t>(22, line.size()));
-            std::wstring stateCell;
-            std::wstring description;
-            if (line.size() > 22)
-                stateCell = line.substr(22, std::min<std::size_t>(18, line.size() - 22));
-            if (line.size() > 40)
-                description = line.substr(40);
-
-            component = trim(component);
-            stateCell = trim(stateCell);
-            description = trim(description);
-
-            html += L"<tr>";
-            // The first two cells are content-sized (effectively character-sized in
-            // this monospaced report). They never wrap. The Description cell has no
-            // fixed width and therefore receives all remaining space and wraps naturally.
-            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:400;\">" + escapeHtml(component) + L"</td>";
-            html += L"<td width=\"1\" style=\"width:1px;padding:2px 18px 2px 0;vertical-align:top;white-space:nowrap;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;\">" + stateHtml(stateCell) + L"</td>";
-            html += L"<td style=\"padding:2px 0;vertical-align:top;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:400;white-space:normal;word-break:normal;overflow-wrap:break-word;\">" + escapeHtml(description) + L"</td>";
-            html += L"</tr>\r\n";
+            closePre();
+            inStatusLines = false;
+        }
+        if (inStatusLines)
+        {
+            html += statusLineHtml(line) + L"\n";
             continue;
         }
 
@@ -842,7 +928,6 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         html += L"\n";
     }
 
-    closeSystemTable();
     closePre();
     html += L"</body></html>\r\n";
     return html;

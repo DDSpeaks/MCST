@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R24'
-$currentBridgeBuild = 174
+$currentVersion = '1.114-R25'
+$currentBridgeBuild = 175
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -21,6 +21,8 @@ $required = @(
     'MCST.Watchdog\MCST.Watchdog.vcxproj',
     'MCST.Watchdog\MCST.Watchdog.rc',
     'MCST.Watchdog\main.cpp',
+    'MCST.Watchdog\TrackerDateParser.h',
+    'MCST.Watchdog\TrackerDateParser.cpp',
     'MCST.Watchdog\CompatibilityManager.cpp',
     'MCST.Watchdog\MultiChartsVersionDetector.cpp',
     'MCST.Tests\MCST.Tests.vcxproj',
@@ -28,7 +30,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R24.txt',
+    'BUILD_VALIDATION_R25.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -131,6 +133,7 @@ if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
     $appConfigSource -notmatch 'RefreshIniProfileCache' -or
     $appConfigSource -notmatch 'TrackerMonitor' -or
     $appConfigSource -notmatch 'stale_critical_after_minutes' -or
+    $appConfigSource -notmatch 'date_order' -or
     $appConfigSource -notmatch 'WritePrivateProfileStringW\(nullptr, nullptr, nullptr, path\.c_str\(\)\)') {
     throw 'INI profile cache refresh support is missing from AppConfig.'
 }
@@ -146,6 +149,10 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'splitAlignedTableRow' -or
     $statusReportSource -notmatch 'openPositionCellHtml' -or
     $statusReportSource -notmatch 'mcst-open-positions-lines' -or
+    $statusReportSource -notmatch 'mcst-overall-status-lines' -or
+    $statusReportSource -notmatch 'mcst-system-status-lines' -or
+    $statusReportSource -notmatch 'Current month Realized P/L' -or
+    $statusReportSource -notmatch 'BuildPositionHistoryTotalRows' -or
     $statusReportSource -notmatch 'preStyle' -or
     $statusReportSource -notmatch 'width=device-width,initial-scale=1.0' -or
     $statusReportSource -notmatch 'white-space:pre;margin:0' -or
@@ -181,10 +188,14 @@ if ($statusReportSource -match [regex]::Escape('width=\"1100\"') -or
     $statusReportSource -match [regex]::Escape('<table class=\"mcst-open-positions\"')) {
     throw 'A rejected fixed-width table, overflow wrapper, or multi-line Open Positions card is still present.'
 }
+if ($statusReportSource -match [regex]::Escape('<table role=\"presentation\"')) {
+    throw 'Overall/System Status still uses an independently shrinkable semantic HTML table.'
+}
 
 $testsSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
 $testsProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\MCST.Tests.vcxproj') -Raw
 if ($testsProject -notmatch 'StatusReport\.cpp' -or
+    $testsProject -notmatch 'TrackerDateParser\.cpp' -or
     $testsProject -notmatch 'BrokerMonitor\.cpp' -or
     $testsSource -notmatch 'EUR \+8,25' -or
     $testsSource -notmatch 'Total Open P/L' -or
@@ -194,6 +205,13 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch '#15803D' -or
     $testsSource -notmatch '#B4232A' -or
     $testsSource -notmatch 'mcst-open-positions-lines' -or
+    $testsSource -notmatch 'mcst-overall-status-lines' -or
+    $testsSource -notmatch 'mcst-system-status-lines' -or
+    $testsSource -notmatch 'Current month Realized P/L' -or
+    $testsSource -notmatch 'EUR -13,18' -or
+    $testsSource -notmatch '18/08/2026 18\.00\.38' -or
+    $testsSource -notmatch '08/18/2026 6:00:38 PM' -or
+    $testsSource -notmatch '2026-08-18T18:00:38' -or
     $testsSource -notmatch 'width=device-width,initial-scale=1\.0' -or
     $testsSource -notmatch 'white-space:pre' -or
     $testsSource -notmatch 'font-size:15px !important' -or
@@ -235,9 +253,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,24,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,24,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R24.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,25,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,25,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R25.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -250,7 +268,7 @@ if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV174StatusReportSnapshotWithRecovery',
+    'BuildV175StatusReportSnapshotWithRecovery',
     'TabViewRecoveryModeScope',
     '~TabViewRecoveryModeScope',
     'g_tabViewRecoveryModeActive.store(false)',
@@ -278,6 +296,19 @@ foreach ($historyToken in @(
 )) {
     if ($bridgeSource -notmatch [regex]::Escape($historyToken)) {
         throw "Tracker Bridge extended monitoring-history token is missing: $historyToken"
+    }
+}
+foreach ($positionHistoryToken in @(
+    'positionHistoryPageOffset',
+    'kPositionHistoryAtonpTimestamp = 0x6A5694FBu',
+    'profile.positionHistoryPageOffset',
+    'V153GridSectionResult positionHistory',
+    '"position_history"',
+    'AppendV153Section(out, positionHistory, 8)',
+    '5000, 5000, 3'
+)) {
+    if ($bridgeSource -notmatch [regex]::Escape($positionHistoryToken)) {
+        throw "Tracker Bridge Position History token is missing: $positionHistoryToken"
     }
 }
 if ($bridgeSource -match 'logs\.diagnostic \+= "; display_rows="' -or
@@ -315,6 +346,7 @@ foreach ($requiredTrackerToken in @(
     'tracker_tabview_vtable_rva',
     'tracker_accounts_page_offset',
     'tracker_open_positions_page_offset',
+    'tracker_position_history_page_offset',
     'tracker_logs_page_offset',
     'tracker_grid_member_offset',
     'tracker_rows_offset_1',
@@ -358,6 +390,10 @@ if ($readerSource -notmatch 'recovery_attempted' -or
 if ($readerSource -notmatch 'name == "monitoring_logs"' -or
     $readerSource -notmatch 'snapshot\.monitoringLogs') {
     throw 'Optional monitoring_logs parsing or validation is missing.'
+}
+if ($readerSource -notmatch 'name == "position_history"' -or
+    $readerSource -notmatch 'snapshot\.positionHistory') {
+    throw 'Optional position_history parsing or validation is missing.'
 }
 
 $protocolHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
@@ -403,13 +439,14 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Aligned Open P/L Lines" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Status Lines and Monthly Realized P/L" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
-    $releaseNotes -notmatch 'one non-wrapping line' -or
-    $releaseNotes -notmatch 'Open P/L is the second column' -or
+    $releaseNotes -notmatch 'Overall Status and System Status' -or
+    $releaseNotes -notmatch 'Position History' -or
+    $releaseNotes -notmatch 'date_order' -or
     $releaseNotes -notmatch '15-pixel monospaced' -or
-    $releaseNotes -notmatch 'Watchdog-only') {
-    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, and the aligned one-line Open P/L correction."
+    $releaseNotes -notmatch 'Protocol V2') {
+    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, Status lines, and Position History totals."
 }
 
-Write-Host "MCST $currentVersion aligned Open P/L line release validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion Status/Position History release validation passed." -ForegroundColor Green

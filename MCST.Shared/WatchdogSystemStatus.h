@@ -66,6 +66,7 @@ namespace mcst
         std::wstring multiChartsExecutable;
         std::wstring multiChartsCompatibilityProfile;
         std::wstring trackerCompatibilityProfile;
+        std::wstring trackerDateOrder = L"auto";
 
         // When a current Tracker read fails, the dashboard/report may retain the
         // last complete table snapshot for operational context. It is Attention

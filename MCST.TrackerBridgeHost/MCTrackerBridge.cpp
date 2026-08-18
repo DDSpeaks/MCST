@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 174;
+    constexpr int kBridgeVersion = 175;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -806,6 +806,7 @@ namespace
     constexpr std::uintptr_t kExtractAccountsRva = 0x10FAE6;
     constexpr std::uintptr_t kExtractOpenPositionsRva = 0x10FF56;
     constexpr DWORD kKnownAtonpSize = 3534848;
+    constexpr DWORD kPositionHistoryAtonpTimestamp = 0x6A5694FBu;
 
     struct TrackerCompatibilityProfile
     {
@@ -823,6 +824,7 @@ namespace
         std::uintptr_t openPositionsExtractorRva = 0;
         std::size_t accountsPageOffset = 0;
         std::size_t openPositionsPageOffset = 0;
+        std::size_t positionHistoryPageOffset = 0;
         std::size_t logsPageOffset = 0;
         std::size_t gridMemberOffset = 0;
         std::size_t rowsOffset1 = 0;
@@ -930,6 +932,7 @@ namespace
         WritePrivateProfileStringW(section.c_str(), L"tracker_tabview_vtable_rva", L"", path.c_str());
         WritePrivateProfileStringW(section.c_str(), L"tracker_accounts_page_offset", L"", path.c_str());
         WritePrivateProfileStringW(section.c_str(), L"tracker_open_positions_page_offset", L"", path.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"tracker_position_history_page_offset", L"", path.c_str());
         WritePrivateProfileStringW(section.c_str(), L"tracker_logs_page_offset", L"", path.c_str());
         WritePrivateProfileStringW(section.c_str(), L"tracker_grid_member_offset", L"", path.c_str());
         WritePrivateProfileStringW(section.c_str(), L"tracker_rows_offset_1", L"", path.c_str());
@@ -983,6 +986,7 @@ namespace
             unsigned long long tabViewVtableRva = 0;
             unsigned long long accountsPageOffset = 0;
             unsigned long long openPositionsPageOffset = 0;
+            unsigned long long positionHistoryPageOffset = 0;
             unsigned long long logsPageOffset = 0;
             unsigned long long gridMemberOffset = 0;
             unsigned long long rowsOffset1 = 0;
@@ -1005,10 +1009,17 @@ namespace
                 continue;
             }
 
+            // Position History is additive in V175. Existing verified profiles
+            // remain valid without this optional key and simply omit the section.
+            (void)TryParseCompatibilityUnsigned(
+                CompatibilityReadValue(path, section, L"tracker_position_history_page_offset"),
+                positionHistoryPageOffset);
+
             const bool layoutValuesSane =
                 tabViewVtableRva > 0 && tabViewVtableRva < imageSize &&
                 accountsPageOffset > 0 && accountsPageOffset < 0x10000 &&
                 openPositionsPageOffset > 0 && openPositionsPageOffset < 0x10000 &&
+                (positionHistoryPageOffset == 0 || positionHistoryPageOffset < 0x10000) &&
                 logsPageOffset > 0 && logsPageOffset < 0x10000 &&
                 gridMemberOffset > 0 && gridMemberOffset < 0x10000 &&
                 rowsOffset1 > 0 && rowsOffset1 < 0x10000 &&
@@ -1042,6 +1053,7 @@ namespace
             profile.openPositionsExtractorRva = static_cast<std::uintptr_t>(openPositionsExtractorRva);
             profile.accountsPageOffset = static_cast<std::size_t>(accountsPageOffset);
             profile.openPositionsPageOffset = static_cast<std::size_t>(openPositionsPageOffset);
+            profile.positionHistoryPageOffset = static_cast<std::size_t>(positionHistoryPageOffset);
             profile.logsPageOffset = static_cast<std::size_t>(logsPageOffset);
             profile.gridMemberOffset = static_cast<std::size_t>(gridMemberOffset);
             profile.rowsOffset1 = static_cast<std::size_t>(rowsOffset1);
@@ -1095,6 +1107,11 @@ namespace
         profile.openPositionsExtractorRva = kExtractOpenPositionsRva;
         profile.accountsPageOffset = 0x58;
         profile.openPositionsPageOffset = 0x68;
+        // The exact V147 image was verified from the live CATPTTabView object:
+        // tabs are stored in UI order at 8-byte intervals and Positions History
+        // is the +0x78 page. Never apply this new offset to another timestamp.
+        profile.positionHistoryPageOffset =
+            snapshot.atonpTrackerPeTimestamp == kPositionHistoryAtonpTimestamp ? 0x78 : 0;
         profile.logsPageOffset = 0x80;
         profile.gridMemberOffset = 0x118;
         profile.rowsOffset1 = 0xD20;
@@ -7778,6 +7795,11 @@ DWORD sehCode = 0;
             result.diagnostic = L"Tracker compatibility UNKNOWN: " + profile.diagnostic;
             return result;
         }
+        if (pageOffset == 0)
+        {
+            result.diagnostic = L"This Tracker profile does not define the optional page offset.";
+            return result;
+        }
         if (!tabView)
         {
             result.diagnostic = L"CATPTTabView object was not found for Tracker profile " + profile.name;
@@ -12658,6 +12680,15 @@ DWORD sehCode = 0;
         V153GridSectionResult positions = ReadV153GridSection(
             snapshot, flexGridRttiVtables, tabView, trackerProfile, "open_positions",
             trackerProfile.openPositionsPageOffset, 1, 8, 1000, 1000, 3);
+        V153GridSectionResult positionHistory = ReadV153GridSection(
+            snapshot, flexGridRttiVtables, tabView, trackerProfile, "position_history",
+            trackerProfile.positionHistoryPageOffset, 1, 8, 5000, 5000, 3);
+        if (positionHistory.ok && positionHistory.rows.size() >= 5000)
+        {
+            positionHistory.ok = false;
+            positionHistory.diagnostic +=
+                L"; capture limit reached; current-month Realized P/L total withheld";
+        }
         V153GridSectionResult monitoringLogs = ReadV153GridSection(
             snapshot, flexGridRttiVtables, tabView, trackerProfile, "recent_logs",
             trackerProfile.logsPageOffset, 1, 6, 200, 200, 3);
@@ -12699,6 +12730,7 @@ DWORD sehCode = 0;
         out << "META\tflexgrid_rtti_diagnostic\t" << V153EscapeFieldUtf8(flexGridRttiDiagnostic) << "\n";
         AppendV153Section(out, accounts, 12);
         AppendV153Section(out, positions, 8);
+        AppendV153Section(out, positionHistory, 8);
         AppendV153Section(out, logs, 6);
         AppendV153Section(out, monitoringLogs, 6);
         out << "SUMMARY\tpages_ok\t" << pagesOk
@@ -12709,7 +12741,7 @@ DWORD sehCode = 0;
         return pagesOk > 0 && totalSeh == 0;
     }
 
-    void AppendV174RecoveryMetadata(
+    void AppendV175RecoveryMetadata(
         std::string& payload,
         bool attempted,
         bool tabViewFound,
@@ -12730,7 +12762,7 @@ DWORD sehCode = 0;
         payload.insert(markerEnd + 1, metadata.str());
     }
 
-    bool BuildV174StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    bool BuildV175StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
     {
         bool tabViewFound = false;
         bool compatibilityMatched = false;
@@ -12757,7 +12789,7 @@ DWORD sehCode = 0;
         {
             if (pagesRead == 3 && sehFailures == 0)
                 g_tabViewRecoveryModeActive.store(false);
-            AppendV174RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            AppendV175RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
             return initialBuilt;
         }
 
@@ -12766,7 +12798,7 @@ DWORD sehCode = 0;
         // allowed per 30-second window and ordinary snapshot reads continue.
         if (!TryBeginTabViewRecovery())
         {
-            AppendV174RecoveryMetadata(
+            AppendV175RecoveryMetadata(
                 payload, false, tabViewFound, pagesRead, sehFailures, "cooldown");
             return initialBuilt;
         }
@@ -12790,7 +12822,7 @@ DWORD sehCode = 0;
             freshCompatibilityMatched,
             freshPagesRead,
             freshSehFailures);
-        AppendV174RecoveryMetadata(
+        AppendV175RecoveryMetadata(
             payload, true, freshTabViewFound, freshPagesRead, freshSehFailures);
         return recovered && freshCompatibilityMatched;
     }
@@ -13004,7 +13036,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV174StatusReportSnapshotWithRecovery(snapshot, responsePayload);
+            const bool built = BuildV175StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 

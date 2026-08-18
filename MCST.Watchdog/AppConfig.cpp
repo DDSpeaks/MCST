@@ -11,6 +11,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <utility>
 
@@ -90,6 +91,37 @@ namespace
         std::wstring raw;
         if (TryReadRaw(path, section, key, raw))
             return;
+
+        WriteValue(path, section, key, fallback);
+        changes.push_back(SettingName(section, key) + L" was missing; default value was written.");
+    }
+
+    void EnsureChoiceKey(
+        const std::wstring& path,
+        const wchar_t* section,
+        const wchar_t* key,
+        const wchar_t* fallback,
+        std::initializer_list<const wchar_t*> choices,
+        std::vector<std::wstring>& changes)
+    {
+        std::wstring raw;
+        if (TryReadRaw(path, section, key, raw))
+        {
+            const std::wstring normalized = ToLower(Trim(raw));
+            for (const wchar_t* choice : choices)
+            {
+                if (normalized == choice)
+                {
+                    if (raw != normalized)
+                        WriteValue(path, section, key, normalized);
+                    return;
+                }
+            }
+            WriteValue(path, section, key, fallback);
+            changes.push_back(SettingName(section, key) + L" had invalid value '" + raw +
+                L"'; default " + fallback + L" was written.");
+            return;
+        }
 
         WriteValue(path, section, key, fallback);
         changes.push_back(SettingName(section, key) + L" was missing; default value was written.");
@@ -292,7 +324,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.114-R24");
+    WriteValue(path, L"General", L"version", L"1.114-R25");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -300,6 +332,9 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureIntKey(path, L"Bridge", L"snapshot_retry_count", 3, 1, 10, changes);
     EnsureIntKey(path, L"Bridge", L"snapshot_retry_delay_milliseconds", 250, 0, 10000, changes);
     EnsureIntKey(path, L"TrackerMonitor", L"stale_critical_after_minutes", 10, 1, 1440, changes);
+    EnsureChoiceKey(
+        path, L"Tracker", L"date_order", L"auto",
+        { L"auto", L"dmy", L"mdy", L"ymd" }, changes);
 
     EnsureBoolKey(path, L"AutoTrading", L"enabled", true, changes);
     EnsureIntKey(path, L"AutoTrading", L"minimum_active_strategies", 65, 0, 10000, changes);
@@ -410,6 +445,7 @@ AppConfig LoadAppConfig()
     config.snapshotRetryDelayMilliseconds = ReadInt(path, L"Bridge", L"snapshot_retry_delay_milliseconds", 250, 0, 10000);
     config.trackerStaleCriticalAfterMinutes = ReadInt(
         path, L"TrackerMonitor", L"stale_critical_after_minutes", 10, 1, 1440);
+    config.trackerDateOrder = ReadString(path, L"Tracker", L"date_order", L"auto");
     config.autoTradingMonitoringEnabled = ReadBool(path, L"AutoTrading", L"enabled", true);
     config.autoTradingMinimum = ReadInt(path, L"AutoTrading", L"minimum_active_strategies", 65, 0, 10000);
     config.autoTradingCheckMinutes = ReadInt(path, L"AutoTrading", L"check_interval_minutes", 5, 1, 1440);

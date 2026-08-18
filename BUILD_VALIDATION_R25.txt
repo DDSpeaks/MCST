@@ -1,0 +1,33 @@
+MCST 1.114-R25 / Tracker Bridge V175 validation
+================================================
+
+Completed in the source workspace
+---------------------------------
+- portable C++17 smoke/regression tests pass;
+- Overall Status and System Status use non-wrapping 15 px preformatted HTML;
+- status HTML contains no semantic presentation table;
+- fixed-width state-dot rendering preserves status columns;
+- Open Positions remains one line per row with aligned Open P/L totals;
+- Position History is an optional eight-column Bridge section;
+- the V147 Positions History page offset is fingerprint-gated at +0x78;
+- optional Position History failure does not enter pages_ok/pages_failed or
+  the core SEH/recovery count;
+- current-month Realized P/L is recalculated and aligned under Open P/L;
+- the monthly total remains available with zero open positions and is withheld
+  when Position History reaches the 5,000-row capture limit;
+- DMY, MDY, YMD, separator variants, ambiguity fallback, and invalid calendar
+  dates have regression coverage;
+- green/red full-value styling includes current-month Realized P/L;
+- Bridge remains Protocol V2.
+
+Required on Windows before production deployment
+------------------------------------------------
+- build MCST.sln in Visual Studio 2022, Release x64;
+- run Tools\Validate-Release.ps1;
+- confirm zero compiler/linker errors;
+- install both the rebuilt MCST-Watchdog.exe and V175 Bridge DLL;
+- restart MultiCharts and confirm the loaded Bridge reports internal V175;
+- verify a live Positions History capture and compare its current-month sum
+  against the Tracker UI;
+- send a real report to iOS Mail and verify Status/Open Positions remain the
+  same apparent font size while long lines continue to the right.

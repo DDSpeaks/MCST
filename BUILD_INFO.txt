@@ -1,27 +1,29 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R24
+MCST-Watchdog version: 1.114-R25
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V174, Protocol V2
-Production change:     One-line Open Positions with aligned Open P/L
+Tracker Bridge:        Product 1.0, internal V175, Protocol V2
+Production change:     One-line Status sections and monthly Realized P/L
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R24 production method
+R25 production method
 ---------------------
-1. Keep every Open Position on one non-wrapping preformatted line.
-2. Put Symbol first and Open P/L second, followed by the remaining seven fields.
-3. Place every known-currency total directly below the Open P/L detail column.
-4. Use the same protected 15-pixel monospaced HTML style as Accounts and Logs.
-5. Preserve complete green/red Open P/L value coloring without removing the
-   spaces that align the column.
-6. Do not create a semantic HTML table, fixed-width child, overflow wrapper, or
-   multi-line position card that a mobile mail client can size independently.
+1. Keep Overall Status, System Status, and Open Positions in protected,
+   non-wrapping 15-pixel preformatted HTML flows.
+2. Preserve status alignment with a fixed four-character colored-dot cell.
+3. Read optional Position History at verified CATPTTabView offset +0x78.
+4. Recalculate current-month Realized P/L from each complete snapshot.
+5. Support DMY, MDY, and YMD numeric dates, use the Windows locale for wholly
+   ambiguous rows, and fail closed on conflicting or invalid dates.
+6. Align known-currency Realized P/L below the Open P/L column and apply the
+   same complete green/red value styling.
+7. Keep Position History outside the three-section Tracker health decision.
 
 Retained production behavior
 ----------------------------
-- non-sticky V174 Tracker recovery and bounded 30-second candidate caching;
+- non-sticky V175 Tracker recovery and bounded 30-second candidate caching;
 - configurable stale-data Attention-to-Critical escalation;
 - separate Tracker-attempt and last-complete-snapshot timestamps;
 - up to 200 live monitoring_logs rows for BrokerMonitor and LogAlertEngine;
@@ -33,3 +35,4 @@ Retained Position Currency R16 research minimum Bridge: V171
 R20 initial self-recovery Bridge: V172
 R21 extended monitoring history Bridge: V173
 R22/R23/R24 non-sticky recovery Bridge: V174
+R25 optional Position History Bridge: V175

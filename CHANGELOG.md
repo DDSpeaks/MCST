@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.114-R25
+
+- Replaced Overall/System Status HTML tables with protected one-line 15 px
+  preformatted sections and fixed-width colored state markers.
+- Added optional Bridge V175 `position_history` capture at the exact verified
+  V147 page offset without changing Protocol V2 or core Tracker health logic.
+- Added current-month known-currency Realized P/L below the Open P/L column.
+- Added DMY/MDY/YMD parsing, Windows-locale fallback, `[Tracker] date_order`
+  override, and fail-closed invalid-date handling.
+- Added date, monthly-total, color, and mobile-layout regression coverage.
+
 ## 1.114-R24
 
 - Replaced the R23 multi-line Open Positions cards with one non-wrapping line

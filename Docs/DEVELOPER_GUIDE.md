@@ -3,17 +3,24 @@
 
 ## Aligned Open P/L Lines build
 
-MCST-Watchdog 1.114-R24 renders Open Positions in the same 15-pixel preformatted HTML flow as Accounts and Recent Logs. It does not use the R22 fixed-width table or the R23 multi-line cards. Every position remains on one line and may continue to the right. This prevents the section from acquiring a smaller independent type scale while preserving the requested row-at-a-glance presentation.
+MCST-Watchdog 1.114-R25 renders Overall Status, System Status, and Open Positions in the same 15-pixel preformatted HTML flow as Accounts and Recent Logs. It does not use semantic status tables, the R22 fixed-width position table, or the R23 multi-line cards. Every status and position row remains one line and may continue to the right. The state marker occupies a fixed four-character span so HTML color does not disturb the plain-text column geometry.
 
-R24 retains the bounded 200-row monitoring history introduced in R21 and Bridge V174's non-sticky recovery. Bridge reads the Logs grid once, derives the ten-row display section and the monitoring section, and leaves Protocol V2 unchanged. BrokerMonitor and LogAlertEngine use only the current live monitoring history; reports continue to show ten rows.
+R25 retains the bounded monitoring history introduced in R21 and Bridge V174's non-sticky recovery. Bridge V175 also reads optional Positions History through the same validated grid path and leaves Protocol V2 unchanged. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
-The bounded recovery remains read-only. Bridge clears only its own CATPTTabView discovery caches, takes a fresh snapshot, and rescans. V174 uses scope-bound recovery state so failure cannot leave later normal discovery disabled. Empty and populated candidate scans are cached for 30 seconds. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
+The bounded recovery remains read-only. Bridge clears only its own CATPTTabView discovery caches, takes a fresh snapshot, and rescans. V175 retains V174's scope-bound recovery state so failure cannot leave later normal discovery disabled. Empty and populated candidate scans are cached for 30 seconds. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R24 orders the nine columns as Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L is placed in the Symbol column and its amount in the Open P/L column, so details and totals share one vertical scan line. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact. R18's green/red full-value styling is retained.
+R25 retains the R24 nine-column order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L and current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact.
+
+`TrackerDateParser` accepts numeric DMY, MDY, and YMD dates and validates real
+calendar days. With `date_order=auto`, snapshot-wide unambiguous evidence is
+used first and the Windows short-date order is the fallback. The parser ignores
+time text. A contradiction or invalid date is excluded rather than coerced.
+The monthly total is recomputed from the current snapshot; no refresh-to-refresh
+accumulator is maintained.
 
 The earlier R16 `Position CCY` Developer action is retained. Bridge V171 or newer verifies the exact ATCenterProxy position vtable and machine-code signatures discovered by R15, finds its live objects, correlates Quantity and Average Price with the visible rows, and decodes the bounded currency strings at object offsets `+0x308` and `+0x328`. No candidate target is called. R20 production reporting does not depend on running this research action.
 
@@ -44,11 +51,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V174
+Internal build:  V175
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, and V174 makes recovery failure non-sticky without changing Protocol V2.
+V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, and V175 adds optional Position History without changing Protocol V2.
 
 ### MCST.TrackerBridge
 
@@ -123,6 +130,7 @@ atonptracker_image_size=...
 tracker_tabview_vtable_rva=0x...
 tracker_accounts_page_offset=0x...
 tracker_open_positions_page_offset=0x...
+tracker_position_history_page_offset=0x...
 tracker_logs_page_offset=0x...
 tracker_grid_member_offset=0x...
 tracker_rows_offset_1=0x...
@@ -131,6 +139,9 @@ tracker_gettext_slot=...
 tracker_flexgrid_vtable_rva=0x...
 tracker_gettext_rva=0x...
 ```
+
+`tracker_position_history_page_offset` is optional. Without it the verified
+core profile remains valid, but monthly Realized P/L is unavailable.
 
 Optional research metadata may also include:
 
