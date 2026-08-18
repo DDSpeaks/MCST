@@ -1,22 +1,23 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R23
+MCST-Watchdog version: 1.114-R24
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V174, Protocol V2
-Production change:     Normal-width mobile Open Positions cards
+Production change:     One-line Open Positions with aligned Open P/L
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R23 production method
+R24 production method
 ---------------------
-1. Keep the aligned nine-column Open Positions table in the plain-text report.
-2. Convert each HTML position to a 100-percent-width four-line card.
-3. Allow every field to wrap instead of creating a viewport-widening child.
-4. Keep 15-pixel monospaced typography on the card, every line, and totals.
-5. Preserve known-currency Open P/L totals and complete profit-value coloring.
-6. Remove the fixed 1100-pixel table and horizontal-scroll wrapper rejected by
-   observed iOS Mail rendering.
+1. Keep every Open Position on one non-wrapping preformatted line.
+2. Put Symbol first and Open P/L second, followed by the remaining seven fields.
+3. Place every known-currency total directly below the Open P/L detail column.
+4. Use the same protected 15-pixel monospaced HTML style as Accounts and Logs.
+5. Preserve complete green/red Open P/L value coloring without removing the
+   spaces that align the column.
+6. Do not create a semantic HTML table, fixed-width child, overflow wrapper, or
+   multi-line position card that a mobile mail client can size independently.
 
 Retained production behavior
 ----------------------------
@@ -31,4 +32,4 @@ Production Tracker minimum Bridge: V156
 Retained Position Currency R16 research minimum Bridge: V171
 R20 initial self-recovery Bridge: V172
 R21 extended monitoring history Bridge: V173
-R22/R23 non-sticky recovery Bridge: V174
+R22/R23/R24 non-sticky recovery Bridge: V174

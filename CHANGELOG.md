@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## 1.114-R24
+
+- Replaced the R23 multi-line Open Positions cards with one non-wrapping line
+  per position, using the same 15-pixel preformatted HTML style as Accounts and
+  Recent Logs.
+- Selected the column order Symbol, Open P/L, Side, Qty, Average Price, Native
+  Value, Account, Profile, and Last Update.
+- Put every known-currency total directly below the second-column Open P/L
+  detail values while preserving complete green/red coloring and alignment.
+- Retained R22 Tracker recovery and stale-state corrections unchanged. Tracker
+  Bridge remains internal V174 and Protocol V2 remains unchanged.
+
 ## 1.114-R23
 
 - Replaced the wide HTML Open Positions table with normal-width cards after an

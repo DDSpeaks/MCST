@@ -99,10 +99,23 @@ int wmain()
         report,
         L"EUR +8,25",
         "Known-currency Open P/L total was not calculated correctly");
+    const std::wstring headerLine = FindLineContaining(report, L"Average Price");
+    if (DelimitedField(headerLine, 0) != L"Symbol" ||
+        DelimitedField(headerLine, 1) != L"Open P/L" ||
+        DelimitedField(headerLine, 2) != L"Side" ||
+        DelimitedField(headerLine, 3) != L"Qty" ||
+        DelimitedField(headerLine, 4) != L"Average Price" ||
+        DelimitedField(headerLine, 5) != L"Native Value" ||
+        DelimitedField(headerLine, 6) != L"Account" ||
+        DelimitedField(headerLine, 7) != L"Profile" ||
+        DelimitedField(headerLine, 8) != L"Last Update")
+    {
+        throw std::runtime_error("Open Positions does not use the selected one-line column order");
+    }
     const std::wstring totalLine = FindLineContaining(report, L"EUR +8,25");
-    if (DelimitedField(totalLine, 6) != L"Total Open P/L" ||
-        DelimitedField(totalLine, 7) != L"EUR +8,25" ||
-        DelimitedField(totalLine, 8) != L"[2 rows]")
+    if (DelimitedField(totalLine, 0) != L"Total Open P/L" ||
+        DelimitedField(totalLine, 1) != L"EUR +8,25" ||
+        DelimitedField(totalLine, 2) != L"[2 rows]")
     {
         throw std::runtime_error("Open P/L total is not aligned below the Open P/L detail column");
     }
@@ -122,20 +135,12 @@ int wmain()
         "Mobile viewport metadata is missing from the Status Report HTML");
     RequireContains(
         reportHtml,
-        L"class=\"mcst-open-position-cards\"",
-        "The responsive Open Positions card container is missing");
+        L"class=\"mcst-open-positions-lines\"",
+        "The one-line Open Positions preformatted section is missing");
     RequireContains(
         reportHtml,
-        L"class=\"mcst-open-position-card\"",
-        "Individual Open Positions are not rendered as readable cards");
-    RequireContains(
-        reportHtml,
-        L"width:100%;max-width:100%;box-sizing:border-box",
-        "An Open Positions card can still widen the mobile message viewport");
-    RequireContains(
-        reportHtml,
-        L"white-space:normal;overflow-wrap:anywhere",
-        "Open Positions values cannot wrap safely on a narrow screen");
+        L"font-size:15px !important;line-height:1.28 !important;white-space:pre",
+        "Open Positions does not share the normal report font size and line flow");
     RequireNotContains(
         reportHtml,
         L"width=\"1100\"",
@@ -148,6 +153,10 @@ int wmain()
         reportHtml,
         L"<table class=\"mcst-open-positions\"",
         "Open Positions is still rendered as one wide HTML table");
+    RequireNotContains(
+        reportHtml,
+        L"mcst-open-position-card",
+        "Open Positions still uses the rejected multi-line card layout");
     RequireContains(
         reportHtml,
         L"font-size:15px !important",
@@ -196,28 +205,10 @@ int wmain()
         L"mcst-stale-critical",
         "The HTML report does not render an expired stale Tracker snapshot as Critical");
 
-    RequireContains(
-        reportHtml,
-        L"AAOI:xnas &middot; Long &middot; <span",
-        "The compact position identity line is missing");
-    RequireContains(
-        reportHtml,
-        L"<span style=\"font-weight:600;\">Open P/L:</span>",
-        "The position Open P/L field is not labelled in the card layout");
-    RequireContains(
-        reportHtml,
-        L"class=\"mcst-open-position-total\"",
-        "Known-currency Open P/L totals are missing from the card layout");
-    if (CountOccurrences(reportHtml, L"class=\"mcst-open-position-card\"") !=
-        snapshot.openPositions.rows.size())
-    {
-        throw std::runtime_error("One or more Open Positions rows are missing from the card layout");
-    }
-    RequireContains(reportHtml, L"Profile:</span> Saxo", "Profile is missing from a position card");
-    RequireContains(reportHtml, L"Account:</span> A", "Account is missing from a position card");
-    RequireContains(reportHtml, L"Average Price:</span> 139,97", "Average Price is missing from a position card");
-    RequireContains(reportHtml, L"Native Value:</span> 419,91", "Native Value is missing from a position card");
-    RequireContains(reportHtml, L"Last Update:</span> now", "Last Update is missing from a position card");
+    RequireContains(reportHtml, L"AAOI:xnas", "Symbol is missing from the one-line Open Positions section");
+    RequireContains(reportHtml, L"139,97", "Average Price is missing from the one-line Open Positions section");
+    RequireContains(reportHtml, L"419,91", "Native Value is missing from the one-line Open Positions section");
+    RequireContains(reportHtml, L"now", "Last Update is missing from the one-line Open Positions section");
     RequireContains(
         reportHtml,
         L"<span style=\"color:#15803D;font-weight:600;\">\u20ac 10,50</span>",
@@ -260,8 +251,8 @@ int wmain()
         L"EUR +106,68",
         "Current Saxo capture Open P/L total was not calculated correctly");
     const std::wstring currentTotalLine = FindLineContaining(currentCaptureReport, L"EUR +106,68");
-    if (DelimitedField(currentTotalLine, 7) != L"EUR +106,68" ||
-        DelimitedField(currentTotalLine, 8) != L"[10 rows]")
+    if (DelimitedField(currentTotalLine, 1) != L"EUR +106,68" ||
+        DelimitedField(currentTotalLine, 2) != L"[10 rows]")
     {
         throw std::runtime_error("Current Saxo total is not in the Open P/L column");
     }

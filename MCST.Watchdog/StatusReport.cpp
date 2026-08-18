@@ -361,8 +361,8 @@ namespace
         }
 
         const std::vector<std::wstring> headers = {
-            L"Profile", L"Account", L"Symbol", L"Side", L"Qty", L"Average Price",
-            L"Native Value", L"Open P/L", L"Last Update"
+            L"Symbol", L"Open P/L", L"Side", L"Qty", L"Average Price",
+            L"Native Value", L"Account", L"Profile", L"Last Update"
         };
         std::vector<std::vector<std::wstring>> rows;
         rows.reserve(section.rows.size());
@@ -373,34 +373,34 @@ namespace
         for (const auto& source : section.rows)
         {
             std::vector<std::wstring> row(9);
-            row[0] = source.size() > 0 ? source[0] : L"";
-            row[1] = source.size() > 1 ? source[1] : L"";
-            row[2] = source.size() > 2 ? source[2] : L"";
-            row[3] = source.size() > 3 ? source[3] : L"";
-            row[4] = source.size() > 4 ? source[4] : L"";
-            row[5] = source.size() > 5 ? source[5] : L"";
-            row[7] = source.size() > 6 ? source[6] : L"";
+            row[0] = source.size() > 2 ? source[2] : L"";
+            row[1] = source.size() > 6 ? source[6] : L"";
+            row[2] = source.size() > 3 ? source[3] : L"";
+            row[3] = source.size() > 4 ? source[4] : L"";
+            row[4] = source.size() > 5 ? source[5] : L"";
+            row[6] = source.size() > 1 ? source[1] : L"";
+            row[7] = source.size() > 0 ? source[0] : L"";
             row[8] = source.size() > 7 ? source[7] : L"";
 
             double quantity = 0.0;
             double averagePrice = 0.0;
-            const bool quantityOk = ParseLocalizedNumber(row[4], quantity);
-            const bool averagePriceOk = ParseLocalizedNumber(row[5], averagePrice);
+            const bool quantityOk = ParseLocalizedNumber(row[3], quantity);
+            const bool averagePriceOk = ParseLocalizedNumber(row[4], averagePrice);
 
             if (quantityOk && averagePriceOk)
             {
                 const double nativeValue = std::fabs(quantity) * averagePrice;
-                row[6] = FormatReportNumber(nativeValue);
+                row[5] = FormatReportNumber(nativeValue);
             }
             else
             {
-                row[6] = L"n/a";
+                row[5] = L"n/a";
             }
 
             double openPl = 0.0;
             std::wstring openPlCurrency;
-            if (ParseLocalizedNumber(row[7], openPl) &&
-                TryExtractKnownCurrency(row[7], openPlCurrency))
+            if (ParseLocalizedNumber(row[1], openPl) &&
+                TryExtractKnownCurrency(row[1], openPlCurrency))
             {
                 openPlTotalsByCurrency[openPlCurrency] += openPl;
                 ++openPlRowsByCurrency[openPlCurrency];
@@ -417,9 +417,9 @@ namespace
         for (const auto& total : openPlTotalsByCurrency)
         {
             std::vector<std::wstring> totalRow(headers.size());
-            totalRow[6] = L"Total Open P/L";
-            totalRow[7] = total.first + L" " + FormatReportNumber(total.second, true);
-            totalRow[8] = L"[" + std::to_wstring(openPlRowsByCurrency[total.first]) + L" rows]";
+            totalRow[0] = L"Total Open P/L";
+            totalRow[1] = total.first + L" " + FormatReportNumber(total.second, true);
+            totalRow[2] = L"[" + std::to_wstring(openPlRowsByCurrency[total.first]) + L" rows]";
             totalRows.push_back(std::move(totalRow));
         }
 
@@ -428,7 +428,7 @@ namespace
         const std::vector<std::size_t> widths =
             CalculateColumnWidths(rowsForWidth, headers.size(), &headers, false);
         const std::vector<bool> rightAligned = {
-            false, false, false, false, true, true, true, true, false
+            false, true, false, true, true, true, false, false, false
         };
 
         AppendAlignedRow(out, headers, widths, std::vector<bool>(headers.size(), false), false);
@@ -453,7 +453,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R23\n"
+        << L"Watchdog version       1.114-R24\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -595,11 +595,24 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         for (;;)
         {
             const std::size_t end = line.find(separator, begin);
-            cells.push_back(end == std::wstring::npos
-                ? line.substr(begin)
-                : line.substr(begin, end - begin));
             if (end == std::wstring::npos)
+            {
+                // trimRight() removes the last space from a trailing " | "
+                // delimiter when the final aligned cell is empty. Preserve that
+                // final empty field so total rows still have all nine columns.
+                if (line.size() >= 2 && line.compare(line.size() - 2, 2, L" |") == 0 &&
+                    line.size() - 2 >= begin)
+                {
+                    cells.push_back(line.substr(begin, line.size() - 2 - begin));
+                    cells.emplace_back();
+                }
+                else
+                {
+                    cells.push_back(line.substr(begin));
+                }
                 break;
+            }
+            cells.push_back(line.substr(begin, end - begin));
             begin = end + separator.size();
         }
         return cells;
@@ -607,26 +620,33 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
 
     auto openPositionCellHtml = [&](const std::wstring& rawCell, std::size_t column)
     {
-        constexpr std::size_t openPlColumn = 7;
-        const std::wstring cell = trim(rawCell);
-        if (cell.empty())
-            return std::wstring(L"&nbsp;");
-
+        constexpr std::size_t openPlColumn = 1;
         if (column != openPlColumn)
-            return escapeHtml(cell);
+            return escapeHtml(rawCell);
+
+        const std::size_t begin = rawCell.find_first_not_of(L" \t");
+        if (begin == std::wstring::npos)
+            return escapeHtml(rawCell);
+        const std::size_t end = rawCell.find_last_not_of(L" \t");
+        const std::wstring cell = rawCell.substr(begin, end - begin + 1);
 
         double profit = 0.0;
-        if (!ParseLocalizedNumber(cell, profit) ||
-            std::fabs(profit) < 0.0000001)
+        const bool parsedProfit = ParseLocalizedNumber(cell, profit);
+        const bool explicitNegative = cell.find(L'-') != std::wstring::npos;
+        const bool explicitPositive = cell.find(L'+') != std::wstring::npos;
+        if ((!parsedProfit || std::fabs(profit) < 0.0000001) &&
+            !explicitNegative && !explicitPositive)
         {
-            return escapeHtml(cell);
+            return escapeHtml(rawCell);
         }
 
-        std::wstring result = profit > 0.0
-            ? L"<span style=\"color:#15803D;font-weight:600;\">"
-            : L"<span style=\"color:#B4232A;font-weight:600;\">";
+        std::wstring result = escapeHtml(rawCell.substr(0, begin));
+        result += explicitNegative || (parsedProfit && profit < 0.0)
+            ? L"<span style=\"color:#B4232A;font-weight:600;\">"
+            : L"<span style=\"color:#15803D;font-weight:600;\">";
         result += escapeHtml(cell);
         result += L"</span>";
+        result += escapeHtml(rawCell.substr(end + 1));
         return result;
     };
 
@@ -652,13 +672,18 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
     bool systemTableOpen = false;
     bool preOpen = false;
     bool inOpenPositions = false;
-    bool openPositionCardsOpen = false;
+
+    const std::wstring preStyle =
+        L"font-family:Consolas,'Courier New',monospace !important;"
+        L"font-size:15px !important;line-height:1.28 !important;"
+        L"white-space:pre;margin:0;-webkit-text-size-adjust:100% !important;"
+        L"-ms-text-size-adjust:100% !important;";
 
     auto openPre = [&]()
     {
         if (!preOpen)
         {
-            html += L"<pre style=\"font-family:Consolas,'Courier New',monospace;font-size:15px;line-height:1.28;white-space:pre;margin:0;\">";
+            html += L"<pre style=\"" + preStyle + L"\">";
             preOpen = true;
         }
     };
@@ -681,42 +706,20 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         }
     };
 
-    auto openOpenPositionCards = [&]()
-    {
-        if (openPositionCardsOpen)
-            return;
-        closePre();
-        // iOS Mail scales a wide table as one visual object even when the table
-        // sits inside an overflow container. Render each position as a normal-
-        // width block instead. Every value may wrap, so no child can force the
-        // message viewport wider or trigger automatic text shrinking.
-        html += L"<div class=\"mcst-open-position-cards\" role=\"list\" style=\"display:block;width:100%;max-width:100%;margin:0 0 4px 0;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.35 !important;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">\r\n";
-        openPositionCardsOpen = true;
-    };
-
-    auto closeOpenPositionCards = [&]()
-    {
-        if (!openPositionCardsOpen)
-            return;
-        html += L"</div>\r\n";
-        openPositionCardsOpen = false;
-    };
-
-    auto positionFieldHtml = [&](const std::wstring& label, const std::wstring& valueHtml)
-    {
-        return L"<span style=\"white-space:normal;overflow-wrap:anywhere;\"><span style=\"font-weight:600;\">" +
-            escapeHtml(label) + L":</span> " + valueHtml + L"</span>";
-    };
-
     for (std::size_t i = 0; i < lines.size(); ++i)
     {
         const std::wstring& line = lines[i];
 
         if (line == L"OPEN POSITIONS")
+        {
+            closePre();
             inOpenPositions = true;
+            html += L"<pre class=\"mcst-open-positions-lines\" style=\"" + preStyle + L"\">";
+            preOpen = true;
+        }
         else if (line == L"RECENT LOGS")
         {
-            closeOpenPositionCards();
+            closePre();
             inOpenPositions = false;
         }
 
@@ -819,64 +822,26 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             const std::vector<std::wstring> cells = splitAlignedTableRow(line);
             if (cells.size() == 9)
             {
-                const bool headerRow = trim(cells[0]) == L"Profile" &&
-                    trim(cells[7]) == L"Open P/L";
-                const bool totalRow = trim(cells[6]) == L"Total Open P/L";
-                if (headerRow)
+                for (std::size_t column = 0; column < cells.size(); ++column)
                 {
-                    openOpenPositionCards();
-                    continue;
+                    if (column != 0)
+                        html += L" | ";
+                    html += openPositionCellHtml(cells[column], column);
                 }
-
-                openOpenPositionCards();
-                if (totalRow)
-                {
-                    html += L"<div class=\"mcst-open-position-total\" style=\"display:block;width:100%;max-width:100%;box-sizing:border-box;border-top:1px solid #A8A8A8;padding:7px 0 3px 0;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;font-weight:600;line-height:1.35 !important;white-space:normal;overflow-wrap:anywhere;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
-                    html += positionFieldHtml(trim(cells[6]), openPositionCellHtml(cells[7], 7));
-                    if (!trim(cells[8]).empty())
-                        html += L" <span style=\"font-weight:400;\">" + escapeHtml(trim(cells[8])) + L"</span>";
-                    html += L"</div>\r\n";
-                    continue;
-                }
-
-                html += L"<div class=\"mcst-open-position-card\" role=\"listitem\" style=\"display:block;width:100%;max-width:100%;box-sizing:border-box;border-top:1px solid #D6D6D6;padding:7px 0 6px 0;font-family:Consolas,'Courier New',monospace !important;font-size:15px !important;line-height:1.35 !important;white-space:normal;overflow-wrap:anywhere;-webkit-text-size-adjust:100% !important;-ms-text-size-adjust:100% !important;\">";
-                html += L"<div style=\"font-size:15px !important;font-weight:600;white-space:normal;overflow-wrap:anywhere;\">" +
-                    escapeHtml(trim(cells[2]));
-                if (!trim(cells[3]).empty())
-                    html += L" &middot; " + escapeHtml(trim(cells[3]));
-                if (!trim(cells[4]).empty())
-                    html += L" &middot; " + positionFieldHtml(L"Qty", escapeHtml(trim(cells[4])));
-                html += L"</div>";
-                html += L"<div style=\"font-size:15px !important;white-space:normal;overflow-wrap:anywhere;\">" +
-                    positionFieldHtml(L"Profile", escapeHtml(trim(cells[0]))) + L" &middot; " +
-                    positionFieldHtml(L"Account", escapeHtml(trim(cells[1]))) + L"</div>";
-                html += L"<div style=\"font-size:15px !important;white-space:normal;overflow-wrap:anywhere;\">" +
-                    positionFieldHtml(L"Average Price", escapeHtml(trim(cells[5]))) + L" &middot; " +
-                    positionFieldHtml(L"Native Value", escapeHtml(trim(cells[6]))) + L"</div>";
-                html += L"<div style=\"font-size:15px !important;white-space:normal;overflow-wrap:anywhere;\">" +
-                    positionFieldHtml(L"Open P/L", openPositionCellHtml(cells[7], 7)) + L" &middot; " +
-                    positionFieldHtml(L"Last Update", escapeHtml(trim(cells[8]))) + L"</div>";
-                html += L"</div>\r\n";
+                html += L"\n";
                 continue;
             }
-
-            const bool separatorLine = !line.empty() &&
-                std::all_of(line.begin(), line.end(), [](wchar_t ch) { return ch == L'-'; });
-            if (openPositionCardsOpen && separatorLine)
-                continue;
-            if (openPositionCardsOpen)
-                closeOpenPositionCards();
         }
 
-        // Keep data-heavy sections such as SYSTEM RESOURCES, ACCOUNTS,
-        // and RECENT LOGS monospaced. OPEN POSITIONS uses normal-width semantic
-        // blocks above so mobile mail clients cannot shrink one wide object.
+        // Keep every data-heavy section in the same 15-pixel preformatted flow.
+        // Open Positions deliberately remains one logical line per position and
+        // may continue to the right, matching Accounts and Recent Logs instead
+        // of becoming a separate table that iOS Mail scales down.
         openPre();
         html += escapeHtml(line);
         html += L"\n";
     }
 
-    closeOpenPositionCards();
     closeSystemTable();
     closePre();
     html += L"</body></html>\r\n";

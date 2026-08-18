@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R23'
+$currentVersion = '1.114-R24'
 $currentBridgeBuild = 174
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -28,7 +28,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R23.txt',
+    'BUILD_VALIDATION_R24.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -145,15 +145,10 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'Total Open P/L' -or
     $statusReportSource -notmatch 'splitAlignedTableRow' -or
     $statusReportSource -notmatch 'openPositionCellHtml' -or
-    $statusReportSource -notmatch 'mcst-open-position-cards' -or
-    $statusReportSource -notmatch 'mcst-open-position-card' -or
-    $statusReportSource -notmatch 'mcst-open-position-total' -or
-    $statusReportSource -notmatch 'positionFieldHtml' -or
-    $statusReportSource -notmatch [regex]::Escape('role=\"list\"') -or
-    $statusReportSource -notmatch [regex]::Escape('role=\"listitem\"') -or
+    $statusReportSource -notmatch 'mcst-open-positions-lines' -or
+    $statusReportSource -notmatch 'preStyle' -or
     $statusReportSource -notmatch 'width=device-width,initial-scale=1.0' -or
-    $statusReportSource -notmatch 'width:100%;max-width:100%;box-sizing:border-box' -or
-    $statusReportSource -notmatch 'white-space:normal;overflow-wrap:anywhere' -or
+    $statusReportSource -notmatch 'white-space:pre;margin:0' -or
     $statusReportSource -notmatch '-webkit-text-size-adjust:100%' -or
     $statusReportSource -notmatch 'font-size:15px !important' -or
     $statusReportSource -notmatch 'mcst-stale-attention' -or
@@ -164,7 +159,10 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'Last complete snapshot' -or
     $statusReportSource -notmatch '#15803D' -or
     $statusReportSource -notmatch '#B4232A' -or
-    $statusReportSource -notmatch 'row\[7\] = source\.size\(\) > 6 \? source\[6\]' -or
+    $statusReportSource -notmatch 'row\[0\] = source\.size\(\) > 2 \? source\[2\]' -or
+    $statusReportSource -notmatch 'row\[1\] = source\.size\(\) > 6 \? source\[6\]' -or
+    $statusReportSource -notmatch 'totalRow\[0\] = L\"Total Open P/L\"' -or
+    $statusReportSource -notmatch 'totalRow\[1\] = total\.first' -or
     $statusReportSource -notmatch 'row\[8\] = source\.size\(\) > 7 \? source\[7\]' -or
     $statusReportSource -notmatch 'std::fabs\(quantity\) \* averagePrice' -or
     $statusReportSource -notmatch 'AppendAlignedSectionRows\(out, snapshot\.recentLogs, true\)') {
@@ -178,8 +176,10 @@ if ($statusReportSource -match 'NATIVE VALUE TOTAL') {
 }
 if ($statusReportSource -match [regex]::Escape('width=\"1100\"') -or
     $statusReportSource -match 'mcst-horizontal-scroll' -or
-    $statusReportSource -match 'width:1100px') {
-    throw 'The iOS-shrunk fixed-width Open Positions table is still present.'
+    $statusReportSource -match 'width:1100px' -or
+    $statusReportSource -match 'mcst-open-position-card' -or
+    $statusReportSource -match [regex]::Escape('<table class=\"mcst-open-positions\"')) {
+    throw 'A rejected fixed-width table, overflow wrapper, or multi-line Open Positions card is still present.'
 }
 
 $testsSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
@@ -193,12 +193,9 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'USD \\u20ac 4,00' -or
     $testsSource -notmatch '#15803D' -or
     $testsSource -notmatch '#B4232A' -or
-    $testsSource -notmatch 'mcst-open-position-cards' -or
-    $testsSource -notmatch 'mcst-open-position-card' -or
-    $testsSource -notmatch 'mcst-open-position-total' -or
+    $testsSource -notmatch 'mcst-open-positions-lines' -or
     $testsSource -notmatch 'width=device-width,initial-scale=1\.0' -or
-    $testsSource -notmatch 'width:100%;max-width:100%;box-sizing:border-box' -or
-    $testsSource -notmatch 'white-space:normal;overflow-wrap:anywhere' -or
+    $testsSource -notmatch 'white-space:pre' -or
     $testsSource -notmatch 'font-size:15px !important' -or
     $testsSource -notmatch 'mcst-stale-attention' -or
     $testsSource -notmatch 'mcst-stale-critical' -or
@@ -213,7 +210,7 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'No connection to Saxo Group trading system' -or
     $testsSource -notmatch 'UIC is not valid' -or
     $testsSource -notmatch 'brokerDecision\.status\.value != L"Connected"') {
-    throw 'Responsive Open Positions placement, size, or color regression test is missing.'
+    throw 'One-line Open Positions placement, size, or color regression test is missing.'
 }
 
 $watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
@@ -238,9 +235,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,23,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,23,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R23.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,24,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,24,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R24.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -406,12 +403,13 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Mobile Position Cards" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Aligned Open P/L Lines" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
-    $releaseNotes -notmatch 'normal-width card' -or
-    $releaseNotes -notmatch 'overflow-wrap:anywhere' -or
+    $releaseNotes -notmatch 'one non-wrapping line' -or
+    $releaseNotes -notmatch 'Open P/L is the second column' -or
+    $releaseNotes -notmatch '15-pixel monospaced' -or
     $releaseNotes -notmatch 'Watchdog-only') {
-    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, and the mobile position-card correction."
+    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, and the aligned one-line Open P/L correction."
 }
 
-Write-Host "MCST $currentVersion mobile position-card release validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion aligned Open P/L line release validation passed." -ForegroundColor Green

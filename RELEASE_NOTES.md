@@ -1,27 +1,26 @@
-# MCST 1.114-R23 Mobile Position Cards
+# MCST 1.114-R24 Aligned Open P/L Lines
 
 Tracker Bridge internal build: V174
 Bridge protocol: V2
 
-R23 corrects the Open Positions size problem confirmed by an iOS Mail capture
-from R22. Other preformatted report sections remained at the intended size, but
-iOS Mail scaled the fixed 1100-pixel position table as one visual object. The
-overflow container did not prevent that client-specific scaling.
+R24 uses the same preformatted HTML flow for Open Positions as Accounts and
+Recent Logs. This responds to the observed iOS Mail result where both a wide
+HTML table and a later card layout failed the intended at-a-glance presentation.
 
 ## Open Positions HTML layout
 
-- The wide nine-column HTML table and horizontal-scroll wrapper are removed.
-- Every position is rendered as a normal-width card with four compact lines:
-  symbol/side/quantity, profile/account, Average Price/Native Value, and
-  Open P/L/Last Update.
-- Cards, child fields, and totals explicitly retain the report's 15-pixel
-  monospaced typography.
-- Values use normal wrapping and `overflow-wrap:anywhere`; no Open Positions
-  child can force the message viewport wider.
-- Known-currency Open P/L totals remain immediately after the position cards.
+- Every position occupies exactly one non-wrapping line and may continue to the
+  right beyond the initially visible message area.
+- The column order is Symbol, Open P/L, Side, Qty, Average Price, Native Value,
+  Account, Profile, and Last Update.
+- Open P/L is the second column. Every known-currency total is printed directly
+  beneath that same column.
+- Open Positions shares the same explicitly protected 15-pixel monospaced
+  `<pre>` styling as the other data-heavy report sections.
+- The rejected multi-line card layout and fixed-width HTML table are absent.
 - Positive profit values remain fully green and negative values fully red,
   including currency signs/codes and plus/minus signs.
-- The plain-text/local Status Report keeps its aligned nine-column table.
+- The plain-text/local Status Report uses the identical one-line column order.
 
 ## Retained R22 behavior
 
@@ -32,5 +31,5 @@ overflow container did not prevent that client-specific scaling.
 - Last Tracker attempt and Last complete snapshot remain separate timestamps.
 - R21's bounded 200-row Broker/log-alert monitoring history is retained.
 
-The R23 change is Watchdog-only. If Bridge V174 is already installed from R22,
-only the rebuilt R23 Watchdog executable needs to be replaced.
+The R24 change is Watchdog-only. If Bridge V174 is already installed from R22
+or R23, only the rebuilt R24 Watchdog executable needs to be replaced.
