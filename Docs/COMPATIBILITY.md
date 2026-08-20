@@ -103,7 +103,7 @@ tracker_flexgrid_vtable_rva=0x...
 tracker_gettext_rva=0x...
 ```
 
-V175 can additionally use this optional verified layout value:
+V175 and later can additionally use this optional verified layout value:
 
 ```ini
 tracker_position_history_page_offset=0x...
@@ -111,6 +111,13 @@ tracker_position_history_page_offset=0x...
 
 Its absence does not invalidate an existing production profile; it only makes
 the monthly Realized P/L enrichment unavailable.
+
+For the exact verified V147 fingerprint (PE timestamp `0x6A5694FB`, image size
+`3534848`), Bridge V176 also embeds CATPTTabView primary vtable RVA
+`0x1D78C8`. A targeted recovery hit is not sufficient by itself: the object
+must pass structural scoring and expose a secondary vtable, a Tracker layout
+signature, or at least five credible page pointers. Other fingerprints do not
+inherit this anchor.
 
 Optional research metadata can include:
 

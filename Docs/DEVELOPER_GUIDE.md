@@ -3,17 +3,22 @@
 
 ## Aligned Open P/L Lines build
 
-MCST-Watchdog 1.114-R25 renders Overall Status, System Status, and Open Positions in the same 15-pixel preformatted HTML flow as Accounts and Recent Logs. It does not use semantic status tables, the R22 fixed-width position table, or the R23 multi-line cards. Every status and position row remains one line and may continue to the right. The state marker occupies a fixed four-character span so HTML color does not disturb the plain-text column geometry.
+MCST-Watchdog 1.114-R27 renders Overall as the first row of System Status and keeps System Status and Open Positions in protected 15-pixel preformatted HTML flows. It does not use semantic status tables, the R22 fixed-width position table, or the R23 multi-line cards. Every status and position row remains one line and may continue to the right. The state marker occupies a fixed four-character span so HTML color does not disturb the plain-text column geometry.
 
-R25 retains the bounded monitoring history introduced in R21 and Bridge V174's non-sticky recovery. Bridge V175 also reads optional Positions History through the same validated grid path and leaves Protocol V2 unchanged. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+R27 retains R26's optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Bridge V176 adds a fingerprint-scoped CATPTTabView vtable anchor and structural candidate validation to the existing non-sticky recovery. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
-The bounded recovery remains read-only. Bridge clears only its own CATPTTabView discovery caches, takes a fresh snapshot, and rescans. V175 retains V174's scope-bound recovery state so failure cannot leave later normal discovery disabled. Empty and populated candidate scans are cached for 30 seconds. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
+The bounded recovery remains read-only. Bridge clears only its own CATPTTabView discovery caches, takes a fresh snapshot, and rescans. V176 retains the scope-bound recovery state and 30-second cache/cooldown. The exact V147 fingerprint supplies vtable RVA `0x1D78C8`; accepted candidates must also carry a secondary vtable, Tracker layout signature, or at least five credible page pointers. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R25 retains the R24 nine-column order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L and current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact.
+R27 retains the nine-column order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact.
+
+`BrokerAuthDetector.cpp` deliberately does not define `WIN32_LEAN_AND_MEAN`.
+It includes `ole2.h` and `oleauto.h` before `UIAutomation.h` so Windows SDK
+10.0.26100 sees the COM base declarations before UI Automation provider and
+client interfaces.
 
 `TrackerDateParser` accepts numeric DMY, MDY, and YMD dates and validates real
 calendar days. With `date_order=auto`, snapshot-wide unambiguous evidence is
@@ -51,11 +56,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V175
+Internal build:  V176
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, and V175 adds optional Position History without changing Protocol V2.
+V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, and V176 adds targeted structural recovery without changing Protocol V2.
 
 ### MCST.TrackerBridge
 

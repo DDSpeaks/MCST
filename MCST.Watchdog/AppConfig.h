@@ -13,6 +13,7 @@ struct BrokerAuthProfile
     std::wstring name;
     std::vector<std::wstring> urlContains;
     std::vector<std::wstring> titleContains;
+    std::vector<std::wstring> titleOnlyContains;
     std::vector<std::wstring> textContains;
     std::vector<std::wstring> recoveryLogContains;
     int alertAfterSeconds = 10;

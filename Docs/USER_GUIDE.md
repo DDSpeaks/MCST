@@ -60,6 +60,7 @@ enabled=true
 name=Saxo
 url_contains=developer.saxobank.com/login
 title_contains=MultiCharts (OpenAPI Web App)|Saxo
+title_only_contains=MultiCharts (OpenAPI Web App)
 text_contains=login|account authentication
 recovery_log_contains=saxo|saxo group
 alert_after_seconds=10
@@ -87,15 +88,20 @@ Matching is case-insensitive and keywords are separated with `|`. The Log Alert 
 
 ## Status Reports and Heartbeats
 
-Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs. Tracker rows use calculated column widths so values remain vertically aligned. Overall Status, System Status, and Open Positions use the same protected 15-pixel monospaced one-line flow; long rows may continue to the right on a narrow display. Open Positions includes a derived per-row `Native Value`, but no Native Value total. Open P/L is totaled separately for every unambiguous currency, and complete positive/negative values are green/red including their currency and sign.
+Status Reports use the same operational state as the Dashboard and include MultiCharts/Bridge identity, selected compatibility profiles, system resources, Watchdog process information, Accounts, Open Positions, and Recent Logs. Tracker rows use calculated column widths so values remain vertically aligned. Overall is the first aligned row inside System Status. System Status and Open Positions use the same protected 15-pixel monospaced one-line flow; long rows may continue to the right on a narrow display. Open Positions includes a derived per-row `Native Value`, but no Native Value total. Open P/L is totaled separately for every unambiguous currency, and complete positive/negative values are green/red including their currency and sign.
 
-Every position stays on one line in this order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Known-currency Open P/L totals and the current month's known-currency Realized P/L from Positions History appear below the details, with each amount in the same second column as the individual profit values. Position History is not listed row by row.
+Every position stays on one line in this order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Known-currency Open P/L totals and one current-month Realized P/L line per visible account appear below the details, with each amount in the same second column as the individual profit values. Position History rows for account numbers not visible in Accounts are excluded, and no aggregate monthly total across accounts is shown. Position History is not listed row by row.
 
 The current-month Realized P/L remains available when there are no current open positions. If the bounded Position History capture reaches its 5,000-row safety limit, the total is withheld and shown as unavailable rather than presenting a potentially partial result.
 
 Numeric Positions History dates support DMY, MDY, and YMD layouts. The default `[Tracker] date_order=auto` uses unambiguous rows and the Windows user locale. Set the value to `dmy`, `mdy`, or `ymd` only when an override is necessary. Invalid rows are excluded instead of guessed.
 
-If a current Tracker table read fails after the bounded automatic retries, Watchdog keeps trying on every normal refresh. When a complete earlier snapshot exists, its Accounts, Open Positions, optional Position History, and Recent Logs may remain visible for context. The Dashboard and Status Report show **STALE** data as Attention for `stale_critical_after_minutes` (10 minutes by default), then escalate it to **CRITICAL**. A wholly unreadable current snapshot with no last-good data is immediately Critical; a partially live snapshot may remain Attention. Reports distinguish the last Tracker attempt from the last complete snapshot. Retained Recent Logs are display-only and do not generate new broker or log alerts. A later successful refresh automatically replaces the stale tables; restarting Watchdog should not normally be required.
+If a current Tracker table read fails after the bounded automatic retries, Watchdog keeps trying on every normal refresh. When a complete earlier snapshot exists, its Accounts, Open Positions, optional Position History, and Recent Logs may remain visible for context. The Dashboard and Status Report show **STALE** data as Attention for `stale_critical_after_minutes` (10 minutes by default), then escalate it to **CRITICAL**. A wholly unreadable current snapshot with no last-good data is immediately Critical; a partially live snapshot may remain Attention. Reports distinguish the last Tracker attempt from the last complete snapshot. Retained Recent Logs are display-only and do not generate new broker or log alerts. A later successful refresh automatically replaces the stale tables. On the exact verified V147 Tracker build, V176 retries a structurally validated CATPTTabView recovery after each bounded cooldown, so restarting Watchdog should not normally be required.
+
+When the dedicated `MultiCharts (OpenAPI Web App)` Saxo login window remains
+open past the configured delay, Broker monitoring raises an authentication
+alert. The browser scan is bounded and its diagnostics omit full OAuth URLs,
+request identifiers, tokens, user IDs, and passwords.
 
 Broker monitoring uses up to 200 current live Logs rows even though the Dashboard and Status Report show only the ten newest rows. This lets Watchdog find the newest Broker-specific connection state after startup even when later unrelated warnings have pushed that event outside the visible ten-row report window.
 

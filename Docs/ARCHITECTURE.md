@@ -50,19 +50,19 @@ The Bridge runs inside MultiCharts and provides a stable Tracker snapshot bounda
 
 ```text
 Product version: 1.0
-Internal build:  V175
+Internal build:  V176
 Protocol:        V2
 ```
 
-The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling, V171 added fingerprint-scoped currency verification, V172 added bounded Tracker recovery, V173 added a monitoring-only Logs history, V174 made failed recovery non-sticky, and V175 adds optional Position History capture. Protocol V2 remains unchanged.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling, V171 added fingerprint-scoped currency verification, V172 added bounded Tracker recovery, V173 added monitoring-only Logs history, V174 made failed recovery non-sticky, V175 added optional Position History capture, and V176 adds fingerprint-scoped CATPTTabView structural recovery. Protocol V2 remains unchanged.
 
-Recovery is deliberately read-only. It clears Bridge-owned object-discovery caches, captures current window/module state again, and repeats the same validated grid read once. Watchdog may then request additional snapshots according to its configured retry limit. V175 retains V174's scope-bound recovery gate, so a later refresh can resume normal discovery without restarting Watchdog. Empty and populated candidate results are cached for 30 seconds to keep repeated scans bounded.
+Recovery is deliberately read-only. It clears Bridge-owned object-discovery caches, captures current window/module state again, and repeats the same validated grid read once. Watchdog may then request additional snapshots according to its configured retry limit. V176 supplies the exact V147 CATPTTabView vtable RVA `0x1D78C8` and rejects candidates without strong structural evidence. Scope-bound recovery state and a 30-second cache/cooldown let later refreshes retry without restarting Watchdog while keeping scans bounded.
 
 If live data is still incomplete, the last complete tables may be displayed with an explicit stale timestamp. A stale snapshot remains Attention during the configured grace period (10 minutes by default) and escalates to Critical afterwards; a wholly unreadable current snapshot with no last-good data is immediately Critical. Stale Recent Logs are never sent to broker or log-alert evaluation.
 
 R21 reads the Logs grid only once per snapshot. The first ten rows cross the established `recent_logs` display boundary, while up to 200 rows are also supplied in the optional `monitoring_logs` section. State engines consume the latter so unrelated warning traffic cannot hide a slightly older Broker connection event. Reports still render only the ten-row display section.
 
-V175 also supplies optional `position_history` rows. This fourth table is not
+V175 and later also supply optional `position_history` rows. This fourth table is not
 part of `pages_ok`, `pages_failed`, core SEH totals, or the three-section Tracker
 health decision. Watchdog uses it only to recalculate current-month,
 known-currency Realized P/L. A missing or failed history section is reported as

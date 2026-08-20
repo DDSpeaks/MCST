@@ -279,11 +279,13 @@ namespace
                 profile.name = suffix;
             profile.urlContains = SplitPatterns(ReadString(path, section.c_str(), L"url_contains", L""));
             profile.titleContains = SplitPatterns(ReadString(path, section.c_str(), L"title_contains", L""));
+            profile.titleOnlyContains = SplitPatterns(ReadString(path, section.c_str(), L"title_only_contains", L""));
             profile.textContains = SplitPatterns(ReadString(path, section.c_str(), L"text_contains", L""));
             profile.recoveryLogContains = SplitPatterns(ReadString(path, section.c_str(), L"recovery_log_contains", L""));
             profile.alertAfterSeconds = ReadInt(path, section.c_str(), L"alert_after_seconds", 10, 3, 600);
 
-            if (!profile.urlContains.empty() || !profile.titleContains.empty() || !profile.textContains.empty())
+            if (!profile.urlContains.empty() || !profile.titleContains.empty() ||
+                !profile.titleOnlyContains.empty() || !profile.textContains.empty())
                 profiles.push_back(std::move(profile));
         }
         return profiles;
@@ -324,7 +326,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.114-R25");
+    WriteValue(path, L"General", L"version", L"1.114-R27");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -402,6 +404,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureStringKey(path, L"BrokerAuth.Saxo", L"name", L"Saxo", changes);
     EnsureStringKey(path, L"BrokerAuth.Saxo", L"url_contains", L"developer.saxobank.com/login", changes);
     EnsureStringKey(path, L"BrokerAuth.Saxo", L"title_contains", L"MultiCharts (OpenAPI Web App)|Saxo", changes);
+    EnsureStringKey(path, L"BrokerAuth.Saxo", L"title_only_contains", L"MultiCharts (OpenAPI Web App)", changes);
     EnsureStringKey(path, L"BrokerAuth.Saxo", L"text_contains", L"login|account authentication", changes);
     EnsureStringKey(path, L"BrokerAuth.Saxo", L"recovery_log_contains", L"saxo|saxo group", changes);
     EnsureIntKey(path, L"BrokerAuth.Saxo", L"alert_after_seconds", 10, 3, 600, changes);

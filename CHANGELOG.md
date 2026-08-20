@@ -228,3 +228,21 @@
 - Expanded compatibility documentation from an AutoTrading-specific view to a general MultiCharts Internal Compatibility Framework.
 - Added detected `Charting.dll` fingerprint information to `[DetectedMultiCharts]` diagnostics.
 - Reworked public documentation for distribution and consolidated release history into this changelog.
+# 1.114-R26 - Account P/L and Self-Recovery
+
+- Calculates current-month Realized P/L separately for every account visible
+  in Accounts and excludes all other Position History accounts.
+- Removes the combined monthly Realized P/L total across accounts.
+- Moves Overall into the first aligned System Status row.
+- Adds bounded Windows UI Automation and a dedicated-window title match for the
+  Saxo/MultiCharts OpenAPI authentication alert without retaining OAuth data.
+- Tracker Bridge V176 supplies the verified V147 CATPTTabView vtable RVA
+  `0x1D78C8` and structurally validates targeted recovery candidates.
+- Keeps Bridge Protocol V2 unchanged.
+# 1.114-R27 - UI Automation Header Fix
+
+- Fixes Windows SDK 10.0.26100 compilation of `BrokerAuthDetector.cpp` by
+  including COM/OLE declarations before `UIAutomation.h`.
+- Removes `WIN32_LEAN_AND_MEAN` from that translation unit so the SDK's COM
+  provider and client interfaces have their required base declarations.
+- Retains all R26 behavior and Tracker Bridge V176 / Protocol V2 unchanged.

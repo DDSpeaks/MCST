@@ -1,21 +1,21 @@
 ﻿# MCST
 
-## Package: 1.114-R25 Status Lines and Monthly Realized P/L
+## Package: 1.114-R27 UI Automation Header Fix
 
-This source package renders Overall Status, System Status, and Open Positions as the same protected, non-wrapping 15-pixel monospaced flow. Mobile mail clients can let long lines continue to the right, but may not independently shrink these sections. Open P/L stays in the second column, its total remains directly below it, and the current month's known-currency Realized P/L from Positions History is aligned in that same column. Complete green/red profit coloring is retained.
+This source package retains R26's account P/L, report layout, Tracker recovery, and Saxo authentication detection. R27 fixes the Windows SDK compilation of `BrokerAuthDetector.cpp` by loading the COM/OLE declarations before `UIAutomation.h` and by not defining `WIN32_LEAN_AND_MEAN` in that translation unit.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R25**
+- MCST-Watchdog: **1.114-R27**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V175**
+- Tracker Bridge internal build: **V176**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V173 added optional `monitoring_logs`, V174 made Tracker recovery non-sticky, and V175 adds the optional `position_history` section. Protocol V2 is unchanged, so older readers ignore the additive section. The current-month total requires the V175 DLL in this package and a verified Position History page offset. The retained R16 `Position CCY` action still requires V171 or newer.
+The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V175 added optional `position_history`; V176 adds the exact verified CATPTTabView vtable anchor and structural validation used by bounded self-recovery. Protocol V2 is unchanged. The current-month account totals and improved recovery require the V176 DLL in this package. The retained R16 `Position CCY` action still requires V171 or newer.
 
 ## Runtime installation
 
@@ -62,6 +62,18 @@ date_order=auto
 ```
 
 Accepted values are `auto`, `dmy`, `mdy`, and `ymd`. Invalid or unparseable dates are excluded rather than guessed.
+
+The default Saxo authentication profile also contains:
+
+```ini
+[BrokerAuth.Saxo]
+title_only_contains=MultiCharts (OpenAPI Web App)
+```
+
+This exact dedicated-window title complements URL and page-text matching when
+modern Edge does not expose its address bar through ordinary Win32 text. Only
+configured match patterns are reported; complete OAuth URLs and credentials are
+not retained.
 
 Watchdog also maintains generated diagnostic information such as:
 

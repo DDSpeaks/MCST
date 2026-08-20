@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R25'
-$currentBridgeBuild = 175
+$currentVersion = '1.114-R27'
+$currentBridgeBuild = 176
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -30,7 +30,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R25.txt',
+    'BUILD_VALIDATION_R27.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -134,6 +134,8 @@ if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
     $appConfigSource -notmatch 'TrackerMonitor' -or
     $appConfigSource -notmatch 'stale_critical_after_minutes' -or
     $appConfigSource -notmatch 'date_order' -or
+    $appConfigSource -notmatch 'title_only_contains' -or
+    $appConfigSource -notmatch 'MultiCharts \(OpenAPI Web App\)' -or
     $appConfigSource -notmatch 'WritePrivateProfileStringW\(nullptr, nullptr, nullptr, path\.c_str\(\)\)') {
     throw 'INI profile cache refresh support is missing from AppConfig.'
 }
@@ -149,10 +151,14 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'splitAlignedTableRow' -or
     $statusReportSource -notmatch 'openPositionCellHtml' -or
     $statusReportSource -notmatch 'mcst-open-positions-lines' -or
-    $statusReportSource -notmatch 'mcst-overall-status-lines' -or
     $statusReportSource -notmatch 'mcst-system-status-lines' -or
     $statusReportSource -notmatch 'Current month Realized P/L' -or
     $statusReportSource -notmatch 'BuildPositionHistoryTotalRows' -or
+    $statusReportSource -notmatch 'MonitorLine\(L"Overall"' -or
+    $statusReportSource -notmatch 'visibleAccounts' -or
+    $statusReportSource -notmatch 'totalsByAccount' -or
+    $statusReportSource -notmatch 'TrimCell\(row\[2\]\)' -or
+    $statusReportSource -notmatch 'Current month Realized P/L " \+ account' -or
     $statusReportSource -notmatch 'preStyle' -or
     $statusReportSource -notmatch 'width=device-width,initial-scale=1.0' -or
     $statusReportSource -notmatch 'white-space:pre;margin:0' -or
@@ -181,6 +187,10 @@ if ($statusReportSource -match 'totalPositionValue') {
 if ($statusReportSource -match 'NATIVE VALUE TOTAL') {
     throw 'The removed Native Value total notice must not appear in the Status Report.'
 }
+if ($statusReportSource -match 'OVERALL STATUS' -or
+    $statusReportSource -match 'mcst-overall-status-lines') {
+    throw 'Overall status must be the first aligned System Status row, not a separate section.'
+}
 if ($statusReportSource -match [regex]::Escape('width=\"1100\"') -or
     $statusReportSource -match 'mcst-horizontal-scroll' -or
     $statusReportSource -match 'width:1100px' -or
@@ -205,10 +215,13 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch '#15803D' -or
     $testsSource -notmatch '#B4232A' -or
     $testsSource -notmatch 'mcst-open-positions-lines' -or
-    $testsSource -notmatch 'mcst-overall-status-lines' -or
     $testsSource -notmatch 'mcst-system-status-lines' -or
     $testsSource -notmatch 'Current month Realized P/L' -or
+    $testsSource -notmatch 'Current month Realized P/L 910792INET' -or
+    $testsSource -notmatch 'Current month Realized P/L 977015INET' -or
     $testsSource -notmatch 'EUR -13,18' -or
+    $testsSource -notmatch 'EUR \+7,25' -or
+    $testsSource -notmatch 'UNLISTED' -or
     $testsSource -notmatch '18/08/2026 18\.00\.38' -or
     $testsSource -notmatch '08/18/2026 6:00:38 PM' -or
     $testsSource -notmatch '2026-08-18T18:00:38' -or
@@ -227,7 +240,8 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'Connection to Saxo Group has been established' -or
     $testsSource -notmatch 'No connection to Saxo Group trading system' -or
     $testsSource -notmatch 'UIC is not valid' -or
-    $testsSource -notmatch 'brokerDecision\.status\.value != L"Connected"') {
+    $testsSource -notmatch 'brokerDecision\.status\.value != L"Connected"' -or
+    $testsSource -notmatch 'Broker authentication required') {
     throw 'One-line Open Positions placement, size, or color regression test is missing.'
 }
 
@@ -236,7 +250,9 @@ if ($watchdogProject -notmatch '<WholeProgramOptimization>false</WholeProgramOpt
     $watchdogProject -notmatch '<FunctionLevelLinking>false</FunctionLevelLinking>' -or
     $watchdogProject -notmatch '<IntrinsicFunctions>false</IntrinsicFunctions>' -or
     $watchdogProject -notmatch '<EnableCOMDATFolding>false</EnableCOMDATFolding>' -or
-    $watchdogProject -notmatch '<OptimizeReferences>false</OptimizeReferences>') {
+    $watchdogProject -notmatch '<OptimizeReferences>false</OptimizeReferences>' -or
+    $watchdogProject -notmatch 'UIAutomationCore\.lib' -or
+    $watchdogProject -notmatch 'OleAut32\.lib') {
     throw 'Required MCST-Watchdog production Release settings have changed.'
 }
 
@@ -253,9 +269,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,25,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,25,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R25.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,27,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,27,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R27.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -268,7 +284,7 @@ if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV175StatusReportSnapshotWithRecovery',
+    'BuildV176StatusReportSnapshotWithRecovery',
     'TabViewRecoveryModeScope',
     '~TabViewRecoveryModeScope',
     'g_tabViewRecoveryModeActive.store(false)',
@@ -284,6 +300,30 @@ foreach ($recoveryToken in @(
     if ($bridgeSource -notmatch [regex]::Escape($recoveryToken)) {
         throw "Tracker Bridge recovery token is missing: $recoveryToken"
     }
+}
+foreach ($targetedRecoveryToken in @(
+    'kKnownTabViewPrimaryVtableRva = 0x1D78C8u',
+    'ValidateAndScoreTabViewCandidate(snapshot, targetVtables, candidate)',
+    'secondaryTabViewVtableAt48',
+    'candidate.trackerLayoutSignature',
+    'pageObjectPointers >= 5'
+)) {
+    if ($bridgeSource -notmatch [regex]::Escape($targetedRecoveryToken)) {
+        throw "Tracker Bridge targeted structural recovery token is missing: $targetedRecoveryToken"
+    }
+}
+
+$brokerAuthDetector = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\BrokerAuthDetector.cpp') -Raw
+if ($brokerAuthDetector -notmatch 'UIAutomation\.h' -or
+    $brokerAuthDetector -notmatch 'ole2\.h' -or
+    $brokerAuthDetector -notmatch 'GetCurrentPatternAs' -or
+    $brokerAuthDetector -notmatch 'UIA_ValuePatternId' -or
+    $brokerAuthDetector -notmatch 'titleOnlyContains' -or
+    $brokerAuthDetector -notmatch 'Never copy the browser''s full URL') {
+    throw 'Bounded browser authentication detection or its COM header order is missing.'
+}
+if ($brokerAuthDetector -match '#define WIN32_LEAN_AND_MEAN') {
+    throw 'BrokerAuthDetector hides the COM declarations required by UIAutomation.h.'
 }
 foreach ($historyToken in @(
     'V153GridSectionResult monitoringLogs',
@@ -439,14 +479,18 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Status Lines and Monthly Realized P/L" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion UI Automation Header Fix" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
-    $releaseNotes -notmatch 'Overall Status and System Status' -or
+    $releaseNotes -notmatch 'Overall' -or
     $releaseNotes -notmatch 'Position History' -or
+    $releaseNotes -notmatch 'visible in Accounts' -or
+    $releaseNotes -notmatch 'UI Automation' -or
+    $releaseNotes -notmatch 'ole2.h' -or
+    $releaseNotes -notmatch '0x1D78C8' -or
     $releaseNotes -notmatch 'date_order' -or
     $releaseNotes -notmatch '15-pixel monospaced' -or
     $releaseNotes -notmatch 'Protocol V2') {
-    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, Status lines, and Position History totals."
+    throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, account totals, browser authentication detection, and self-recovery."
 }
 
-Write-Host "MCST $currentVersion Status/Position History release validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion UI Automation Header Fix validation passed." -ForegroundColor Green

@@ -11,7 +11,7 @@
   <PropertyGroup><TargetName>MCST-Watchdog</TargetName><OutDir>$(SolutionDir)bin\Release\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\Release\</IntDir></PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile><RuntimeLibrary>MultiThreaded</RuntimeLibrary><WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp17</LanguageStandard><PreprocessorDefinitions>NDEBUG;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><Optimization>MaxSpeed</Optimization><FunctionLevelLinking>false</FunctionLevelLinking><IntrinsicFunctions>false</IntrinsicFunctions></ClCompile>
-    <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><AdditionalDependencies>Psapi.lib;Shell32.lib;Version.lib;Gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><AdditionalDependencies>Psapi.lib;Shell32.lib;Version.lib;Gdiplus.lib;UIAutomationCore.lib;Ole32.lib;OleAut32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

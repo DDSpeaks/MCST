@@ -15,6 +15,7 @@ struct BrokerAuthenticationDetection
 };
 
 // Detects broker authentication pages in supported browser windows without
-// interacting with the browser. The detector reads the address-bar value by
-// the proven Win32 browser window/child-text inspection used by the original production Watchdog and never records URL query strings or fragments.
+// interacting with the browser. The detector reads bounded Win32 and UI
+// Automation accessibility evidence and never records URL query strings,
+// fragments, credentials, or raw page text.
 BrokerAuthenticationDetection DetectBrokerAuthentication(const AppConfig& config);

@@ -1,53 +1,59 @@
-# MCST 1.114-R25 Status Lines and Monthly Realized P/L
+# MCST 1.114-R27 UI Automation Header Fix
 
-Tracker Bridge internal build: V175  
+Tracker Bridge internal build: V176  
 Bridge protocol: V2
 
-## Status Report layout
+## Windows SDK compilation fix
 
-- Overall Status and System Status now use the same non-wrapping, preformatted
-  HTML flow as the other report sections.
-- Every status component remains on one logical line and may continue to the
-  right on a narrow display.
-- The colored state dot occupies a fixed four-character cell, so the status and
-  description columns remain vertically aligned.
-- Semantic status tables were removed because iOS Mail could scale them to a
-  much smaller type size.
-- Overall Status, System Status, and Open Positions all enforce the same
-  15-pixel monospaced typography.
+- `BrokerAuthDetector.cpp` now includes `ole2.h` and `oleauto.h` before
+  `UIAutomation.h`, ensuring the COM interface declarations are available.
+- `WIN32_LEAN_AND_MEAN` is no longer defined in this translation unit because
+  it hid declarations required by the Windows 10.0.26100 UI Automation headers.
+- The authentication behavior, privacy limits, account totals, report layout,
+  Tracker recovery, Bridge V176, and Protocol V2 are otherwise unchanged.
 
-## Current-month Realized P/L
+## Account-specific monthly Realized P/L
 
-- Bridge V175 reads the Positions History grid through the existing validated,
-  read-only FlexGrid path and adds an optional `position_history` payload
-  section.
-- The page offset `0x78` is enabled only for the exact verified V147
-  `ATOnPTracker.dll` fingerprint. External compatibility profiles can provide
-  `tracker_position_history_page_offset`; existing profiles remain valid when
-  the optional key is absent.
-- Watchdog recalculates the current month's Realized P/L from the complete
-  captured history on every report. It never accumulates refreshes, so repeated
-  rows cannot be double-counted across snapshots.
-- Only values with an unambiguous currency sign or ISO code are totalled.
-- The amount is aligned directly below the Open P/L column and uses the same
-  full-value green/red styling, including currency and sign.
-- The monthly total remains visible even when the Open Positions grid has no
-  current rows.
-- A capture that reaches the 5,000-row safety limit is rejected as incomplete;
-  Watchdog never presents a potentially partial monthly total as complete.
-- Position History failure is report enrichment failure only. It does not alter
-  the three existing Tracker health sections, recovery count, Broker state, or
-  overall Critical classification.
+- Position History is totalled only for every account visible in Accounts.
+  Rows belonging to any other account are excluded.
+- Each visible account receives its own `Current month Realized P/L <account>`
+  line. No potentially misleading combined total across accounts is shown.
+- Known currencies remain separate, and the amount, currency code, and sign use
+  the same green/red styling as Open P/L.
+- The locale-aware Position History date parser supports numeric DMY, MDY, and
+  YMD formats. `[Tracker] date_order=auto|dmy|mdy|ymd` remains available.
 
-## Locale-aware dates
+## Report layout
 
-- Numeric DMY, MDY, and YMD dates are supported with `/`, `.`, `-`, or spaces.
-- Automatic detection uses unambiguous Position History rows and then the
-  Windows user locale for ambiguous dates.
-- `[Tracker] date_order=auto|dmy|mdy|ymd` provides an explicit override.
-- Invalid dates fail closed and are reported as skipped; time text is ignored.
+- Overall is now the first aligned row inside System Status instead of a
+  separate section.
+- System Status and Open Positions retain protected, non-wrapping,
+  15-pixel monospaced rendering. Every logical row stays on one line and may
+  continue to the right on a narrow mail display.
+- Total Open P/L and each account's monthly Realized P/L remain directly below
+  the Open P/L column.
+
+## Tracker self-recovery
+
+- The exact verified V147 `ATOnPTracker.dll` fingerprint now supplies the known
+  CATPTTabView primary vtable RVA `0x1D78C8` to bounded fresh recovery scans.
+- Recovery candidates must also pass structural validation: secondary vtable,
+  Tracker layout signature, or at least five credible page pointers.
+- The existing 30-second cooldown remains, so a long-lived stale state receives
+  new bounded attempts without restarting MCST-Watchdog.
+
+## Saxo authentication alert
+
+- Modern Edge/Chromium browser contents are inspected through bounded Windows
+  UI Automation in addition to ordinary child-window text.
+- The dedicated `MultiCharts (OpenAPI Web App)` title can identify the known
+  Saxo authentication window even when the address bar is not Win32 text.
+- The detector stores only the configured matching pattern, never a complete
+  OAuth URL, request identifier, token, user ID, or password.
 
 ## Installation note
 
-Both `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll` must be rebuilt and
-replaced. Restart MultiCharts after replacing the DLL. Protocol V2 is retained.
+Rebuild and replace `MCST-Watchdog.exe`. Tracker Bridge remains V176 and does
+not need replacement when upgrading directly from R26. When upgrading from R25
+or older, replace the included `MCST-TrackerBridge.dll` too and restart
+MultiCharts. Protocol V2 is unchanged.

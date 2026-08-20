@@ -1,0 +1,29 @@
+MCST 1.114-R26 / Tracker Bridge V176 validation
+================================================
+
+Automated source checks
+-----------------------
+- Run Tools\Validate-Release.ps1 from a Windows PowerShell prompt.
+- Build MCST.sln as Release x64 with Visual Studio 2022 and the Windows SDK.
+- Run MCST.Tests.exe; every foundation test must pass.
+
+Required functional checks
+--------------------------
+1. Confirm Overall is the first row under SYSTEM STATUS and aligns with the
+   remaining rows on desktop and iOS Mail.
+2. Confirm every Open Positions record stays on one logical line and all Open
+   P/L amounts and totals share the same vertical column.
+3. With two visible Accounts, confirm each has a separate current-month
+   Realized P/L and a Position History row for a third account is absent.
+4. Verify DMY, MDY, and YMD samples or set [Tracker] date_order explicitly.
+5. Leave a verified V147 Tracker read stale past a recovery cooldown and confirm
+   a later bounded retry restores live data without restarting Watchdog.
+6. Open the MultiCharts Saxo authentication browser. Confirm an authentication
+   alert after the configured delay and privacy-safe diagnostics.
+
+Deployment checks
+-----------------
+- Replace both MCST-Watchdog.exe and MCST-TrackerBridge.dll.
+- Restart MultiCharts and confirm the loaded Bridge reports internal V176.
+- Confirm Bridge protocol V2 and the expected ATOnPTracker fingerprint.
+- Inspect a saved report in the target desktop and mobile mail clients.

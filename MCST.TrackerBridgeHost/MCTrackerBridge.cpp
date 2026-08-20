@@ -42,7 +42,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 175;
+    constexpr int kBridgeVersion = 176;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -807,6 +807,7 @@ namespace
     constexpr std::uintptr_t kExtractOpenPositionsRva = 0x10FF56;
     constexpr DWORD kKnownAtonpSize = 3534848;
     constexpr DWORD kPositionHistoryAtonpTimestamp = 0x6A5694FBu;
+    constexpr std::uintptr_t kKnownTabViewPrimaryVtableRva = 0x1D78C8u;
 
     struct TrackerCompatibilityProfile
     {
@@ -1100,9 +1101,14 @@ namespace
         profile.mode = L"embedded_legacy";
         profile.atonpTrackerPeTimestamp = snapshot.atonpTrackerPeTimestamp;
         profile.atonpTrackerImageSize = snapshot.atonpTrackerSize;
-        // Preserve the validated RTTI-based locator for the embedded fallback.
-        // Exact CATPTTabView vtable authorization is required only for external profiles.
-        profile.tabViewVtableRva = 0;
+        // The exact V147 image exposes CATPTTabView's primary RTTI vtable at
+        // RVA 0x1D78C8. Supplying it only for that fingerprint authorizes the
+        // same bounded fresh recovery scan used by external exact profiles.
+        // Other same-size legacy images retain RTTI-only normal discovery.
+        profile.tabViewVtableRva =
+            snapshot.atonpTrackerPeTimestamp == kPositionHistoryAtonpTimestamp
+                ? kKnownTabViewPrimaryVtableRva
+                : 0;
         profile.accountsExtractorRva = kExtractAccountsRva;
         profile.openPositionsExtractorRva = kExtractOpenPositionsRva;
         profile.accountsPageOffset = 0x58;
@@ -1169,6 +1175,11 @@ namespace
         std::string rejectedReason;
         int score = 0;
     };
+
+    void ValidateAndScoreTabViewCandidate(
+        const Snapshot& snapshot,
+        const std::vector<std::uintptr_t>& targets,
+        TabViewCandidate& candidate);
 
     SRWLOCK g_extractorLock = SRWLOCK_INIT;
     ExtractorAttempt g_accountsAttempt;
@@ -1397,6 +1408,7 @@ DWORD sehCode = 0;
         constexpr std::size_t kMaxCandidates = 64;
 
         const std::uintptr_t targetVtable = snapshot.atonpTrackerBase + tabViewVtableRva;
+        const std::vector<std::uintptr_t> targetVtables = { targetVtable };
         std::vector<TabViewCandidate> candidates;
         if (!snapshot.atonpTrackerBase || tabViewVtableRva == 0 ||
             snapshot.atonpTrackerSize != expectedImageSize ||
@@ -1536,9 +1548,9 @@ DWORD sehCode = 0;
                             CountWindowReferencesInObject(candidate.object, pageValues, 0x2000);
                         candidate.flexGridReferences =
                             CountWindowReferencesInObject(candidate.object, gridValues, 0x2000);
-                        candidate.score = 100 + candidate.trackerWindowReferences * 12 +
-                                          candidate.pageWindowReferences * 4 +
-                                          candidate.flexGridReferences * 4;
+                        ValidateAndScoreTabViewCandidate(snapshot, targetVtables, candidate);
+                        if (candidate.rejected)
+                            continue;
                         candidates.push_back(candidate);
                         if (candidates.size() >= kMaxCandidates)
                         {
@@ -2448,18 +2460,24 @@ DWORD sehCode = 0;
             std::uintptr_t freshAccepted = 0;
             if (profileCandidates.size() == 1)
             {
-                freshAccepted = profileCandidates.front().object;
+                const TabViewCandidate& only = profileCandidates.front();
+                if (only.score >= 140 &&
+                    (only.secondaryTabViewVtableAt48 || only.trackerLayoutSignature ||
+                     only.pageObjectPointers >= 5))
+                {
+                    freshAccepted = only.object;
+                }
             }
             else if (profileCandidates.size() > 1)
             {
                 const TabViewCandidate& best = profileCandidates[0];
                 const TabViewCandidate& second = profileCandidates[1];
-                const int bestReferences =
-                    best.trackerWindowReferences +
-                    best.pageWindowReferences +
-                    best.flexGridReferences;
-                if (bestReferences > 0 && best.score >= second.score + 20)
+                if (best.score >= 140 && best.score >= second.score + 20 &&
+                    (best.secondaryTabViewVtableAt48 || best.trackerLayoutSignature ||
+                     best.pageObjectPointers >= 5))
+                {
                     freshAccepted = best.object;
+                }
             }
 
             diagnostic = "bounded exact-profile recovery scan: " + profileScanDiagnostic;
@@ -2624,17 +2642,27 @@ DWORD sehCode = 0;
                 const TabViewCandidate& best = profileCandidates.front();
                 if (profileCandidates.size() == 1)
                 {
-                    accepted = best.object;
-                    out << "; exact profile vtable produced one CATPTTabView candidate";
+                    if (best.score >= 140 &&
+                        (best.secondaryTabViewVtableAt48 || best.trackerLayoutSignature ||
+                         best.pageObjectPointers >= 5))
+                    {
+                        accepted = best.object;
+                        out << "; exact profile vtable produced one structural CATPTTabView candidate";
+                    }
+                    else
+                    {
+                        out << "; exact profile vtable produced one non-structural candidate";
+                    }
                 }
                 else
                 {
                     const TabViewCandidate& second = profileCandidates[1];
-                    const int bestReferences = best.trackerWindowReferences + best.pageWindowReferences + best.flexGridReferences;
-                    if (bestReferences > 0 && best.score >= second.score + 20)
+                    if (best.score >= 140 && best.score >= second.score + 20 &&
+                        (best.secondaryTabViewVtableAt48 || best.trackerLayoutSignature ||
+                         best.pageObjectPointers >= 5))
                     {
                         accepted = best.object;
-                        out << "; exact profile vtable produced a uniquely strongest CATPTTabView candidate";
+                        out << "; exact profile vtable produced a uniquely strongest structural CATPTTabView candidate";
                     }
                     else
                     {
@@ -12617,7 +12645,8 @@ DWORD sehCode = 0;
 
     void AppendV153Section(std::ostringstream& out, const V153GridSectionResult& section, unsigned int columnCount)
     {
-        out << "SECTION\t" << section.name
+        out 
+            << "SECTION\t" << section.name
             << '\t' << (section.ok ? "OK" : "FAIL")
             << '\t' << columnCount
             << '\t' << section.rows.size()
@@ -12741,7 +12770,7 @@ DWORD sehCode = 0;
         return pagesOk > 0 && totalSeh == 0;
     }
 
-    void AppendV175RecoveryMetadata(
+    void AppendV176RecoveryMetadata(
         std::string& payload,
         bool attempted,
         bool tabViewFound,
@@ -12762,7 +12791,7 @@ DWORD sehCode = 0;
         payload.insert(markerEnd + 1, metadata.str());
     }
 
-    bool BuildV175StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    bool BuildV176StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
     {
         bool tabViewFound = false;
         bool compatibilityMatched = false;
@@ -12789,7 +12818,7 @@ DWORD sehCode = 0;
         {
             if (pagesRead == 3 && sehFailures == 0)
                 g_tabViewRecoveryModeActive.store(false);
-            AppendV175RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            AppendV176RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
             return initialBuilt;
         }
 
@@ -12798,7 +12827,7 @@ DWORD sehCode = 0;
         // allowed per 30-second window and ordinary snapshot reads continue.
         if (!TryBeginTabViewRecovery())
         {
-            AppendV175RecoveryMetadata(
+            AppendV176RecoveryMetadata(
                 payload, false, tabViewFound, pagesRead, sehFailures, "cooldown");
             return initialBuilt;
         }
@@ -12822,7 +12851,7 @@ DWORD sehCode = 0;
             freshCompatibilityMatched,
             freshPagesRead,
             freshSehFailures);
-        AppendV175RecoveryMetadata(
+        AppendV176RecoveryMetadata(
             payload, true, freshTabViewFound, freshPagesRead, freshSehFailures);
         return recovered && freshCompatibilityMatched;
     }
@@ -13036,7 +13065,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV175StatusReportSnapshotWithRecovery(snapshot, responsePayload);
+            const bool built = BuildV176StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 

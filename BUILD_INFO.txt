@@ -1,33 +1,36 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R25
+MCST-Watchdog version: 1.114-R27
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V175, Protocol V2
-Production change:     One-line Status sections and monthly Realized P/L
+Tracker Bridge:        Product 1.0, internal V176, Protocol V2
+Production change:     Windows SDK UI Automation header-order fix
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R25 production method
+R27 production method
 ---------------------
-1. Keep Overall Status, System Status, and Open Positions in protected,
-   non-wrapping 15-pixel preformatted HTML flows.
-2. Preserve status alignment with a fixed four-character colored-dot cell.
-3. Read optional Position History at verified CATPTTabView offset +0x78.
-4. Recalculate current-month Realized P/L from each complete snapshot.
-5. Support DMY, MDY, and YMD numeric dates, use the Windows locale for wholly
-   ambiguous rows, and fail closed on conflicting or invalid dates.
-6. Align known-currency Realized P/L below the Open P/L column and apply the
-   same complete green/red value styling.
-7. Keep Position History outside the three-section Tracker health decision.
+1. Include COM/OLE declarations before UIAutomation.h in BrokerAuthDetector.
+2. Do not define WIN32_LEAN_AND_MEAN in that UI Automation translation unit.
+3. Retain R26 behavior: total current-month Realized P/L separately for each account currently
+   visible in Accounts; exclude every other Position History account.
+4. Do not show an aggregate monthly result across accounts.
+5. Place Overall as the first aligned System Status row.
+6. Keep System Status and Open Positions in protected, non-wrapping 15-pixel
+   preformatted HTML flows.
+7. Give the exact V147 Tracker fingerprint the verified CATPTTabView vtable RVA
+   0x1D78C8 and structurally validate every bounded recovery candidate.
+8. Detect the dedicated Saxo authentication browser with bounded Windows UI
+   Automation while retaining privacy-safe diagnostics.
 
 Retained production behavior
 ----------------------------
-- non-sticky V175 Tracker recovery and bounded 30-second candidate caching;
+- 30-second bounded Tracker recovery cooldown and candidate-cache lifetime;
 - configurable stale-data Attention-to-Critical escalation;
 - separate Tracker-attempt and last-complete-snapshot timestamps;
 - up to 200 live monitoring_logs rows for BrokerMonitor and LogAlertEngine;
 - ten display/report Recent Logs rows;
+- locale-aware DMY/MDY/YMD Position History dates;
 - read-only Tracker recovery and compatibility gates.
 
 Production Tracker minimum Bridge: V156
@@ -36,3 +39,5 @@ R20 initial self-recovery Bridge: V172
 R21 extended monitoring history Bridge: V173
 R22/R23/R24 non-sticky recovery Bridge: V174
 R25 optional Position History Bridge: V175
+R26 targeted structural recovery Bridge: V176
+R27 retains Tracker Bridge: V176

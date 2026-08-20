@@ -100,9 +100,16 @@ int wmain()
     static_assert(std::is_default_constructible_v<TrackerStatusSnapshot>);
 
     mcst::WatchdogSystemStatus status;
+    status.overall = mcst::HealthState::Healthy;
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 175;
+    snapshot.bridgeVersion = 176;
     snapshot.protocolVersion = 2;
+    snapshot.accounts.present = true;
+    snapshot.accounts.ok = true;
+    snapshot.accounts.expectedColumns = 12;
+    snapshot.accounts.rows = {
+        { L"Saxo", L"A", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" }
+    };
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
     snapshot.openPositions.expectedColumns = 8;
@@ -156,10 +163,14 @@ int wmain()
         reportHtml,
         L"class=\"mcst-open-positions-lines\"",
         "The one-line Open Positions preformatted section is missing");
+    RequireNotContains(
+        report,
+        L"OVERALL STATUS",
+        "Overall Status still has a separate report section");
     RequireContains(
-        reportHtml,
-        L"class=\"mcst-overall-status-lines\"",
-        "Overall Status is not rendered in a protected one-line flow");
+        report,
+        L"Overall               [OK] OK",
+        "Overall status is not the first aligned System Status row");
     RequireContains(
         reportHtml,
         L"class=\"mcst-system-status-lines\"",
@@ -347,22 +358,40 @@ int wmain()
     snapshot.positionHistory.ok = true;
     snapshot.positionHistory.expectedColumns = 8;
     snapshot.positionHistory.rows = {
-        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"A", L"IONQ:xnys", L"Flat", L"0", L"", L"EUR +5,60" },
-        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 17), L"Saxo", L"A", L"APLD:xnas", L"Flat", L"0", L"", L"\u20ac -18,78" },
-        { dmyDate(previousMonthYear, previousMonth, 15), L"Saxo", L"A", L"OLD:xnas", L"Flat", L"0", L"", L"EUR +100,00" }
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"910792INET", L"IONQ:xnys", L"Flat", L"0", L"", L"EUR +5,60" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 17), L"Saxo", L"910792INET", L"APLD:xnas", L"Flat", L"0", L"", L"\u20ac -18,78" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"977015INET", L"SECOND:xnas", L"Flat", L"0", L"", L"EUR +7,25" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"UNLISTED", L"HIDDEN:xnas", L"Flat", L"0", L"", L"EUR +900,00" },
+        { dmyDate(previousMonthYear, previousMonth, 15), L"Saxo", L"910792INET", L"OLD:xnas", L"Flat", L"0", L"", L"EUR +100,00" }
+    };
+    snapshot.accounts.rows = {
+        { L"Saxo Group live", L"910792INET", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" },
+        { L"Saxo Group live", L"977015INET", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" }
     };
     status.trackerDateOrder = L"dmy";
     const std::wstring historyReport = BuildStatusReport(status, snapshot);
     RequireContains(
         historyReport,
-        L"Current month Realized P/L",
-        "Current-month Position History total is missing");
+        L"Current month Realized P/L 910792INET",
+        "First visible account's Position History total is missing");
     RequireContains(
         historyReport,
         L"EUR -13,18",
         "Current-month realized P/L included the wrong rows or amount");
+    RequireContains(
+        historyReport,
+        L"Current month Realized P/L 977015INET",
+        "Second visible account's Position History total is missing");
+    RequireContains(
+        historyReport,
+        L"EUR +7,25",
+        "Second visible account's Position History amount is incorrect");
+    RequireNotContains(
+        historyReport,
+        L"EUR +900,00",
+        "A Position History account absent from Accounts was included");
     const std::wstring realizedLine = FindLineContaining(historyReport, L"EUR -13,18");
-    if (DelimitedField(realizedLine, 0) != L"Current month Realized P/L" ||
+    if (DelimitedField(realizedLine, 0) != L"Current month Realized P/L 910792INET" ||
         DelimitedField(realizedLine, 1) != L"EUR -13,18" ||
         DelimitedField(realizedLine, 2) != L"[2 rows]")
     {
@@ -372,6 +401,10 @@ int wmain()
         BuildStatusReportHtml(historyReport),
         L"<span style=\"color:#B4232A;font-weight:600;\">EUR -13,18</span>",
         "Negative current-month realized P/L is not fully red");
+    RequireContains(
+        BuildStatusReportHtml(historyReport),
+        L"<span style=\"color:#15803D;font-weight:600;\">EUR +7,25</span>",
+        "Positive account-specific current-month realized P/L is not fully green");
 
     TrackerStatusSnapshot closedOnlySnapshot = snapshot;
     closedOnlySnapshot.openPositions.rows.clear();
@@ -380,6 +413,35 @@ int wmain()
         closedOnlyReport,
         L"EUR -13,18",
         "Current-month realized P/L disappeared when there were no open positions");
+
+    AppConfig authenticationConfig;
+    authenticationConfig.brokerMonitoringEnabled = true;
+    authenticationConfig.brokerAlertEmailEnabled = true;
+    BrokerAuthenticationDetection authentication;
+    authentication.detected = true;
+    authentication.profileName = L"Saxo";
+    authentication.sanitizedUrl = L"developer.saxobank.com/login";
+    authentication.alertAfterSeconds = 3;
+    BrokerMonitor authenticationMonitor;
+    TrackerBridgeSection noMonitoringLogs;
+    noMonitoringLogs.ok = true;
+    const auto authenticationStart = std::chrono::system_clock::now();
+    const BrokerMonitorDecision authenticationGrace = authenticationMonitor.Evaluate(
+        noMonitoringLogs, authentication, authenticationConfig, authenticationStart);
+    if (authenticationGrace.status.state != mcst::HealthState::Attention ||
+        authenticationGrace.sendAlertEmail)
+    {
+        throw std::runtime_error("Broker authentication grace period was not started correctly");
+    }
+    const BrokerMonitorDecision authenticationAlert = authenticationMonitor.Evaluate(
+        noMonitoringLogs, authentication, authenticationConfig,
+        authenticationStart + std::chrono::seconds(4));
+    if (authenticationAlert.status.state != mcst::HealthState::Critical ||
+        !authenticationAlert.sendAlertEmail ||
+        authenticationAlert.subject != L"MCST-Watchdog Broker Authentication Required")
+    {
+        throw std::runtime_error("Persistent Saxo authentication did not produce a critical email alert");
+    }
 
     // Exact regression from the R20 screenshot: rows are newest first. More
     // than ten unrelated warnings follow a successful Saxo connection, while

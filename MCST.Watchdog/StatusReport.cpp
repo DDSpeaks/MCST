@@ -132,6 +132,15 @@ namespace
         return value;
     }
 
+    std::wstring TrimCell(std::wstring value)
+    {
+        const std::size_t begin = value.find_first_not_of(L" \t\r\n");
+        if (begin == std::wstring::npos)
+            return L"";
+        const std::size_t end = value.find_last_not_of(L" \t\r\n");
+        return value.substr(begin, end - begin + 1);
+    }
+
     std::wstring PadCell(const std::wstring& value, std::size_t width, bool rightAlign)
     {
         const std::wstring clean = SingleLineCell(value);
@@ -386,27 +395,51 @@ namespace
 
     std::vector<std::vector<std::wstring>> BuildPositionHistoryTotalRows(
         const TrackerBridgeSection& section,
+        const TrackerBridgeSection& accounts,
         const std::wstring& configuredDateOrder)
     {
         constexpr std::size_t outputColumns = 9;
         std::vector<std::vector<std::wstring>> rows;
-        auto unavailable = [&](const std::wstring& reason)
+
+        std::vector<std::wstring> visibleAccounts;
+        for (const auto& accountRow : accounts.rows)
+        {
+            if (accountRow.size() <= 1)
+                continue;
+            const std::wstring account = TrimCell(accountRow[1]);
+            if (!account.empty() &&
+                std::find(visibleAccounts.begin(), visibleAccounts.end(), account) == visibleAccounts.end())
+            {
+                visibleAccounts.push_back(account);
+            }
+        }
+
+        auto unavailable = [&](const std::wstring& account, const std::wstring& reason)
         {
             std::vector<std::wstring> row(outputColumns);
-            row[0] = L"Current month Realized P/L";
+            row[0] = account.empty()
+                ? L"Current month Realized P/L"
+                : L"Current month Realized P/L " + account;
             row[1] = L"not available";
             row[2] = L"[" + reason + L"]";
             rows.push_back(std::move(row));
         };
 
+        if (visibleAccounts.empty())
+        {
+            unavailable(L"", L"no account number is visible in Accounts");
+            return rows;
+        }
         if (!section.present)
         {
-            unavailable(L"Position History was not supplied by the Bridge");
+            for (const auto& account : visibleAccounts)
+                unavailable(account, L"Position History was not supplied by the Bridge");
             return rows;
         }
         if (!section.ok)
         {
-            unavailable(L"Position History read failed");
+            for (const auto& account : visibleAccounts)
+                unavailable(account, L"Position History read failed");
             return rows;
         }
 
@@ -414,8 +447,11 @@ namespace
         dateValues.reserve(section.rows.size());
         for (const auto& row : section.rows)
         {
-            if (!row.empty())
+            if (row.size() > 2 &&
+                std::find(visibleAccounts.begin(), visibleAccounts.end(), TrimCell(row[2])) != visibleAccounts.end())
+            {
                 dateValues.push_back(row[0]);
+            }
         }
 
         const TrackerDateOrder configured = ParseTrackerDateOrder(configuredDateOrder);
@@ -424,7 +460,8 @@ namespace
             : configured;
         if (order == TrackerDateOrder::Auto)
         {
-            unavailable(L"date order was ambiguous");
+            for (const auto& account : visibleAccounts)
+                unavailable(account, L"date order was ambiguous");
             return rows;
         }
 
@@ -432,14 +469,19 @@ namespace
         int currentMonth = 0;
         CurrentLocalYearMonth(currentYear, currentMonth);
 
-        std::map<std::wstring, double> totals;
-        std::map<std::wstring, std::size_t> countedRows;
-        std::size_t currentMonthRowsNotTotaled = 0;
+        std::map<std::wstring, std::map<std::wstring, double>> totalsByAccount;
+        std::map<std::wstring, std::map<std::wstring, std::size_t>> countedRowsByAccount;
+        std::map<std::wstring, std::size_t> rowsNotTotaledByAccount;
         std::size_t datesNotParsed = 0;
         for (const auto& row : section.rows)
         {
             if (row.size() < 8)
                 continue;
+
+            const std::wstring account = TrimCell(row[2]);
+            if (std::find(visibleAccounts.begin(), visibleAccounts.end(), account) == visibleAccounts.end())
+                continue;
+
             TrackerCalendarDate date;
             if (!TryParseTrackerCalendarDate(row[0], order, date))
             {
@@ -454,35 +496,41 @@ namespace
             if (ParseLocalizedNumber(row[7], realizedPl) &&
                 TryExtractKnownCurrency(row[7], currency))
             {
-                totals[currency] += realizedPl;
-                ++countedRows[currency];
+                totalsByAccount[account][currency] += realizedPl;
+                ++countedRowsByAccount[account][currency];
             }
             else
             {
-                ++currentMonthRowsNotTotaled;
+                ++rowsNotTotaledByAccount[account];
             }
         }
 
-        for (const auto& total : totals)
+        for (const auto& account : visibleAccounts)
         {
-            std::vector<std::wstring> row(outputColumns);
-            row[0] = L"Current month Realized P/L";
-            row[1] = total.first + L" " + FormatReportNumber(total.second, true);
-            row[2] = L"[" + std::to_wstring(countedRows[total.first]) + L" rows";
-            if (currentMonthRowsNotTotaled != 0)
-                row[2] += L"; " + std::to_wstring(currentMonthRowsNotTotaled) + L" not totalled";
-            row[2] += L"]";
-            rows.push_back(std::move(row));
+            const auto totals = totalsByAccount.find(account);
+            if (totals == totalsByAccount.end() || totals->second.empty())
+            {
+                std::vector<std::wstring> row(outputColumns);
+                row[0] = L"Current month Realized P/L " + account;
+                row[1] = L"not calculated";
+                row[2] = L"[no current-month row with an unambiguous currency]";
+                rows.push_back(std::move(row));
+                continue;
+            }
+
+            for (const auto& total : totals->second)
+            {
+                std::vector<std::wstring> row(outputColumns);
+                row[0] = L"Current month Realized P/L " + account;
+                row[1] = total.first + L" " + FormatReportNumber(total.second, true);
+                row[2] = L"[" + std::to_wstring(countedRowsByAccount[account][total.first]) + L" rows";
+                if (rowsNotTotaledByAccount[account] != 0)
+                    row[2] += L"; " + std::to_wstring(rowsNotTotaledByAccount[account]) + L" not totalled";
+                row[2] += L"]";
+                rows.push_back(std::move(row));
+            }
         }
 
-        if (totals.empty())
-        {
-            std::vector<std::wstring> row(outputColumns);
-            row[0] = L"Current month Realized P/L";
-            row[1] = L"not calculated";
-            row[2] = L"[no current-month row had an unambiguous currency]";
-            rows.push_back(std::move(row));
-        }
         if (datesNotParsed != 0)
         {
             std::vector<std::wstring> row(outputColumns);
@@ -498,6 +546,7 @@ namespace
         std::wostringstream& out,
         const TrackerBridgeSection& section,
         const TrackerBridgeSection& positionHistory,
+        const TrackerBridgeSection& accounts,
         const std::wstring& configuredDateOrder)
     {
         const std::vector<std::wstring> headers = {
@@ -563,7 +612,7 @@ namespace
             totalRows.push_back(std::move(totalRow));
         }
         const auto historyTotalRows =
-            BuildPositionHistoryTotalRows(positionHistory, configuredDateOrder);
+            BuildPositionHistoryTotalRows(positionHistory, accounts, configuredDateOrder);
         totalRows.insert(totalRows.end(), historyTotalRows.begin(), historyTotalRows.end());
 
         std::vector<std::vector<std::wstring>> rowsForWidth = rows;
@@ -596,7 +645,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n"
-        << L"Watchdog version       1.114-R25\n"
+        << L"Watchdog version       1.114-R27\n"
         << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
         << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
         << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
@@ -607,12 +656,9 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
         out << L"ATOnPTracker fingerprint 0x" << std::hex << std::uppercase << snapshot.atonpTrackerPeTimestamp
             << std::dec << L" / " << snapshot.atonpTrackerImageSize << L" bytes\n";
     }
-    out << L"\n"
-        << L"OVERALL STATUS\n"
-        << L"--------------\n"
-        << StateCell(status.overall) << L"\n\n"
-        << L"SYSTEM STATUS\n"
+    out << L"\nSYSTEM STATUS\n"
         << L"-------------\n"
+        << MonitorLine(L"Overall", { status.overall, mcst::HealthStateText(status.overall), L"" })
         << MonitorLine(L"Bridge", status.bridge)
         << MonitorLine(L"Tracker Snapshot", status.trackerSnapshot)
         << MonitorLine(L"AutoTrading", status.autoTrading)
@@ -653,7 +699,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     AppendAlignedSectionRows(out, snapshot.accounts, false);
     out << L"\nOPEN POSITIONS\n--------------\n";
     AppendOpenPositionsTable(
-        out, snapshot.openPositions, snapshot.positionHistory, status.trackerDateOrder);
+        out, snapshot.openPositions, snapshot.positionHistory, snapshot.accounts, status.trackerDateOrder);
     out << L"\nRECENT LOGS\n-----------\n";
     AppendAlignedSectionRows(out, snapshot.recentLogs, true);
     return out.str();
@@ -855,16 +901,6 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         {
             closePre();
             inOpenPositions = false;
-        }
-
-        if (line == L"OVERALL STATUS")
-        {
-            closePre();
-            inStatusLines = true;
-            html += L"<pre class=\"mcst-overall-status-lines\" style=\"" + preStyle + L"\">";
-            preOpen = true;
-            html += escapeHtml(line) + L"\n";
-            continue;
         }
 
         if (line == L"SYSTEM STATUS")
