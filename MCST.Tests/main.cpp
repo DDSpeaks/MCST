@@ -207,8 +207,27 @@ int wmain()
         "Status dots do not preserve the fixed character column");
     RequireContains(
         reportHtml,
+        L"display:inline-block;width:18ch;",
+        "System Status names do not use a fixed HTML column");
+    RequireContains(
+        reportHtml,
+        L"display:inline-block;width:26ch;",
+        "System Status values do not use a fixed HTML column");
+    RequireContains(
+        reportHtml,
         L"font-size:2em;line-height:0.5",
         "Overall Status dot is not emphasized without changing its column width");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-status-overall-dot\"",
+        "Overall Status dot does not use a nested size-only element");
+    const std::size_t dotCellStart = reportHtml.find(L"class=\"mcst-status-dot-cell\"");
+    const std::size_t dotCellTagEnd = reportHtml.find(L'>', dotCellStart);
+    if (dotCellStart == std::wstring::npos || dotCellTagEnd == std::wstring::npos ||
+        reportHtml.substr(dotCellStart, dotCellTagEnd - dotCellStart).find(L"font-size:2em") != std::wstring::npos)
+    {
+        throw std::runtime_error("The fixed-width Status dot cell itself is still enlarged");
+    }
     RequireNotContains(
         reportHtml,
         L"<table role=\"presentation\"",
@@ -247,7 +266,7 @@ int wmain()
     const std::wstring emptyPositionsReport = BuildStatusReport(status, emptyPositionsSnapshot);
     RequireContains(
         emptyPositionsReport,
-        L"OPEN POSITIONS\n--------------\nNo open positions.",
+        L"OPEN POSITIONS\n--------------\n(no rows)",
         "Empty Open Positions does not use the concise empty-state message");
     if (!FindLineContaining(emptyPositionsReport, L"Average Price").empty())
         throw std::runtime_error("Empty Open Positions still prints position column headings");

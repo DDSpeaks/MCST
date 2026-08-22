@@ -1,4 +1,4 @@
-# MCST 1.114-R28 Status Report Alignment Cleanup
+# MCST 1.114-R30 Status Report Alignment Cleanup
 
 Tracker Bridge internal build: V176  
 Bridge protocol: V2
@@ -9,8 +9,13 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 ## Column alignment
 
 - Identity rows and Latest Activity now use a shared calculated label width.
-- System Status calculates common Name, State, Value, and Detail columns, so
-  details begin at the same position even when status values have different lengths.
+- System Status HTML uses explicit fixed-width Name, Dot, State, and Value spans.
+  Different marker lengths and iOS Mail's bold-font metrics can no longer move
+  the following columns. The large Overall dot occupies the same Dot column as
+  every normal-size component dot.
+- R30 keeps the fixed-width Overall Name, Dot, and State elements at the normal
+  font size. Bold text and the double-size dot live in nested elements, so CSS
+  no longer doubles the physical width of the `4ch` Dot column.
 - Accounts cells are trimmed before layout and numeric columns are right-aligned.
   Positive and negative values therefore end at exactly the same character column.
 
@@ -36,7 +41,8 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 - Total Open P/L and each account's monthly Realized P/L remain directly below
   the Open P/L column.
 - When there are no open positions, position column headings and separators are
-  omitted and `No open positions.` is shown. Account-specific monthly Realized
+  omitted and `(no rows)` is shown, matching Accounts and Recent Logs.
+  Account-specific monthly Realized
   P/L lines remain available below the message.
 
 ## Tracker self-recovery
@@ -60,6 +66,6 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 ## Installation note
 
 Rebuild and replace `MCST-Watchdog.exe`. Tracker Bridge remains V176 and does
-not need replacement when upgrading directly from R27. When upgrading from R25
+not need replacement when upgrading directly from R29. When upgrading from R25
 or older, replace the included `MCST-TrackerBridge.dll` too and restart
 MultiCharts. Protocol V2 is unchanged.

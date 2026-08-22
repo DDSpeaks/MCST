@@ -1,16 +1,18 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R28
+MCST-Watchdog version: 1.114-R30
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V176, Protocol V2
 Production change:     Status Report alignment and empty-position cleanup
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R28 production method
+R30 production method
 ---------------------
-1. Calculate shared columns for identity, System Status, Latest Activity, and Accounts rows.
+1. Keep every System Status column on a normal-size outer element and apply
+   bold or double-size styling only to nested content, so CSS `ch` widths never
+   change with Overall emphasis in iOS Mail.
 2. Trim imported cells and right-align numeric Accounts columns, including signed values.
 3. Retain R26 behavior: total current-month Realized P/L separately for each account currently
    visible in Accounts; exclude every other Position History account.
@@ -18,7 +20,7 @@ R28 production method
 5. Emphasize OVERALL STATUS as the first System Status row without duplicating its state.
 6. Keep System Status and Open Positions in protected, non-wrapping 15-pixel
    preformatted HTML flows.
-7. Replace an empty Open Positions table with `No open positions.` while retaining monthly results.
+7. Use the same `(no rows)` empty marker for Accounts, Open Positions, and Recent Logs.
 8. Give the exact V147 Tracker fingerprint the verified CATPTTabView vtable RVA
    0x1D78C8 and structurally validate every bounded recovery candidate.
 9. Detect the dedicated Saxo authentication browser with bounded Windows UI
@@ -41,4 +43,4 @@ R21 extended monitoring history Bridge: V173
 R22/R23/R24 non-sticky recovery Bridge: V174
 R25 optional Position History Bridge: V175
 R26 targeted structural recovery Bridge: V176
-R28 retains Tracker Bridge: V176
+R30 retains Tracker Bridge: V176

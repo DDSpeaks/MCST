@@ -19,6 +19,10 @@
 
 namespace
 {
+    constexpr std::size_t kMonitorNameWidth = 18;
+    constexpr std::size_t kMonitorStateWidth = 14;
+    constexpr std::size_t kMonitorValueWidth = 26;
+
     const wchar_t* StateMarker(mcst::HealthState state)
     {
         switch (state)
@@ -66,23 +70,22 @@ namespace
             { L"Heartbeat", status.heartbeat }
         };
 
-        std::size_t nameWidth = 0;
-        std::size_t stateWidth = 0;
-        std::size_t valueWidth = 0;
-        for (const auto& row : rows)
-        {
-            nameWidth = (std::max)(nameWidth, row.first.size());
-            stateWidth = (std::max)(stateWidth, StateCell(row.second.state).size());
-            valueWidth = (std::max)(valueWidth, row.second.value.size());
-        }
-        nameWidth += 2;
-        stateWidth += 2;
-        valueWidth += 2;
-
-        out << MonitorLine(rows.front().first, rows.front().second, nameWidth, stateWidth, valueWidth)
+        out << MonitorLine(
+            rows.front().first,
+            rows.front().second,
+            kMonitorNameWidth,
+            kMonitorStateWidth,
+            kMonitorValueWidth)
             << L'\n';
         for (std::size_t index = 1; index < rows.size(); ++index)
-            out << MonitorLine(rows[index].first, rows[index].second, nameWidth, stateWidth, valueWidth);
+        {
+            out << MonitorLine(
+                rows[index].first,
+                rows[index].second,
+                kMonitorNameWidth,
+                kMonitorStateWidth,
+                kMonitorValueWidth);
+        }
     }
 
     void AppendKeyValueRows(
@@ -705,7 +708,7 @@ namespace
 
         if (rows.empty())
         {
-            out << L"No open positions.\n";
+            out << L"(no rows)\n";
             if (!totalRows.empty())
             {
                 out << L'\n';
@@ -754,7 +757,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.114-R28" },
+        { L"Watchdog version", L"1.114-R30" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },
@@ -859,37 +862,67 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             { L"[?]", L"UNKNOWN", L"#8B949E", L"#687078" }
         };
 
+        auto slice = [&](std::size_t begin, std::size_t width)
+        {
+            if (begin >= rawLine.size())
+                return std::wstring();
+            return rawLine.substr(begin, (std::min)(width, rawLine.size() - begin));
+        };
+
+        if (rawLine.size() < kMonitorNameWidth)
+            return escapeHtml(rawLine);
+
+        const std::wstring nameCell = slice(0, kMonitorNameWidth);
+        const std::wstring stateCell = slice(kMonitorNameWidth, kMonitorStateWidth);
+        const std::wstring valueCell = slice(
+            kMonitorNameWidth + kMonitorStateWidth,
+            kMonitorValueWidth);
+        const std::wstring detailCell = rawLine.size() >
+            kMonitorNameWidth + kMonitorStateWidth + kMonitorValueWidth
+            ? rawLine.substr(kMonitorNameWidth + kMonitorStateWidth + kMonitorValueWidth)
+            : L"";
+
         for (const auto& style : styles)
         {
-            const std::size_t marker = rawLine.find(style.marker);
+            const std::size_t marker = stateCell.find(style.marker);
             if (marker != std::wstring::npos)
             {
-                const bool overall = rawLine.rfind(L"OVERALL STATUS", 0) == 0;
-                const std::size_t afterMarker = marker + std::wcslen(style.marker);
-                const std::size_t label = rawLine.find(style.label, afterMarker);
-                std::wstring result;
+                const bool overall = TrimCell(nameCell) == L"OVERALL STATUS";
+                std::wstring result = L"<span class=\"mcst-status-name-cell\" style=\"display:inline-block;width:" +
+                    std::to_wstring(kMonitorNameWidth) + L"ch;\">";
                 if (overall)
-                    result = L"<span style=\"font-weight:700;\">" + escapeHtml(rawLine.substr(0, marker)) + L"</span>";
+                    result += L"<span style=\"font-weight:700;\">" + escapeHtml(TrimCell(nameCell)) + L"</span>";
                 else
-                    result = escapeHtml(rawLine.substr(0, marker));
-                // Replace the four-character plain marker with an equally wide
-                // monospaced dot cell. Every later field therefore keeps its
-                // exact character column while the whole line remains nowrap.
-                result += L"<span style=\"display:inline-block;width:4ch;text-align:center;color:";
+                    result += escapeHtml(TrimCell(nameCell));
+                result += L"</span>";
+
+                // Every status segment owns an explicit character width. Bold
+                // fonts and the different source markers ([OK] versus [X]/[?]/[!])
+                // can therefore no longer move any following column in iOS Mail.
+                result += L"<span class=\"mcst-status-dot-cell\" style=\"display:inline-block;width:4ch;text-align:center;color:";
                 result += style.dotColor;
-                result += overall
-                    ? L";font-weight:700;font-size:2em;line-height:0.5;vertical-align:-0.12em;\">&#9679;</span>"
-                    : L";font-weight:700;\">&#9679;</span>";
-                if (label == std::wstring::npos)
+                result += L";font-weight:700;\">";
+                if (overall)
                 {
-                    result += escapeHtml(rawLine.substr(afterMarker));
-                    return result;
+                    result += L"<span class=\"mcst-status-overall-dot\" style=\"font-size:2em;line-height:0.5;vertical-align:-0.12em;\">&#9679;</span>";
                 }
-                result += escapeHtml(rawLine.substr(afterMarker, label - afterMarker));
-                result += L"<span style=\"color:" + std::wstring(style.textColor) +
-                    (overall ? L";font-weight:700;\">" : L";font-weight:600;\">") +
-                    style.label + L"</span>";
-                result += escapeHtml(rawLine.substr(label + std::wcslen(style.label)));
+                else
+                {
+                    result += L"&#9679;";
+                }
+                result += L"</span>";
+
+                result += L"<span class=\"mcst-status-state-cell\" style=\"display:inline-block;width:" +
+                    std::to_wstring(kMonitorStateWidth - 4) + L"ch;color:" +
+                    std::wstring(style.textColor) + L";\">";
+                result += overall
+                    ? L"<span style=\"font-weight:700;\">"
+                    : L"<span style=\"font-weight:600;\">";
+                result += std::wstring(style.label) + L"</span></span>";
+                result += L"<span class=\"mcst-status-value-cell\" style=\"display:inline-block;width:" +
+                    std::to_wstring(kMonitorValueWidth) + L"ch;\">" +
+                    escapeHtml(TrimCell(valueCell)) + L"</span>";
+                result += escapeHtml(detailCell);
                 return result;
             }
         }

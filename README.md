@@ -1,14 +1,14 @@
 ﻿# MCST
 
-## Package: 1.114-R28 Status Report Alignment Cleanup
+## Package: 1.114-R30 Status Report Alignment Cleanup
 
-This source package retains R27's Windows SDK compilation fix, account-specific monthly P/L, Tracker recovery, and Saxo authentication detection. R28 cleans up Status Report column alignment, emphasizes Overall, and replaces an empty Open Positions grid with a concise empty-state message.
+This source package retains R29's fixed System Status columns, unified `(no rows)` output, account-specific monthly P/L, Tracker recovery, and Saxo authentication detection. R30 moves Overall bolding and dot enlargement into nested elements so the outer `ch` column widths remain identical to ordinary rows in iOS Mail.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R28**
+- MCST-Watchdog: **1.114-R30**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V176**
 - Bridge protocol: **V2**

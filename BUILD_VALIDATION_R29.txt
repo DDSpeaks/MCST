@@ -1,0 +1,41 @@
+MCST 1.114-R29 / Tracker Bridge V176 validation
+================================================
+
+Automated source checks
+-----------------------
+- R29 StatusReport, TrackerDateParser, BrokerMonitor, and MCST.Tests portable
+  regression build passed during package preparation on 22 August 2026.
+- Run Tools\Validate-Release.ps1 from a Windows PowerShell prompt.
+- Build MCST.sln as Release x64 with Visual Studio 2022 and the Windows SDK.
+- Run MCST.Tests.exe; every foundation test must pass.
+
+Required functional checks
+--------------------------
+1. Confirm OVERALL STATUS is bold, separated from the component rows, has a
+   double-size dot in the exact same vertical column as every component dot,
+   and does not repeat its state.
+2. Confirm System Status descriptions and all Latest Activity values begin in
+   identical columns on desktop and iOS Mail.
+3. Confirm positive and negative Accounts numbers end at the same character
+   column, including values with a leading minus sign.
+4. Confirm every Open Positions record stays on one logical line and all Open
+   P/L amounts and totals share the same vertical column.
+5. With no open positions, confirm the section says `(no rows)` and
+   omits the nine position column headings while retaining monthly results.
+6. With two visible Accounts, confirm each has a separate current-month
+   Realized P/L and a Position History row for a third account is absent.
+7. Verify DMY, MDY, and YMD samples or set [Tracker] date_order explicitly.
+8. Leave a verified V147 Tracker read stale past a recovery cooldown and confirm
+   a later bounded retry restores live data without restarting Watchdog.
+9. Open the MultiCharts Saxo authentication browser. Confirm an authentication
+   alert after the configured delay and privacy-safe diagnostics.
+10. Confirm `BrokerAuthDetector.cpp` compiles with the installed Windows SDK;
+   COM/OLE headers must precede `UIAutomation.h` and this translation unit must
+   not define `WIN32_LEAN_AND_MEAN`.
+
+Deployment checks
+-----------------
+- Replace both MCST-Watchdog.exe and MCST-TrackerBridge.dll.
+- Restart MultiCharts and confirm the loaded Bridge reports internal V176.
+- Confirm Bridge protocol V2 and the expected ATOnPTracker fingerprint.
+- Inspect a saved report in the target desktop and mobile mail clients.

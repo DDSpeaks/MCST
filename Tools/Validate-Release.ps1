@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R28'
+$currentVersion = '1.114-R30'
 $currentBridgeBuild = 176
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -30,7 +30,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R28.txt',
+    'BUILD_VALIDATION_R30.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -157,7 +157,12 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'AppendMonitorLines' -or
     $statusReportSource -notmatch 'OVERALL STATUS' -or
     $statusReportSource -notmatch 'font-size:2em' -or
-    $statusReportSource -notmatch 'No open positions\.' -or
+    $statusReportSource -notmatch 'out << L"\(no rows\)\\n"' -or
+    $statusReportSource -notmatch 'kMonitorNameWidth = 18' -or
+    $statusReportSource -notmatch 'kMonitorStateWidth = 14' -or
+    $statusReportSource -notmatch 'kMonitorValueWidth = 26' -or
+    $statusReportSource -notmatch 'mcst-status-dot-cell' -or
+    $statusReportSource -notmatch 'mcst-status-overall-dot' -or
     $statusReportSource -notmatch 'alignNumericColumns' -or
     $statusReportSource -notmatch 'visibleAccounts' -or
     $statusReportSource -notmatch 'totalsByAccount' -or
@@ -219,10 +224,13 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch '#B4232A' -or
     $testsSource -notmatch 'mcst-open-positions-lines' -or
     $testsSource -notmatch 'mcst-system-status-lines' -or
-    $testsSource -notmatch 'No open positions\.' -or
+    $testsSource -notmatch 'OPEN POSITIONS\\n--------------\\n\(no rows\)' -or
+    $testsSource -notmatch 'display:inline-block;width:18ch' -or
+    $testsSource -notmatch 'display:inline-block;width:26ch' -or
     $testsSource -notmatch 'Signed Accounts values do not end in the same column' -or
     $testsSource -notmatch 'System Status detail columns are not aligned' -or
     $testsSource -notmatch 'font-size:2em' -or
+    $testsSource -notmatch 'The fixed-width Status dot cell itself is still enlarged' -or
     $testsSource -notmatch 'Current month Realized P/L' -or
     $testsSource -notmatch 'Current month Realized P/L 910792INET' -or
     $testsSource -notmatch 'Current month Realized P/L 977015INET' -or
@@ -276,9 +284,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,28,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,28,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R28.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,30,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,30,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R30.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw

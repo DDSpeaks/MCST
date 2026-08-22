@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 1.114-R30
+
+- Moved Overall name bolding and dot enlargement into nested HTML elements.
+- Kept the outer Name, Dot, and State cells at normal font metrics, preventing
+  `font-size:2em` from doubling the physical width of the `4ch` Dot column.
+- Added a regression test that rejects enlargement of the fixed-width dot cell.
+- Retained R29's fixed component columns, unified `(no rows)` output, Tracker
+  Bridge V176, and Protocol V2.
+
+## 1.114-R29
+
+- Replaced space-dependent System Status HTML with explicit fixed-width Name,
+  Dot, State, and Value spans, preventing iOS Mail bold metrics and the different
+  `[OK]`/`[X]`/`[?]`/`[!]` marker lengths from moving later columns.
+- Kept the double-size Overall dot in the exact same fixed Dot column as every
+  component status marker.
+- Changed empty Open Positions output from `No open positions.` to `(no rows)`,
+  matching Accounts and Recent Logs while retaining monthly Realized P/L lines.
+- Retained Tracker Bridge V176 and Protocol V2 unchanged.
+
 ## 1.114-R28
 
 - Unified identity, System Status, Latest Activity, and Accounts column geometry.
