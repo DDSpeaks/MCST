@@ -1,26 +1,27 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R27
+MCST-Watchdog version: 1.114-R28
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V176, Protocol V2
-Production change:     Windows SDK UI Automation header-order fix
+Production change:     Status Report alignment and empty-position cleanup
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R27 production method
+R28 production method
 ---------------------
-1. Include COM/OLE declarations before UIAutomation.h in BrokerAuthDetector.
-2. Do not define WIN32_LEAN_AND_MEAN in that UI Automation translation unit.
+1. Calculate shared columns for identity, System Status, Latest Activity, and Accounts rows.
+2. Trim imported cells and right-align numeric Accounts columns, including signed values.
 3. Retain R26 behavior: total current-month Realized P/L separately for each account currently
    visible in Accounts; exclude every other Position History account.
 4. Do not show an aggregate monthly result across accounts.
-5. Place Overall as the first aligned System Status row.
+5. Emphasize OVERALL STATUS as the first System Status row without duplicating its state.
 6. Keep System Status and Open Positions in protected, non-wrapping 15-pixel
    preformatted HTML flows.
-7. Give the exact V147 Tracker fingerprint the verified CATPTTabView vtable RVA
+7. Replace an empty Open Positions table with `No open positions.` while retaining monthly results.
+8. Give the exact V147 Tracker fingerprint the verified CATPTTabView vtable RVA
    0x1D78C8 and structurally validate every bounded recovery candidate.
-8. Detect the dedicated Saxo authentication browser with bounded Windows UI
+9. Detect the dedicated Saxo authentication browser with bounded Windows UI
    Automation while retaining privacy-safe diagnostics.
 
 Retained production behavior
@@ -40,4 +41,4 @@ R21 extended monitoring history Bridge: V173
 R22/R23/R24 non-sticky recovery Bridge: V174
 R25 optional Position History Bridge: V175
 R26 targeted structural recovery Bridge: V176
-R27 retains Tracker Bridge: V176
+R28 retains Tracker Bridge: V176

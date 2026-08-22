@@ -1,11 +1,11 @@
 ﻿# MCST Developer Guide
 
 
-## Aligned Open P/L Lines build
+## Status Report alignment build
 
-MCST-Watchdog 1.114-R27 renders Overall as the first row of System Status and keeps System Status and Open Positions in protected 15-pixel preformatted HTML flows. It does not use semantic status tables, the R22 fixed-width position table, or the R23 multi-line cards. Every status and position row remains one line and may continue to the right. The state marker occupies a fixed four-character span so HTML color does not disturb the plain-text column geometry.
+MCST-Watchdog 1.114-R28 renders emphasized `OVERALL STATUS` as the first row of System Status and keeps System Status and Open Positions in protected 15-pixel preformatted HTML flows. It does not use semantic status tables, the R22 fixed-width position table, or the R23 multi-line cards. Every status and position row remains one line and may continue to the right. Normal and double-size state dots occupy the same fixed four-character span so HTML color and emphasis do not disturb the plain-text column geometry.
 
-R27 retains R26's optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Bridge V176 adds a fingerprint-scoped CATPTTabView vtable anchor and structural candidate validation to the existing non-sticky recovery. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+R28 retains R26's optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections show only an empty-state message before any monthly Realized P/L rows. Bridge V176 adds a fingerprint-scoped CATPTTabView vtable anchor and structural candidate validation to the existing non-sticky recovery. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
@@ -13,7 +13,13 @@ The bounded recovery remains read-only. Bridge clears only its own CATPTTabView 
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R27 retains the nine-column order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact.
+R28 retains the nine-column order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact.
+
+Identity and Latest Activity rows calculate one shared label width per section.
+System Status calculates common Name, State, Value, and Detail widths. Accounts
+cells are trimmed before width calculation; columns containing only localized
+numbers are right-aligned, while account identifiers and timestamps remain
+left-aligned.
 
 `BrokerAuthDetector.cpp` deliberately does not define `WIN32_LEAN_AND_MEAN`.
 It includes `ole2.h` and `oleauto.h` before `UIAutomation.h` so Windows SDK

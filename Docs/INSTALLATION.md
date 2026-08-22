@@ -69,7 +69,7 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R27 production Tracker snapshots require Bridge V156 or newer; the account-specific current-month Realized P/L and targeted structural self-recovery use the V176 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. Replacing both Watchdog and the Bridge DLL is recommended when upgrading from R25 or older; upgrading from R26 requires at least the rebuilt Watchdog executable.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R28 production Tracker snapshots require Bridge V156 or newer; the account-specific current-month Realized P/L and targeted structural self-recovery use the V176 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. Replacing both Watchdog and the Bridge DLL is recommended when upgrading from R25 or older; upgrading from R27 requires only the rebuilt Watchdog executable.
 
 The default Saxo authentication profile includes
 `title_only_contains=MultiCharts (OpenAPI Web App)`. Keep this exact match only

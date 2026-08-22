@@ -101,14 +101,26 @@ int wmain()
 
     mcst::WatchdogSystemStatus status;
     status.overall = mcst::HealthState::Healthy;
+    status.bridge = { mcst::HealthState::Healthy, L"Connected", L"Bridge detail" };
+    status.trackerSnapshot = { mcst::HealthState::Healthy, L"Snapshot OK", L"Snapshot detail" };
+    status.heartbeat = { mcst::HealthState::Unknown, L"Disabled", L"Heartbeat detail" };
+    status.lastTrackerAttempt = L"2026-08-22 12:00";
+    status.lastCompleteTrackerSnapshot = L"2026-08-22 11:59";
+    status.lastAutoTradingRead = L"2026-08-22 11:58";
+    status.lastReport = L"2026-08-22 11:00";
+    status.lastAlert = L"None";
     TrackerStatusSnapshot snapshot;
     snapshot.bridgeVersion = 176;
     snapshot.protocolVersion = 2;
+    snapshot.atonpTrackerLoaded = true;
+    snapshot.atonpTrackerPeTimestamp = 0x6A5E694F;
+    snapshot.atonpTrackerImageSize = 3534848;
     snapshot.accounts.present = true;
     snapshot.accounts.ok = true;
     snapshot.accounts.expectedColumns = 12;
     snapshot.accounts.rows = {
-        { L"Saxo", L"A", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" }
+        { L"Saxo Group live", L"910792INET", L"3 951,77", L"3 951,77", L"0,00", L"", L"", L"", L"", L"", L"", L"" },
+        { L"Saxo Group live", L"977015INET", L"-1 484,11", L"-1 484,11", L"0,00", L"", L"", L"", L"", L"", L"", L"" }
     };
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
@@ -163,14 +175,28 @@ int wmain()
         reportHtml,
         L"class=\"mcst-open-positions-lines\"",
         "The one-line Open Positions preformatted section is missing");
-    RequireNotContains(
-        report,
-        L"OVERALL STATUS",
-        "Overall Status still has a separate report section");
     RequireContains(
         report,
-        L"Overall               [OK] OK",
+        L"OVERALL STATUS",
+        "Emphasized Overall Status row is missing");
+    RequireContains(
+        report,
+        L"OVERALL STATUS    [OK] OK",
         "Overall status is not the first aligned System Status row");
+    const std::wstring overallLine = FindLineContaining(report, L"OVERALL STATUS");
+    if (CountOccurrences(overallLine, L"OK") != 2)
+        throw std::runtime_error("Overall status is printed more than once");
+    const std::wstring bridgeLine = FindLineContaining(report, L"Bridge detail");
+    const std::wstring heartbeatLine = FindLineContaining(report, L"Heartbeat detail");
+    if (bridgeLine.find(L"Bridge detail") != heartbeatLine.find(L"Heartbeat detail"))
+        throw std::runtime_error("System Status detail columns are not aligned");
+    const std::wstring positiveAccountLine = FindLineContaining(report, L"3 951,77");
+    const std::wstring negativeAccountLine = FindLineContaining(report, L"-1 484,11");
+    if (positiveAccountLine.find(L"3 951,77") + std::wstring(L"3 951,77").size() !=
+        negativeAccountLine.find(L"-1 484,11") + std::wstring(L"-1 484,11").size())
+    {
+        throw std::runtime_error("Signed Accounts values do not end in the same column");
+    }
     RequireContains(
         reportHtml,
         L"class=\"mcst-system-status-lines\"",
@@ -179,6 +205,10 @@ int wmain()
         reportHtml,
         L"display:inline-block;width:4ch;text-align:center",
         "Status dots do not preserve the fixed character column");
+    RequireContains(
+        reportHtml,
+        L"font-size:2em;line-height:0.5",
+        "Overall Status dot is not emphasized without changing its column width");
     RequireNotContains(
         reportHtml,
         L"<table role=\"presentation\"",
@@ -211,6 +241,16 @@ int wmain()
         reportHtml,
         L"-webkit-text-size-adjust:100% !important",
         "Mobile automatic text shrinking is not disabled");
+
+    TrackerStatusSnapshot emptyPositionsSnapshot = snapshot;
+    emptyPositionsSnapshot.openPositions.rows.clear();
+    const std::wstring emptyPositionsReport = BuildStatusReport(status, emptyPositionsSnapshot);
+    RequireContains(
+        emptyPositionsReport,
+        L"OPEN POSITIONS\n--------------\nNo open positions.",
+        "Empty Open Positions does not use the concise empty-state message");
+    if (!FindLineContaining(emptyPositionsReport, L"Average Price").empty())
+        throw std::runtime_error("Empty Open Positions still prints position column headings");
 
     mcst::WatchdogSystemStatus staleStatus = status;
     staleStatus.trackerDataStale = true;

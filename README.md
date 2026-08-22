@@ -1,14 +1,14 @@
 ﻿# MCST
 
-## Package: 1.114-R27 UI Automation Header Fix
+## Package: 1.114-R28 Status Report Alignment Cleanup
 
-This source package retains R26's account P/L, report layout, Tracker recovery, and Saxo authentication detection. R27 fixes the Windows SDK compilation of `BrokerAuthDetector.cpp` by loading the COM/OLE declarations before `UIAutomation.h` and by not defining `WIN32_LEAN_AND_MEAN` in that translation unit.
+This source package retains R27's Windows SDK compilation fix, account-specific monthly P/L, Tracker recovery, and Saxo authentication detection. R28 cleans up Status Report column alignment, emphasizes Overall, and replaces an empty Open Positions grid with a concise empty-state message.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R27**
+- MCST-Watchdog: **1.114-R28**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V176**
 - Bridge protocol: **V2**

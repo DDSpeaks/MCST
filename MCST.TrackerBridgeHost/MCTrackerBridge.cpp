@@ -12645,8 +12645,7 @@ DWORD sehCode = 0;
 
     void AppendV153Section(std::ostringstream& out, const V153GridSectionResult& section, unsigned int columnCount)
     {
-        out 
-            << "SECTION\t" << section.name
+        out << "SECTION\t" << section.name
             << '\t' << (section.ok ? "OK" : "FAIL")
             << '\t' << columnCount
             << '\t' << section.rows.size()

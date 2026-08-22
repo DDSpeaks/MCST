@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R27'
+$currentVersion = '1.114-R28'
 $currentBridgeBuild = 176
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -30,7 +30,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R27.txt',
+    'BUILD_VALIDATION_R28.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -154,7 +154,11 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'mcst-system-status-lines' -or
     $statusReportSource -notmatch 'Current month Realized P/L' -or
     $statusReportSource -notmatch 'BuildPositionHistoryTotalRows' -or
-    $statusReportSource -notmatch 'MonitorLine\(L"Overall"' -or
+    $statusReportSource -notmatch 'AppendMonitorLines' -or
+    $statusReportSource -notmatch 'OVERALL STATUS' -or
+    $statusReportSource -notmatch 'font-size:2em' -or
+    $statusReportSource -notmatch 'No open positions\.' -or
+    $statusReportSource -notmatch 'alignNumericColumns' -or
     $statusReportSource -notmatch 'visibleAccounts' -or
     $statusReportSource -notmatch 'totalsByAccount' -or
     $statusReportSource -notmatch 'TrimCell\(row\[2\]\)' -or
@@ -178,7 +182,7 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'totalRow\[1\] = total\.first' -or
     $statusReportSource -notmatch 'row\[8\] = source\.size\(\) > 7 \? source\[7\]' -or
     $statusReportSource -notmatch 'std::fabs\(quantity\) \* averagePrice' -or
-    $statusReportSource -notmatch 'AppendAlignedSectionRows\(out, snapshot\.recentLogs, true\)') {
+    $statusReportSource -notmatch 'AppendAlignedSectionRows\(out, snapshot\.recentLogs, true, false\)') {
     throw 'Known-currency Tracker totals or aligned Open Positions field mapping is missing.'
 }
 if ($statusReportSource -match 'totalPositionValue') {
@@ -187,9 +191,8 @@ if ($statusReportSource -match 'totalPositionValue') {
 if ($statusReportSource -match 'NATIVE VALUE TOTAL') {
     throw 'The removed Native Value total notice must not appear in the Status Report.'
 }
-if ($statusReportSource -match 'OVERALL STATUS' -or
-    $statusReportSource -match 'mcst-overall-status-lines') {
-    throw 'Overall status must be the first aligned System Status row, not a separate section.'
+if ($statusReportSource -match 'mcst-overall-status-lines') {
+    throw 'Overall status must remain in the shared System Status flow, not a separate section.'
 }
 if ($statusReportSource -match [regex]::Escape('width=\"1100\"') -or
     $statusReportSource -match 'mcst-horizontal-scroll' -or
@@ -216,6 +219,10 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch '#B4232A' -or
     $testsSource -notmatch 'mcst-open-positions-lines' -or
     $testsSource -notmatch 'mcst-system-status-lines' -or
+    $testsSource -notmatch 'No open positions\.' -or
+    $testsSource -notmatch 'Signed Accounts values do not end in the same column' -or
+    $testsSource -notmatch 'System Status detail columns are not aligned' -or
+    $testsSource -notmatch 'font-size:2em' -or
     $testsSource -notmatch 'Current month Realized P/L' -or
     $testsSource -notmatch 'Current month Realized P/L 910792INET' -or
     $testsSource -notmatch 'Current month Realized P/L 977015INET' -or
@@ -269,9 +276,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,27,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,27,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R27.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,28,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,28,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R28.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -479,7 +486,7 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion UI Automation Header Fix" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Status Report Alignment Cleanup" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
     $releaseNotes -notmatch 'Overall' -or
     $releaseNotes -notmatch 'Position History' -or
@@ -493,4 +500,4 @@ if ($releaseNotes -notmatch "MCST $escapedCurrentVersion UI Automation Header Fi
     throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, account totals, browser authentication detection, and self-recovery."
 }
 
-Write-Host "MCST $currentVersion UI Automation Header Fix validation passed." -ForegroundColor Green
+Write-Host "MCST $currentVersion Status Report Alignment Cleanup validation passed." -ForegroundColor Green

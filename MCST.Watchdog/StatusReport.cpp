@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <cwchar>
 #include <map>
+#include <utility>
 
 namespace
 {
@@ -34,16 +35,68 @@ namespace
         return std::wstring(StateMarker(state)) + L" " + mcst::HealthStateText(state);
     }
 
-    std::wstring MonitorLine(const wchar_t* name, const mcst::MonitorStatus& item)
+    std::wstring MonitorLine(
+        const std::wstring& name,
+        const mcst::MonitorStatus& item,
+        std::size_t nameWidth,
+        std::size_t stateWidth,
+        std::size_t valueWidth)
     {
         std::wostringstream out;
-        out << std::left << std::setw(22) << name
-            << std::setw(18) << StateCell(item.state)
-            << item.value;
+        out << std::left << std::setw(static_cast<int>(nameWidth)) << name
+            << std::setw(static_cast<int>(stateWidth)) << StateCell(item.state)
+            << std::setw(static_cast<int>(valueWidth)) << item.value;
         if (!item.detail.empty())
-            out << L"  " << item.detail;
+            out << item.detail;
         out << L'\n';
         return out.str();
+    }
+
+    void AppendMonitorLines(std::wostringstream& out, const mcst::WatchdogSystemStatus& status)
+    {
+        const std::vector<std::pair<std::wstring, mcst::MonitorStatus>> rows = {
+            { L"OVERALL STATUS", { status.overall, L"", L"" } },
+            { L"Bridge", status.bridge },
+            { L"Tracker Snapshot", status.trackerSnapshot },
+            { L"AutoTrading", status.autoTrading },
+            { L"Broker", status.broker },
+            { L"Recent Logs", status.recentLogs },
+            { L"Status Reports", status.statusReports },
+            { L"Email", status.email },
+            { L"Heartbeat", status.heartbeat }
+        };
+
+        std::size_t nameWidth = 0;
+        std::size_t stateWidth = 0;
+        std::size_t valueWidth = 0;
+        for (const auto& row : rows)
+        {
+            nameWidth = (std::max)(nameWidth, row.first.size());
+            stateWidth = (std::max)(stateWidth, StateCell(row.second.state).size());
+            valueWidth = (std::max)(valueWidth, row.second.value.size());
+        }
+        nameWidth += 2;
+        stateWidth += 2;
+        valueWidth += 2;
+
+        out << MonitorLine(rows.front().first, rows.front().second, nameWidth, stateWidth, valueWidth)
+            << L'\n';
+        for (std::size_t index = 1; index < rows.size(); ++index)
+            out << MonitorLine(rows[index].first, rows[index].second, nameWidth, stateWidth, valueWidth);
+    }
+
+    void AppendKeyValueRows(
+        std::wostringstream& out,
+        const std::vector<std::pair<std::wstring, std::wstring>>& rows)
+    {
+        std::size_t labelWidth = 0;
+        for (const auto& row : rows)
+            labelWidth = (std::max)(labelWidth, row.first.size());
+        labelWidth += 2;
+
+        for (const auto& row : rows)
+            out << std::left << std::setw(static_cast<int>(labelWidth)) << row.first
+                << row.second << L'\n';
     }
 
     std::wstring FormatGb(unsigned long long bytes)
@@ -143,7 +196,7 @@ namespace
 
     std::wstring PadCell(const std::wstring& value, std::size_t width, bool rightAlign)
     {
-        const std::wstring clean = SingleLineCell(value);
+        const std::wstring clean = TrimCell(SingleLineCell(value));
         if (clean.size() >= width)
             return clean;
         const std::wstring padding(width - clean.size(), L' ');
@@ -160,7 +213,7 @@ namespace
         if (headers)
         {
             for (std::size_t column = 0; column < columnCount && column < headers->size(); ++column)
-                widths[column] = (std::max)(widths[column], SingleLineCell((*headers)[column]).size());
+                widths[column] = (std::max)(widths[column], TrimCell(SingleLineCell((*headers)[column])).size());
         }
 
         for (const auto& row : rows)
@@ -169,7 +222,7 @@ namespace
             {
                 if (lastColumnFlexible && column + 1 == columnCount)
                     continue;
-                widths[column] = (std::max)(widths[column], SingleLineCell(row[column]).size());
+                widths[column] = (std::max)(widths[column], TrimCell(SingleLineCell(row[column])).size());
             }
         }
         return widths;
@@ -188,7 +241,7 @@ namespace
             if (column != 0)
                 out << L" | ";
 
-            const std::wstring value = column < row.size() ? row[column] : L"";
+            const std::wstring value = column < row.size() ? TrimCell(row[column]) : L"";
             if (lastColumnFlexible && column + 1 == columnCount)
                 out << SingleLineCell(value);
             else
@@ -216,7 +269,8 @@ namespace
     void AppendAlignedSectionRows(
         std::wostringstream& out,
         const TrackerBridgeSection& section,
-        bool lastColumnFlexible)
+        bool lastColumnFlexible,
+        bool alignNumericColumns)
     {
         if (section.rows.empty())
         {
@@ -229,7 +283,41 @@ namespace
             : section.rows.front().size();
         const std::vector<std::size_t> widths = CalculateColumnWidths(
             section.rows, columnCount, nullptr, lastColumnFlexible);
-        const std::vector<bool> alignments(columnCount, false);
+        std::vector<bool> alignments(columnCount, false);
+        if (alignNumericColumns)
+        {
+            for (std::size_t column = 0; column < columnCount; ++column)
+            {
+                bool sawNumber = false;
+                bool onlyNumbers = true;
+                for (const auto& row : section.rows)
+                {
+                    const std::wstring value = column < row.size() ? TrimCell(row[column]) : L"";
+                    if (value.empty())
+                        continue;
+
+                    bool hasDigit = false;
+                    for (const wchar_t ch : value)
+                    {
+                        if (ch >= L'0' && ch <= L'9')
+                        {
+                            hasDigit = true;
+                            continue;
+                        }
+                        if (ch != L' ' && ch != L'\u00A0' && ch != L'+' && ch != L'-' &&
+                            ch != L',' && ch != L'.' && ch != L'\'')
+                        {
+                            onlyNumbers = false;
+                            break;
+                        }
+                    }
+                    if (!onlyNumbers)
+                        break;
+                    sawNumber = sawNumber || hasDigit;
+                }
+                alignments[column] = onlyNumbers && sawNumber;
+            }
+        }
 
         for (const auto& row : section.rows)
             AppendAlignedRow(out, row, widths, alignments, lastColumnFlexible);
@@ -615,6 +703,26 @@ namespace
             BuildPositionHistoryTotalRows(positionHistory, accounts, configuredDateOrder);
         totalRows.insert(totalRows.end(), historyTotalRows.begin(), historyTotalRows.end());
 
+        if (rows.empty())
+        {
+            out << L"No open positions.\n";
+            if (!totalRows.empty())
+            {
+                out << L'\n';
+                const std::vector<std::size_t> compactWidths =
+                    CalculateColumnWidths(totalRows, 3, nullptr, false);
+                const std::vector<bool> compactAlignment = { false, true, false };
+                for (const auto& totalRow : totalRows)
+                {
+                    const std::vector<std::wstring> compactRow = {
+                        totalRow[0], totalRow[1], totalRow[2]
+                    };
+                    AppendAlignedRow(out, compactRow, compactWidths, compactAlignment, false);
+                }
+            }
+            return;
+        }
+
         std::vector<std::vector<std::wstring>> rowsForWidth = rows;
         rowsForWidth.insert(rowsForWidth.end(), totalRows.begin(), totalRows.end());
         const std::vector<std::size_t> widths =
@@ -644,36 +752,38 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
 {
     std::wostringstream out;
     out << L"MCST-Watchdog Status Report\n"
-        << L"===========================\n"
-        << L"Watchdog version       1.114-R27\n"
-        << L"Tracker Bridge         MCST Tracker Bridge 1.0 (internal V" << snapshot.bridgeVersion << L", protocol V" << snapshot.protocolVersion << L")\n"
-        << L"MultiCharts            " << (status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion) << L"\n"
-        << L"MC executable          " << (status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable) << L"\n"
-        << L"AutoTrading profile    " << (status.multiChartsCompatibilityProfile.empty() ? L"Unknown" : status.multiChartsCompatibilityProfile) << L"\n"
-        << L"Tracker profile        " << (status.trackerCompatibilityProfile.empty() ? L"Unknown" : status.trackerCompatibilityProfile) << L"\n";
+        << L"===========================\n";
+    std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
+        { L"Watchdog version", L"1.114-R28" },
+        { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
+            std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
+            std::to_wstring(snapshot.protocolVersion) + L")" },
+        { L"MultiCharts", status.multiChartsVersion.empty() ? L"Unknown" : status.multiChartsVersion },
+        { L"MC executable", status.multiChartsExecutable.empty() ? L"Unknown" : status.multiChartsExecutable },
+        { L"AutoTrading profile", status.multiChartsCompatibilityProfile.empty() ? L"Unknown" : status.multiChartsCompatibilityProfile },
+        { L"Tracker profile", status.trackerCompatibilityProfile.empty() ? L"Unknown" : status.trackerCompatibilityProfile }
+    };
     if (snapshot.atonpTrackerLoaded)
     {
-        out << L"ATOnPTracker fingerprint 0x" << std::hex << std::uppercase << snapshot.atonpTrackerPeTimestamp
-            << std::dec << L" / " << snapshot.atonpTrackerImageSize << L" bytes\n";
+        std::wostringstream fingerprint;
+        fingerprint << L"0x" << std::hex << std::uppercase << snapshot.atonpTrackerPeTimestamp
+            << std::dec << L" / " << snapshot.atonpTrackerImageSize << L" bytes";
+        identityRows.push_back({ L"ATOnPTracker fingerprint", fingerprint.str() });
     }
+    AppendKeyValueRows(out, identityRows);
     out << L"\nSYSTEM STATUS\n"
-        << L"-------------\n"
-        << MonitorLine(L"Overall", { status.overall, mcst::HealthStateText(status.overall), L"" })
-        << MonitorLine(L"Bridge", status.bridge)
-        << MonitorLine(L"Tracker Snapshot", status.trackerSnapshot)
-        << MonitorLine(L"AutoTrading", status.autoTrading)
-        << MonitorLine(L"Broker", status.broker)
-        << MonitorLine(L"Recent Logs", status.recentLogs)
-        << MonitorLine(L"Status Reports", status.statusReports)
-        << MonitorLine(L"Email", status.email)
-        << MonitorLine(L"Heartbeat", status.heartbeat)
-        << L"\nLATEST ACTIVITY\n"
-        << L"---------------\n"
-        << std::left << std::setw(24) << L"Last Tracker attempt" << status.lastTrackerAttempt << L'\n'
-        << std::left << std::setw(24) << L"Last complete snapshot" << status.lastCompleteTrackerSnapshot << L'\n'
-        << std::left << std::setw(22) << L"Last AutoTrading Read" << (status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead) << L'\n'
-        << std::left << std::setw(22) << L"Last Status Report" << status.lastReport << L'\n'
-        << std::left << std::setw(22) << L"Last Alert" << status.lastAlert << L"\n\n";
+        << L"-------------\n";
+    AppendMonitorLines(out, status);
+    out << L"\nLATEST ACTIVITY\n"
+        << L"---------------\n";
+    AppendKeyValueRows(out, {
+        { L"Last Tracker attempt", status.lastTrackerAttempt },
+        { L"Last complete snapshot", status.lastCompleteTrackerSnapshot },
+        { L"Last AutoTrading Read", status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead },
+        { L"Last Status Report", status.lastReport },
+        { L"Last Alert", status.lastAlert }
+    });
+    out << L'\n';
 
     AppendSystemResources(out, status);
 
@@ -696,12 +806,12 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     }
 
     out << L"\nACCOUNTS\n--------\n";
-    AppendAlignedSectionRows(out, snapshot.accounts, false);
+    AppendAlignedSectionRows(out, snapshot.accounts, false, true);
     out << L"\nOPEN POSITIONS\n--------------\n";
     AppendOpenPositionsTable(
         out, snapshot.openPositions, snapshot.positionHistory, snapshot.accounts, status.trackerDateOrder);
     out << L"\nRECENT LOGS\n-----------\n";
-    AppendAlignedSectionRows(out, snapshot.recentLogs, true);
+    AppendAlignedSectionRows(out, snapshot.recentLogs, true, false);
     return out.str();
 }
 
@@ -754,15 +864,22 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
             const std::size_t marker = rawLine.find(style.marker);
             if (marker != std::wstring::npos)
             {
+                const bool overall = rawLine.rfind(L"OVERALL STATUS", 0) == 0;
                 const std::size_t afterMarker = marker + std::wcslen(style.marker);
                 const std::size_t label = rawLine.find(style.label, afterMarker);
-                std::wstring result = escapeHtml(rawLine.substr(0, marker));
+                std::wstring result;
+                if (overall)
+                    result = L"<span style=\"font-weight:700;\">" + escapeHtml(rawLine.substr(0, marker)) + L"</span>";
+                else
+                    result = escapeHtml(rawLine.substr(0, marker));
                 // Replace the four-character plain marker with an equally wide
                 // monospaced dot cell. Every later field therefore keeps its
                 // exact character column while the whole line remains nowrap.
                 result += L"<span style=\"display:inline-block;width:4ch;text-align:center;color:";
                 result += style.dotColor;
-                result += L";font-weight:700;\">&#9679;</span>";
+                result += overall
+                    ? L";font-weight:700;font-size:2em;line-height:0.5;vertical-align:-0.12em;\">&#9679;</span>"
+                    : L";font-weight:700;\">&#9679;</span>";
                 if (label == std::wstring::npos)
                 {
                     result += escapeHtml(rawLine.substr(afterMarker));
@@ -770,7 +887,8 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
                 }
                 result += escapeHtml(rawLine.substr(afterMarker, label - afterMarker));
                 result += L"<span style=\"color:" + std::wstring(style.textColor) +
-                    L";font-weight:600;\">" + style.label + L"</span>";
+                    (overall ? L";font-weight:700;\">" : L";font-weight:600;\">") +
+                    style.label + L"</span>";
                 result += escapeHtml(rawLine.substr(label + std::wcslen(style.label)));
                 return result;
             }
@@ -942,7 +1060,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
         if (inOpenPositions)
         {
             const std::vector<std::wstring> cells = splitAlignedTableRow(line);
-            if (cells.size() == 9)
+            if (cells.size() >= 2)
             {
                 for (std::size_t column = 0; column < cells.size(); ++column)
                 {

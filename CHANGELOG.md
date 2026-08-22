@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.114-R28
+
+- Unified identity, System Status, Latest Activity, and Accounts column geometry.
+- Trimmed imported Accounts cells and right-aligned numeric columns so signed
+  and unsigned values end at the same character position.
+- Emphasized `OVERALL STATUS` with bold text, a double-size fixed-width dot, and
+  separation from the component rows; removed the duplicate state value.
+- Replaced empty Open Positions column headings with `No open positions.` while
+  retaining account-specific current-month Realized P/L lines.
+- Retained Tracker Bridge V176, Protocol V2, recovery, and authentication behavior.
+
 ## 1.114-R25
 
 - Replaced Overall/System Status HTML tables with protected one-line 15 px

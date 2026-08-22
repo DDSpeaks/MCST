@@ -1,16 +1,18 @@
-# MCST 1.114-R27 UI Automation Header Fix
+# MCST 1.114-R28 Status Report Alignment Cleanup
 
 Tracker Bridge internal build: V176  
 Bridge protocol: V2
 
-## Windows SDK compilation fix
+R27's Windows SDK header-order fix is retained: `ole2.h` and `oleauto.h`
+remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
-- `BrokerAuthDetector.cpp` now includes `ole2.h` and `oleauto.h` before
-  `UIAutomation.h`, ensuring the COM interface declarations are available.
-- `WIN32_LEAN_AND_MEAN` is no longer defined in this translation unit because
-  it hid declarations required by the Windows 10.0.26100 UI Automation headers.
-- The authentication behavior, privacy limits, account totals, report layout,
-  Tracker recovery, Bridge V176, and Protocol V2 are otherwise unchanged.
+## Column alignment
+
+- Identity rows and Latest Activity now use a shared calculated label width.
+- System Status calculates common Name, State, Value, and Detail columns, so
+  details begin at the same position even when status values have different lengths.
+- Accounts cells are trimmed before layout and numeric columns are right-aligned.
+  Positive and negative values therefore end at exactly the same character column.
 
 ## Account-specific monthly Realized P/L
 
@@ -25,13 +27,17 @@ Bridge protocol: V2
 
 ## Report layout
 
-- Overall is now the first aligned row inside System Status instead of a
-  separate section.
+- `OVERALL STATUS` is bold, separated from component rows, and uses a double-size
+  colored dot while retaining the same fixed marker-cell width. Its state is no
+  longer printed twice.
 - System Status and Open Positions retain protected, non-wrapping,
   15-pixel monospaced rendering. Every logical row stays on one line and may
   continue to the right on a narrow mail display.
 - Total Open P/L and each account's monthly Realized P/L remain directly below
   the Open P/L column.
+- When there are no open positions, position column headings and separators are
+  omitted and `No open positions.` is shown. Account-specific monthly Realized
+  P/L lines remain available below the message.
 
 ## Tracker self-recovery
 
@@ -54,6 +60,6 @@ Bridge protocol: V2
 ## Installation note
 
 Rebuild and replace `MCST-Watchdog.exe`. Tracker Bridge remains V176 and does
-not need replacement when upgrading directly from R26. When upgrading from R25
+not need replacement when upgrading directly from R27. When upgrading from R25
 or older, replace the included `MCST-TrackerBridge.dll` too and restart
 MultiCharts. Protocol V2 is unchanged.
