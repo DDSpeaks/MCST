@@ -1,30 +1,23 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R30
+MCST-Watchdog version: 1.114-R31
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V176, Protocol V2
-Production change:     Status Report alignment and empty-position cleanup
+Tracker Bridge:        Product 1.0, internal V177, Protocol V2
+Production change:     Progressive CATPTTabView recovery and diagnostics
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R30 production method
+R31 production method
 ---------------------
-1. Keep every System Status column on a normal-size outer element and apply
-   bold or double-size styling only to nested content, so CSS `ch` widths never
-   change with Overall emphasis in iOS Mail.
-2. Trim imported cells and right-align numeric Accounts columns, including signed values.
-3. Retain R26 behavior: total current-month Realized P/L separately for each account currently
-   visible in Accounts; exclude every other Position History account.
-4. Do not show an aggregate monthly result across accounts.
-5. Emphasize OVERALL STATUS as the first System Status row without duplicating its state.
-6. Keep System Status and Open Positions in protected, non-wrapping 15-pixel
-   preformatted HTML flows.
-7. Use the same `(no rows)` empty marker for Accounts, Open Positions, and Recent Logs.
-8. Give the exact V147 Tracker fingerprint the verified CATPTTabView vtable RVA
-   0x1D78C8 and structurally validate every bounded recovery candidate.
-9. Detect the dedicated Saxo authentication browser with bounded Windows UI
-   Automation while retaining privacy-safe diagnostics.
+1. Prefer the exact fingerprint-scoped CATPTTabView locator before a process-wide RTTI scan.
+2. Suppress repeated broad scans after a confirmed persistent failure.
+3. Retry with fast, expanded, and wide byte/time budgets under separate cooldowns.
+4. Reuse up to eight previously accepted allocation neighborhoods as validated hints.
+5. Log candidate counts, scores, rejection reasons, limits, elapsed time, tier, and decision.
+6. Surface the Bridge CATPTTabView diagnostic in Watchdog status details.
+7. Retain R30 report alignment, account-specific monthly Realized P/L, `(no rows)` output,
+   locale-aware history dates, and Saxo authentication detection.
 
 Retained production behavior
 ----------------------------
@@ -43,4 +36,4 @@ R21 extended monitoring history Bridge: V173
 R22/R23/R24 non-sticky recovery Bridge: V174
 R25 optional Position History Bridge: V175
 R26 targeted structural recovery Bridge: V176
-R30 retains Tracker Bridge: V176
+R31 progressive diagnostic recovery Bridge: V177

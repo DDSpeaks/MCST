@@ -39,6 +39,7 @@ struct TrackerStatusSnapshot
     std::wstring trackerCompatibilityProfile;
     std::wstring trackerCompatibilitySource;
     std::wstring trackerCompatibilityDiagnostic;
+    std::wstring tabViewDiagnostic;
     bool recoveryAttempted = false;
     std::wstring recoveryResult;
     TrackerBridgeSection accounts;

@@ -171,6 +171,7 @@ namespace
                     else if (key == "tracker_compatibility_profile") snapshot.trackerCompatibilityProfile = DecodeField(value);
                     else if (key == "tracker_compatibility_source") snapshot.trackerCompatibilitySource = DecodeField(value);
                     else if (key == "tracker_compatibility_diagnostic") snapshot.trackerCompatibilityDiagnostic = DecodeField(value);
+                    else if (key == "tabview_diagnostic") snapshot.tabViewDiagnostic = DecodeField(value);
                     else if (key == "recovery_attempted") snapshot.recoveryAttempted = value == "true";
                     else if (key == "recovery_result") snapshot.recoveryResult = DecodeField(value);
                 }

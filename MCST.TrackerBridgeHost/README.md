@@ -8,12 +8,12 @@ MCST Tracker Bridge is the MultiCharts-side runtime component that provides Orde
 Public product name: MCST Tracker Bridge
 Product version:     1.0
 DLL file:            MCST-TrackerBridge.dll
-Internal build:      V176
+Internal build:      V177
 Bridge protocol:     V2
 Runtime location:    C:\MCExtras\MCST-TrackerBridge.dll
 ```
 
-The internal V176 identifier describes this Bridge implementation. It is separate from the public product version and from exact MultiCharts module fingerprints. Production Tracker snapshots still have a V156 minimum. V175's optional, bounded `position_history` section is retained. V176 gives the exact verified V147 fingerprint the CATPTTabView vtable RVA `0x1D78C8` and requires strong structural evidence before a targeted recovery candidate is accepted. The retained Position Currency command remains available from V171 onward.
+The internal V177 identifier describes this Bridge implementation. It is separate from the public product version and from exact MultiCharts module fingerprints. Production Tracker snapshots still have a V156 minimum. V175's optional `position_history` and V176's exact verified V147 CATPTTabView vtable RVA `0x1D78C8` are retained. V177 adds progressive fast/expanded/wide recovery, validated allocation hints, and exact candidate diagnostics. The retained Position Currency command remains available from V171 onward.
 
 ## How the Bridge is loaded
 
@@ -69,6 +69,6 @@ This design allows a newly verified `Profile.*` section to be activated with a f
 
 ## Protocol stability
 
-Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Command 50 was introduced in V157 and is retained unchanged. V173 added optional `monitoring_logs`; V175 similarly added optional `position_history`. Older parsers ignore unknown sections. V176 changes only internal fingerprint-scoped recovery; the message header and command set are unchanged. Internal layout discovery, recovery, profile selection, and bounded table capture stay inside the Bridge.
+Bridge Protocol V2 remains the stable Watchdog/Bridge boundary. Command 50 was introduced in V157 and is retained unchanged. V173 added optional `monitoring_logs`; V175 similarly added optional `position_history`. Older parsers ignore unknown sections. V177 changes only internal recovery and optional metadata detail; the message header and command set are unchanged. Internal layout discovery, recovery, profile selection, and bounded table capture stay inside the Bridge.
 
 The recovery path never writes MultiCharts memory, changes Tracker UI state, sends synthetic input, or calls an unknown function. It is attempted at most once per snapshot request and only when a same-process Tracker has an authorized compatibility profile but fewer than all three table sections were read.

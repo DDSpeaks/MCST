@@ -1,19 +1,40 @@
-# MCST 1.114-R30 Status Report Alignment Cleanup
+# MCST 1.114-R31 Progressive Tracker Recovery
 
-Tracker Bridge internal build: V176  
+Tracker Bridge internal build: V177  
 Bridge protocol: V2
 
 R27's Windows SDK header-order fix is retained: `ole2.h` and `oleauto.h`
 remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
-## Column alignment
+## Progressive CATPTTabView recovery
+
+- A verified exact-profile locator now runs before the expensive process-wide
+  RTTI walk. Normal startup and object recreation can therefore recover through
+  the known V147 vtable without a broad scan.
+- After a confirmed failure, repeated Watchdog retries no longer launch the
+  20-40 second process-wide search observed in the R30 execution trace.
+- Recovery uses three read-only tiers: fast (16 MiB / 0.9 s), expanded
+  (64 MiB / 1.8 s), and wide (128 MiB / 2.8 s). Expanded and wide attempts have
+  separate two- and five-minute cooldowns; fast attempts retain the 30-second
+  cooldown.
+- Up to eight previously accepted CATPTTabView addresses are retained as safe
+  allocator-neighborhood hints. Each hint is revalidated with `VirtualQuery`
+  before its allocation is inspected.
+- Execution trace entries now report tier, candidate count, scores, exact
+  vtable hits, invalid hits, structural rejections, byte/time limits, elapsed
+  time, and the final decision (`accepted`, `no_candidates`,
+  `insufficient_structure`, or `ambiguous_candidates`).
+- The parsed CATPTTabView diagnostic is also included in Watchdog Tracker and
+  Recent Logs details.
+
+## Retained column alignment
 
 - Identity rows and Latest Activity now use a shared calculated label width.
 - System Status HTML uses explicit fixed-width Name, Dot, State, and Value spans.
   Different marker lengths and iOS Mail's bold-font metrics can no longer move
   the following columns. The large Overall dot occupies the same Dot column as
   every normal-size component dot.
-- R30 keeps the fixed-width Overall Name, Dot, and State elements at the normal
+- R31 retains the fixed-width Overall Name, Dot, and State elements at the normal
   font size. Bold text and the double-size dot live in nested elements, so CSS
   no longer doubles the physical width of the `4ch` Dot column.
 - Accounts cells are trimmed before layout and numeric columns are right-aligned.
@@ -45,14 +66,14 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
   Account-specific monthly Realized
   P/L lines remain available below the message.
 
-## Tracker self-recovery
+## Tracker compatibility
 
 - The exact verified V147 `ATOnPTracker.dll` fingerprint now supplies the known
   CATPTTabView primary vtable RVA `0x1D78C8` to bounded fresh recovery scans.
 - Recovery candidates must also pass structural validation: secondary vtable,
   Tracker layout signature, or at least five credible page pointers.
-- The existing 30-second cooldown remains, so a long-lived stale state receives
-  new bounded attempts without restarting MCST-Watchdog.
+- Protocol V2, the V147 fingerprint, the structural acceptance requirements,
+  Position History, and Position Currency research are unchanged.
 
 ## Saxo authentication alert
 
@@ -65,7 +86,6 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Installation note
 
-Rebuild and replace `MCST-Watchdog.exe`. Tracker Bridge remains V176 and does
-not need replacement when upgrading directly from R29. When upgrading from R25
-or older, replace the included `MCST-TrackerBridge.dll` too and restart
-MultiCharts. Protocol V2 is unchanged.
+Rebuild and replace both `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll`.
+Restart MultiCharts so Bridge V177 is loaded; restarting Watchdog alone does not
+replace the DLL running inside MultiCharts. Protocol V2 is unchanged.

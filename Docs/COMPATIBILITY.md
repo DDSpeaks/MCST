@@ -113,7 +113,7 @@ Its absence does not invalidate an existing production profile; it only makes
 the monthly Realized P/L enrichment unavailable.
 
 For the exact verified V147 fingerprint (PE timestamp `0x6A5694FB`, image size
-`3534848`), Bridge V176 also embeds CATPTTabView primary vtable RVA
+`3534848`), Bridge V176 and newer also embed CATPTTabView primary vtable RVA
 `0x1D78C8`. A targeted recovery hit is not sufficient by itself: the object
 must pass structural scoring and expose a secondary vtable, a Tracker layout
 signature, or at least five credible page pointers. Other fingerprints do not

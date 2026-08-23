@@ -1,21 +1,29 @@
 ﻿# MCST
 
-## Package: 1.114-R30 Status Report Alignment Cleanup
+## Package: 1.114-R31 Progressive Tracker Recovery
 
-This source package retains R29's fixed System Status columns, unified `(no rows)` output, account-specific monthly P/L, Tracker recovery, and Saxo authentication detection. R30 moves Overall bolding and dot enlargement into nested elements so the outer `ch` column widths remain identical to ordinary rows in iOS Mail.
+This source package retains R30's report alignment, unified `(no rows)` output,
+account-specific monthly P/L, and Saxo authentication detection. R31 replaces
+repeated 20-40 second CATPTTabView searches with deadline-safe progressive
+recovery and records the exact candidate/scan outcome for each recovery attempt.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R30**
+- MCST-Watchdog: **1.114-R31**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V176**
+- Tracker Bridge internal build: **V177**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
-The Tracker Bridge product version, internal build, and protocol version are separate identifiers. V175 added optional `position_history`; V176 adds the exact verified CATPTTabView vtable anchor and structural validation used by bounded self-recovery. Protocol V2 is unchanged. The current-month account totals and improved recovery require the V176 DLL in this package. The retained R16 `Position CCY` action still requires V171 or newer.
+The Tracker Bridge product version, internal build, and protocol version are
+separate identifiers. V175 added optional `position_history`; V176 added the
+exact verified CATPTTabView vtable anchor; V177 adds progressive fast, expanded,
+and wide recovery tiers, retained allocation hints, and detailed recovery
+diagnostics. Protocol V2 is unchanged. R31 requires the V177 DLL in this
+package. The retained R16 `Position CCY` action still requires V171 or newer.
 
 ## Runtime installation
 

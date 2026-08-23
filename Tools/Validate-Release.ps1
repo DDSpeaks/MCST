@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R30'
-$currentBridgeBuild = 176
+$currentVersion = '1.114-R31'
+$currentBridgeBuild = 177
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -30,7 +30,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R30.txt',
+    'BUILD_VALIDATION_R31.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -284,22 +284,27 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,30,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,30,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R30.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,31,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,31,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R31.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
+$bridgeRc = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc') -Raw
 if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).parent_path()')) {
     throw 'Invalid vector-to-filesystem::path construction found in Tracker Bridge Host compatibility path.'
 }
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
+if ($bridgeRc -notmatch 'FILEVERSION 1,0,177,0' -or
+    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.177.0\0"')) {
+    throw 'Tracker Bridge Windows file version is not aligned with internal V177.'
+}
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV176StatusReportSnapshotWithRecovery',
+    'BuildV177StatusReportSnapshotWithRecovery',
     'TabViewRecoveryModeScope',
     '~TabViewRecoveryModeScope',
     'g_tabViewRecoveryModeActive.store(false)',
@@ -310,6 +315,21 @@ foreach ($recoveryToken in @(
     'recovery_result',
     'kTabViewRecoveryCooldownMs = 30000',
     'g_tabViewRecoveryModeActive',
+    'g_tabViewPersistentFailureActive',
+    'g_tabViewRecoveryFailureStreak',
+    'g_recentTabViewHints',
+    'RememberTabViewHint',
+    'tabview_recovery_start',
+    'tabview_recovery_scan',
+    'tabview_recovery_complete',
+    'tabview_recovery_incomplete',
+    'exact_vtable_hits',
+    'structurally_rejected',
+    'accepted_candidates',
+    'decision = "no_candidates"',
+    'kExpandedTabViewRecoveryCooldownMs',
+    'kWideTabViewRecoveryCooldownMs',
+    'process-wide discovery deferred during persistent recovery',
     'pagesRead < 3'
 )) {
     if ($bridgeSource -notmatch [regex]::Escape($recoveryToken)) {
@@ -326,6 +346,13 @@ foreach ($targetedRecoveryToken in @(
     if ($bridgeSource -notmatch [regex]::Escape($targetedRecoveryToken)) {
         throw "Tracker Bridge targeted structural recovery token is missing: $targetedRecoveryToken"
     }
+}
+
+$trackerReaderHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
+$trackerReaderSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
+if ($trackerReaderHeader -notmatch 'tabViewDiagnostic' -or
+    $trackerReaderSource -notmatch 'key == "tabview_diagnostic"') {
+    throw 'CATPTTabView recovery diagnostic is not exposed through TrackerBridgeReader.'
 }
 
 $brokerAuthDetector = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\BrokerAuthDetector.cpp') -Raw

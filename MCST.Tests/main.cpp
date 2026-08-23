@@ -110,7 +110,7 @@ int wmain()
     status.lastReport = L"2026-08-22 11:00";
     status.lastAlert = L"None";
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 176;
+    snapshot.bridgeVersion = 177;
     snapshot.protocolVersion = 2;
     snapshot.atonpTrackerLoaded = true;
     snapshot.atonpTrackerPeTimestamp = 0x6A5E694F;

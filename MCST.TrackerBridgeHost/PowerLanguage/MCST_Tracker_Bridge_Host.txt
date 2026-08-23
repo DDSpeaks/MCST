@@ -1,5 +1,5 @@
 ﻿// MCST Tracker Bridge 1.0 Host
-// Internal bridge build: V176. Bridge protocol: V2.
+// Internal bridge build: V177. Bridge protocol: V2.
 // Add this indicator to one chart in each MultiCharts64 instance that owns
 // the Order and Position Tracker used by MCST-Watchdog.
 

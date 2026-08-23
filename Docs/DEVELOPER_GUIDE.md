@@ -3,17 +3,17 @@
 
 ## Status Report alignment build
 
-MCST-Watchdog 1.114-R30 renders emphasized `OVERALL STATUS` as the first row of System Status and keeps System Status and Open Positions in protected 15-pixel preformatted HTML flows. It does not use semantic status tables, the R22 fixed-width position table, or the R23 multi-line cards. Every status and position row remains one line and may continue to the right. System Status Name, Dot, State, and Value outer segments use normal-size explicit `ch` widths. Overall bolding and double-size dot styling are applied only to nested content, so neither emphasis changes the physical column width in iOS Mail.
+MCST-Watchdog 1.114-R31 retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
 
-R30 retains R26's optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V176 adds a fingerprint-scoped CATPTTabView vtable anchor and structural candidate validation to the existing non-sticky recovery. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+R31 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177 adds progressive CATPTTabView recovery and exact scan diagnostics to V176's structural validation. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
-The bounded recovery remains read-only. Bridge clears only its own CATPTTabView discovery caches, takes a fresh snapshot, and rescans. V176 retains the scope-bound recovery state and 30-second cache/cooldown. The exact V147 fingerprint supplies vtable RVA `0x1D78C8`; accepted candidates must also carry a secondary vtable, Tracker layout signature, or at least five credible page pointers. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
+Recovery remains read-only. Bridge first uses the exact-profile locator, then suppresses repeated process-wide scans after a confirmed persistent failure. Fast, expanded, and wide tiers use 16/64/128 MiB byte caps and 0.9/1.8/2.8 second time caps. Expanded and wide tiers have two- and five-minute cooldowns; fast recovery retains the 30-second cooldown. The exact V147 fingerprint supplies vtable RVA `0x1D78C8`; accepted candidates still require strong structural evidence. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R30 retains the nine-column order: Symbol, Open P/L, Side, Qty, Average Price, Native Value, Account, Profile, and Last Update. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total. Padding outside each colored P/L span is preserved to keep the monospaced alignment exact.
+R31 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total.
 
 Identity and Latest Activity rows calculate one shared label width per section.
 System Status calculates common Name, State, Value, and Detail widths. Accounts
@@ -62,11 +62,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V176
+Internal build:  V177
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, and V176 adds targeted structural recovery without changing Protocol V2.
+V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, V176 added targeted structural recovery, and V177 adds progressive diagnostic recovery without changing Protocol V2.
 
 ### MCST.TrackerBridge
 

@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## 1.114-R31
+
+- Added fast, expanded, and wide fingerprint-scoped CATPTTabView recovery tiers.
+- Prevented repeated 20-40 second process-wide scans after a persistent failure.
+- Retained validated allocation-neighborhood hints for recreated Tracker objects.
+- Added recovery tier, candidate, score, rejection, byte/time-limit, elapsed-time,
+  and final-decision diagnostics to the Bridge execution trace and Watchdog status.
+- Bumped Tracker Bridge to V177; Protocol V2 is unchanged.
+- Retained all R30 report alignment and accounting behavior.
+
 ## 1.114-R30
 
 - Moved Overall name bolding and dot enlargement into nested HTML elements.
