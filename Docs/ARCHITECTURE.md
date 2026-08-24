@@ -110,6 +110,11 @@ Watchdog and Bridge consume the same database independently:
 
 A human-readable MultiCharts version helps identify the installed release, but it does not authorize internal memory access. Exact module fingerprints and verified profile values provide that authorization.
 
+Developer Mode is not part of the normal monitoring path. Its research tools
+are normally entered only when an update changes an exact module fingerprint
+and no verified profile matches, or when a developer explicitly requests a
+controlled evidence capture.
+
 ## Unknown-build policy
 
 The compatibility policy is fail-safe:

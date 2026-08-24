@@ -122,6 +122,12 @@ For Tracker compatibility, a new `ATOnPTracker.dll` build without a verified pro
 
 ## Developer Mode
 
+> **Normally leave Developer mode off.** These research tools are generally
+> needed only after MultiCharts has been updated, when the exact `Charting.dll`
+> or `ATOnPTracker.dll` fingerprint has changed, or when a developer explicitly
+> asks you to collect compatibility evidence. Do not use them as part of normal
+> daily monitoring.
+
 Developer Mode is disabled by default:
 
 ```ini
@@ -139,6 +145,8 @@ When enabled, the compact Developer toolbar contains the following controls.
 The **Help** button opens a two-pane beginner guide. Choose a button name on
 the left; the right pane then explains its goal, preparation, exact action,
 success result, next step, failure handling, and safety boundary.
+The same update/developer-request restriction appears at the top of the Help
+window and on every individual button page.
 
 - **AT Start** — starts a new controlled AutoTrading research session and records its baseline. Press this first while MultiCharts is stable and the expected active-strategy count is visible. Starting again replaces an unfinished session.
 - **AT Capture** — appends the current AutoTrading state to the active session.

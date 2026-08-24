@@ -6,6 +6,18 @@ MCST reads selected MultiCharts internal structures that are not public stable A
 
 The production policy is simple: **exact verified profile or safe failure**.
 
+## When to use Developer Mode
+
+Leave Developer mode off during normal monitoring. Its controls are normally
+needed only after a MultiCharts update, after the exact `Charting.dll` or
+`ATOnPTracker.dll` fingerprint changes, or when a developer specifically asks
+for compatibility evidence. A product-version change is the common trigger,
+but the exact module fingerprint is authoritative and can change independently.
+
+An `UNKNOWN` or unavailable reader after such a change is an intentional safe
+failure. Research output supports verification; it does not authorize a
+candidate automatically.
+
 ## Compatibility database
 
 The shared database is:

@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## 1.114-R34
+
+- Added a prominent Developer-tool operating rule above the Help selector and
+  repeated it inside Overview and every individual action topic.
+- Clarified that the tools are normally used only after a MultiCharts update,
+  a changed exact Charting.dll/ATOnPTracker.dll fingerprint, or an explicit
+  developer request; they are not normal monitoring controls.
+- Added the same rule to the README, User Guide, Developer Guide, Installation
+  Guide, Release Notes, Build Information, and validation checklist.
+- Added regression coverage that requires the rule in every Help topic.
+- Retained Watchdog report behavior, Tracker Bridge V178, and Protocol V2.
+
 ## 1.114-R33
 
 - Replaced the single long Developer Help document with a two-pane topic

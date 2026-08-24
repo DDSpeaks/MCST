@@ -15,6 +15,8 @@ namespace
         const wchar_t* safety)
     {
         return std::wstring(title) +
+            L"\r\n\r\nIMPORTANT - WHEN THESE TOOLS ARE NORMALLY USED\r\n" +
+            GetDeveloperToolsNormalUseRule() +
             L"\r\n\r\nGOAL\r\n" + goal +
             L"\r\n\r\nWHAT THIS BUTTON DOES\r\n" + purpose +
             L"\r\n\r\nWHEN TO USE IT\r\n" + whenToUse +
@@ -27,13 +29,24 @@ namespace
     }
 }
 
+const wchar_t* GetDeveloperToolsNormalUseRule()
+{
+    return
+        L"Developer tools are normally needed only after a MultiCharts update, "
+        L"after the Charting.dll or ATOnPTracker.dll fingerprint changes, or when "
+        L"a developer specifically asks you to collect compatibility evidence. "
+        L"Do not use them during normal monitoring.";
+}
+
 const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
 {
     static const std::vector<DeveloperHelpTopic> topics = {
         {
             L"Overview",
             L"DEVELOPER MODE HELP\r\n\r\n"
-            L"These buttons collect compatibility evidence for developers. They are not normal monitoring controls and they do not switch live trading on or off.\r\n\r\n"
+            L"IMPORTANT - WHEN THESE TOOLS ARE NORMALLY USED\r\n" +
+            std::wstring(GetDeveloperToolsNormalUseRule()) +
+            L"\r\n\r\nThese buttons collect compatibility evidence for developers. They are not normal monitoring controls and they do not switch live trading on or off.\r\n\r\n"
             L"Choose a button on the left. The right side explains its purpose, the exact preparation, what success looks like, and what to do with the result.\r\n\r\n"
             L"AutoTrading workflow:\r\n"
             L"1. AT Start\r\n"

@@ -3,8 +3,13 @@
 
 ## Beginner Developer Help build
 
-MCST-Watchdog 1.114-R33 replaces the long Help text with a two-pane Win32
-topic selector backed by `DeveloperHelpContent`. Each Developer action has
+MCST-Watchdog 1.114-R34 retains R33's two-pane Win32 topic selector backed by
+`DeveloperHelpContent` and adds a persistent operating-boundary notice. It
+states that these controls are normally used only after a MultiCharts update,
+after an exact Charting.dll or ATOnPTracker.dll fingerprint change, or at a
+developer's explicit request. Normal monitoring does not require them. The
+notice appears both above the topic selector and inside every topic so it
+cannot be missed when a user skips Overview. Each Developer action has
 Goal, Purpose, When, Preparation, Action, Success, Next step, Failure, and
 Safety sections. The same content is linked into `MCST-LogicTests.exe`, which
 rejects a missing topic or missing required guidance.
@@ -17,9 +22,9 @@ not perform the user's AutoTrading change.
 
 ## Status Report alignment retained
 
-MCST-Watchdog 1.114-R33 retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
+MCST-Watchdog 1.114-R34 retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
 
-R33 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177's progressive CATPTTabView recovery and exact scan diagnostics remain intact; V178 moves the tier decision to the shared, testable `TrackerRecoveryPolicy.h`. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+R34 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177's progressive CATPTTabView recovery and exact scan diagnostics remain intact; V178 moves the tier decision to the shared, testable `TrackerRecoveryPolicy.h`. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
@@ -27,7 +32,7 @@ Recovery remains read-only. Bridge first uses the exact-profile locator, then su
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R33 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total.
+R34 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total.
 
 Identity and Latest Activity rows calculate one shared label width per section.
 System Status calculates common Name, State, Value, and Detail widths. Accounts
@@ -116,6 +121,12 @@ enabled=false
 ```
 
 Research controls are hidden in production mode. The compact toolbar is deliberately centralized in `DashboardLayout` so additional compatibility tools can be added without consuming the normal production button row.
+
+The intended trigger is an unrecognized exact module fingerprint or a specific
+developer investigation request. A visible MultiCharts product-version change
+is the common case, but fingerprint authorization remains authoritative: an
+updated module can require research even if the marketing version string does
+not visibly change.
 
 The main window exposes `[Developer] enabled` as a persistent **Developer
 mode** checkbox immediately to the right of Reload Settings. The normalized

@@ -1252,11 +1252,14 @@ namespace
         {
             HWND heading = CreateWindowW(L"STATIC", L"Developer Mode Help - choose a button to see exact instructions",
                 WS_CHILD | WS_VISIBLE, 18, 14, 900, 28, hwnd, nullptr, nullptr, nullptr);
+            HWND useRule = CreateWindowW(L"STATIC",
+                L"Normally use only after a MultiCharts/module update, a changed fingerprint, or a developer request - not during normal monitoring.",
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 18, 44, 932, 22, hwnd, nullptr, nullptr, nullptr);
             HWND choose = CreateWindowW(L"STATIC", L"CHOOSE A BUTTON",
-                WS_CHILD | WS_VISIBLE, 18, 52, 220, 22, hwnd, nullptr, nullptr, nullptr);
+                WS_CHILD | WS_VISIBLE, 18, 76, 220, 22, hwnd, nullptr, nullptr, nullptr);
             HWND list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-                18, 78, 220, 410, hwnd,
+                18, 102, 220, 386, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpTopics)), nullptr, nullptr);
             const auto& topics = GetDeveloperHelpTopics();
             for (const auto& topic : topics)
@@ -1268,12 +1271,13 @@ namespace
             HWND text = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE |
                 ES_AUTOVSCROLL | ES_READONLY,
-                254, 52, 696, 500, hwnd,
+                254, 76, 696, 476, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpText)), nullptr, nullptr);
             HWND close = CreateWindowW(L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                 860, 564, 90, 32, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpClose)), nullptr, nullptr);
             SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_headerFont), TRUE);
+            SendMessageW(useRule, WM_SETFONT, reinterpret_cast<WPARAM>(g_labelFont), TRUE);
             SendMessageW(choose, WM_SETFONT, reinterpret_cast<WPARAM>(g_labelFont), TRUE);
             SendMessageW(list, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             SendMessageW(note, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
@@ -1287,10 +1291,11 @@ namespace
             RECT client{};
             GetClientRect(hwnd, &client);
             const int contentHeight = (std::max)(180, static_cast<int>(client.bottom) - 126);
-            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpTopics), 18, 78, 220,
+            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpTopics), 18, 102, 220,
                 (std::max)(120, contentHeight - 64), TRUE);
-            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpText), 254, 52,
-                (std::max)(300, static_cast<int>(client.right) - 272), contentHeight, TRUE);
+            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpText), 254, 76,
+                (std::max)(300, static_cast<int>(client.right) - 272),
+                (std::max)(160, contentHeight - 24), TRUE);
             MoveWindow(GetDlgItem(hwnd, kDeveloperHelpClose),
                 (std::max)(18, static_cast<int>(client.right) - 108),
                 (std::max)(60, static_cast<int>(client.bottom) - 48), 90, 32, TRUE);
@@ -1431,7 +1436,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R33", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R34", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1739,7 +1744,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R33", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R34", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2266,7 +2271,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R33 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R34 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2337,7 +2342,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R33 - Beginner Developer Help",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R34 - Update-Only Developer Guidance",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

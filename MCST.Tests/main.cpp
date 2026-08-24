@@ -106,6 +106,19 @@ int RunLogicTests()
     const auto& helpTopics = GetDeveloperHelpTopics();
     if (helpTopics.size() != 8 || helpTopics.front().buttonLabel != L"Overview")
         throw std::runtime_error("Developer Help topic navigation is incomplete");
+    const std::wstring normalUseRule = GetDeveloperToolsNormalUseRule();
+    if (normalUseRule.find(L"only after a MultiCharts update") == std::wstring::npos ||
+        normalUseRule.find(L"Charting.dll or ATOnPTracker.dll fingerprint changes") == std::wstring::npos ||
+        normalUseRule.find(L"developer specifically asks") == std::wstring::npos ||
+        normalUseRule.find(L"Do not use them during normal monitoring") == std::wstring::npos)
+    {
+        throw std::runtime_error("Developer tool normal-use rule is incomplete");
+    }
+    for (const auto& topic : helpTopics)
+    {
+        if (topic.content.find(normalUseRule) == std::wstring::npos)
+            throw std::runtime_error("A Developer Help topic omits the normal-use rule");
+    }
     for (std::size_t index = 1; index < helpTopics.size(); ++index)
     {
         for (const wchar_t* heading : {

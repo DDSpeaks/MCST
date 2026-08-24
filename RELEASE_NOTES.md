@@ -1,4 +1,4 @@
-# MCST 1.114-R33 Beginner Developer Help
+# MCST 1.114-R34 Update-Only Developer Guidance
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
@@ -19,6 +19,11 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Developer Mode help
 
+- R34 adds a prominent rule above the Help topic selector and repeats it inside
+  every topic: Developer tools are normally needed only after a MultiCharts
+  update, after a Charting.dll/ATOnPTracker.dll fingerprint change, or when a
+  developer explicitly requests compatibility evidence. They are not part of
+  normal monitoring.
 - Help now opens a resizable two-pane window. The left pane selects `Overview`,
   `AT Start`, `AT Capture`, `AT Finish`, `Tracker Capture`, `Position CCY`,
   `Open Compat`, or `Reload Compat`; the right pane shows the selected guide.
@@ -69,7 +74,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
   Different marker lengths and iOS Mail's bold-font metrics can no longer move
   the following columns. The large Overall dot occupies the same Dot column as
   every normal-size component dot.
-- R33 retains the fixed-width Overall Name, Dot, and State elements at the normal
+- R34 retains the fixed-width Overall Name, Dot, and State elements at the normal
   font size. Bold text and the double-size dot live in nested elements, so CSS
   no longer doubles the physical width of the `4ch` Dot column.
 - Accounts cells are trimmed before layout and numeric columns are right-aligned.
@@ -121,7 +126,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Installation note
 
-Rebuild and replace `MCST-Watchdog.exe`. Bridge V178 is unchanged from R32, so
+Rebuild and replace `MCST-Watchdog.exe`. Bridge V178 is unchanged from R33, so
 it does not need replacement for this Help-only update. If the DLL is replaced,
 restart MultiCharts so Bridge V178 is loaded; restarting Watchdog alone does not
 replace the DLL running inside MultiCharts. Protocol V2 is unchanged.

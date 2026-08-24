@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R33'
+$currentVersion = '1.114-R34'
 $currentBridgeBuild = 178
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -33,7 +33,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R33.txt',
+    'BUILD_VALIDATION_R34.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -126,6 +126,11 @@ foreach ($helpHeading in @('GOAL', 'WHAT THIS BUTTON DOES', 'WHEN TO USE IT', 'B
 foreach ($captureInstruction in @('On ONE chart, choose ONE strategy', "Change only that strategy's AutoTrading state", 'ON to OFF, or OFF to ON')) {
     if ($developerHelp -notmatch [regex]::Escape($captureInstruction)) {
         throw "AT Capture beginner instruction is missing: $captureInstruction"
+    }
+}
+foreach ($normalUseInstruction in @('only after a MultiCharts update', 'Charting.dll or ATOnPTracker.dll fingerprint changes', 'developer specifically asks', 'Do not use them during normal monitoring')) {
+    if ($developerHelp -notmatch [regex]::Escape($normalUseInstruction)) {
+        throw "Developer tool normal-use guidance is missing: $normalUseInstruction"
     }
 }
 if ($watchdogMain -notmatch 'configRevision' -or
@@ -321,9 +326,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,33,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,33,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R33.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,34,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,34,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R34.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw

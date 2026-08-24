@@ -1,23 +1,25 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R33
+MCST-Watchdog version: 1.114-R34
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Beginner two-pane Developer Help
+Production change:     Update-only Developer tool guidance
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R33 production method
+R34 production method
 ---------------------
 1. Present each Developer action as a separate selectable Help topic.
-2. Explain preparation, exact action, success, next step, failure, and safety to a new user.
-3. State that AT Capture changes only one chart strategy's AutoTrading ON/OFF state.
-4. Expose a persistent default-off Developer mode checkbox beside Reload Settings.
-5. Keep the research toolbar at 20 px versus the 34 px production controls.
-6. Exercise the help-topic and toolbar contracts in MCST-LogicTests.exe.
-7. Retain the shared TrackerRecoveryPolicy and Bridge V178 unchanged.
-8. Retain R30 report alignment, account-specific monthly Realized P/L, `(no rows)` output,
+2. State globally and in every topic that Developer tools are normally for a
+   MultiCharts/module update, changed exact fingerprint, or developer request.
+3. Explain preparation, exact action, success, next step, failure, and safety to a new user.
+4. State that AT Capture changes only one chart strategy's AutoTrading ON/OFF state.
+5. Expose a persistent default-off Developer mode checkbox beside Reload Settings.
+6. Keep the research toolbar at 20 px versus the 34 px production controls.
+7. Exercise the help-topic and toolbar contracts in MCST-LogicTests.exe.
+8. Retain the shared TrackerRecoveryPolicy and Bridge V178 unchanged.
+9. Retain R30 report alignment, account-specific monthly Realized P/L, `(no rows)` output,
    locale-aware history dates, and Saxo authentication detection.
 
 Retained production behavior

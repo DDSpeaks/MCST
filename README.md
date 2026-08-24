@@ -1,19 +1,20 @@
 ﻿# MCST
 
-## Package: 1.114-R33 Beginner Developer Help
+## Package: 1.114-R34 Update-Only Developer Guidance
 
-This source package retains R32's tested recovery policy, report layout, larger
-status dots, account-specific monthly P/L, and Saxo authentication detection.
-R33 replaces the single long Developer Help document with a two-pane,
-button-selectable guide written for a user who has no prior knowledge of the
-research workflow. Each action now explains its goal, exact preparation,
-success result, next step, failure handling, and safety boundary.
+This source package retains R33's two-pane beginner Help, compact Developer
+toolbar, tested recovery policy, report layout, account-specific monthly P/L,
+and Saxo authentication detection. R34 makes the operating boundary explicit:
+Developer tools are normally used only after a MultiCharts update, after an
+exact `Charting.dll` or `ATOnPTracker.dll` fingerprint changes, or when a
+developer specifically requests compatibility evidence. They are not normal
+monitoring controls.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R33**
+- MCST-Watchdog: **1.114-R34**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -26,7 +27,7 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-R33 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+R34 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
 
 ## Runtime installation

@@ -1,8 +1,12 @@
 # Position Currency Research — 1.114-R16
 
-> Retained diagnostic in the 1.114-R33 package. R33 does not continue the search
+> Retained diagnostic in the 1.114-R34 package. R34 does not continue the search
 > for Average Price currency. Production Status Reports total only Open P/L rows
 > whose displayed currency is already unambiguous.
+
+Run this retained Developer action only when a developer specifically requests
+new compatibility evidence after a relevant MultiCharts/module change. It is
+not required for normal monitoring or routine Status Reports.
 
 ## R15 result carried into R16
 
