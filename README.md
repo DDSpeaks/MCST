@@ -1,20 +1,17 @@
 ﻿# MCST
 
-## Package: 1.114-R34 Update-Only Developer Guidance
+## Package: 1.114-R37 GitHub Publication-Ready Package
 
-This source package retains R33's two-pane beginner Help, compact Developer
-toolbar, tested recovery policy, report layout, account-specific monthly P/L,
-and Saxo authentication detection. R34 makes the operating boundary explicit:
-Developer tools are normally used only after a MultiCharts update, after an
-exact `Charting.dll` or `ATOnPTracker.dll` fingerprint changes, or when a
-developer specifically requests compatibility evidence. They are not normal
-monitoring controls.
+This source package retains R36's reproducible GitHub Actions release path and
+all earlier monitoring behavior. R37 completes the public-release package by
+adding the MIT License, including it in the portable Windows ZIP, and enforcing
+the licensing contract in release validation.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R34**
+- MCST-Watchdog: **1.114-R37**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -27,8 +24,32 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-R34 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+R37 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
+
+## Prebuilt GitHub Release
+
+Pushing tag `v1.114-R37` runs the Windows Release x64 build, executes
+`MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
+The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
+files, inert `.ini.example` templates, installation instructions, release
+notes, the MIT License, and a package manifest. It contains no active user INI
+files, credentials, source code, test binary, or compiler artifacts.
+
+A manual **Build Windows release** Actions run performs the same validation and
+uploads a temporary artifact without publishing a GitHub Release. See
+`Docs/FIRST_GITHUB_PUBLICATION.md`, `Docs/GITHUB_RELEASES.md`, and
+`Docs/PORTABLE_INSTALL.md`.
+
+## License
+
+MCST is released under the permissive [MIT License](LICENSE).
+
+Copyright (c) 2026 Mika Tättäläinen
+
+The license covers this MCST source code and the binaries built from it. It does
+not grant rights to MultiCharts, Saxo software, Microsoft Windows, or other
+third-party products, trademarks, services, or dependencies.
 
 ## Runtime installation
 
@@ -167,6 +188,12 @@ The production source tree intentionally contains no Debug solution configuratio
 
 Static validation does not replace a real Windows/MSVC build.
 
+To create the portable package after a successful local build:
+
+```powershell
+.\Tools\Build-PortableRelease.ps1
+```
+
 ## Documentation
 
 - `Docs/INSTALLATION.md`
@@ -174,6 +201,9 @@ Static validation does not replace a real Windows/MSVC build.
 - `Docs/DEVELOPER_GUIDE.md`
 - `Docs/ARCHITECTURE.md`
 - `Docs/COMPATIBILITY.md`
+- `Docs/FIRST_GITHUB_PUBLICATION.md`
+- `Docs/GITHUB_RELEASES.md`
+- `Docs/PORTABLE_INSTALL.md`
 - `CODING_STANDARD.md`
 - `RELEASE_NOTES.md`
 - `CHANGELOG.md`

@@ -1,0 +1,33 @@
+; MCST Compatibility database schema example
+; ------------------------------------------------------------
+; REFERENCE TEMPLATE ONLY. Never enable placeholder addresses or copy an
+; unverified candidate into production. MCST creates MCST-Compatibility.ini
+; automatically and installs its bundled verified AutoTrading profile.
+
+[Compatibility]
+schema_version=2
+unknown_build_policy=reject
+
+; This disabled candidate demonstrates the Tracker research schema. Every
+; fingerprint, RVA, offset, slot, and function address must be verified against
+; the exact ATOnPTracker.dll build before an enabled Profile.* is created.
+[Candidate.ATOnPTracker-EXAMPLE]
+candidate_created=true
+enabled=false
+name=Unverified ATOnPTracker example - do not enable
+atonptracker_pe_timestamp=
+atonptracker_image_size=
+tracker_tabview_vtable_rva=
+tracker_accounts_page_offset=
+tracker_open_positions_page_offset=
+tracker_position_history_page_offset=
+tracker_logs_page_offset=
+tracker_grid_member_offset=
+tracker_rows_offset_1=
+tracker_rows_offset_2=
+tracker_gettext_slot=
+tracker_flexgrid_vtable_rva=
+tracker_gettext_rva=
+tracker_accounts_extractor_rva=
+tracker_open_positions_extractor_rva=
+verification=UNVERIFIED - Developer Mode research required before creating an enabled Profile.* section

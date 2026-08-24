@@ -1,0 +1,91 @@
+; MCST-Watchdog 1.114-R37 starter example
+; ------------------------------------------------------------
+; REFERENCE TEMPLATE ONLY. Do not store passwords or private account data in
+; GitHub. MCST-Watchdog creates MCST-Watchdog.ini beside the EXE and fills in
+; every missing supported key. This example deliberately keeps email sending
+; disabled until the user supplies and tests their own SMTP settings.
+
+[Dashboard]
+refresh_seconds=10
+
+[Developer]
+enabled=false
+
+[Bridge]
+timeout_milliseconds=5000
+snapshot_retry_count=3
+snapshot_retry_delay_milliseconds=250
+
+[TrackerMonitor]
+stale_critical_after_minutes=10
+
+[Tracker]
+; auto detects DMY, MDY, or YMD and falls back to the Windows locale only for
+; ambiguous numeric dates. Explicit alternatives: dmy, mdy, ymd.
+date_order=auto
+
+[AutoTrading]
+enabled=true
+minimum_active_strategies=65
+check_interval_minutes=5
+
+[StatusReport]
+; Enable only after Email settings and the recipient have been tested.
+enabled=false
+interval_minutes=60
+send_on_startup=false
+weekdays=mon-fri
+send_start=00:00
+send_end=23:59
+to=
+
+[Email]
+enabled=false
+smtp_server=
+smtp_port=587
+use_ssl=true
+smtp_user=
+smtp_password=
+from=
+to=
+alert_to=
+report_to=
+autotrading_alerts=true
+autotrading_recovery=true
+
+[LogAlerts]
+enabled=true
+email_enabled=false
+notify_existing_on_startup=false
+deduplication_minutes=60
+fatal_keywords=fatal|unhandled exception|access violation|application crash
+critical_keywords=status: rejected|order: rejected|invalid stop price|order failed|boxed positions are not permitted
+warning_keywords=
+ignore_keywords=simulated trades are not shown on historical data
+
+[Heartbeat]
+enabled=false
+interval_minutes=60
+send_on_startup=false
+
+[BrokerMonitor]
+enabled=true
+disconnect_grace_seconds=60
+state_cache_max_age_minutes=1440
+alert_email=false
+recovery_email=false
+
+[BrokerAuth.Saxo]
+enabled=true
+name=Saxo
+url_contains=developer.saxobank.com/login
+title_contains=MultiCharts (OpenAPI Web App)|Saxo
+title_only_contains=MultiCharts (OpenAPI Web App)
+text_contains=login|account authentication
+recovery_log_contains=saxo|saxo group
+alert_after_seconds=10
+
+[Files]
+; Empty values select files beside MCST-Watchdog.exe.
+report_path=
+raw_snapshot_path=

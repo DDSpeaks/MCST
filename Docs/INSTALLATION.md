@@ -7,6 +7,10 @@
 - Visual Studio 2022 with the v143 C++ toolset only when building from source
 - An SMTP account only when email alerts, status reports, or heartbeats are enabled
 
+Visual Studio is not required when installing the prebuilt portable ZIP from a
+GitHub Release. Follow `PORTABLE_INSTALL.md` in that package. The source-build
+instructions below are for developers and release maintainers.
+
 ## Build the production binaries
 
 Open `MCST.sln` in Visual Studio 2022 and build `Release|x64`. The production source package intentionally contains no Debug solution configuration.
@@ -69,7 +73,7 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R34 production Tracker snapshots require Bridge V156 or newer; progressive diagnostic self-recovery uses the V178 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. R34 changes Watchdog Help only, so an installation already using Bridge V178 needs only the rebuilt Watchdog executable. If the Bridge DLL is replaced for any reason, MultiCharts must be restarted because restarting Watchdog alone does not reload the DLL inside MultiCharts.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.114-R37 production Tracker snapshots require Bridge V156 or newer; progressive diagnostic self-recovery uses the V178 DLL included in this package. The retained R16 Position Currency research action requires V171 or newer. R37 changes licensing and publication packaging and documentation only, so an installation already using Bridge V178 needs only the rebuilt Watchdog executable. If the Bridge DLL is replaced for any reason, MultiCharts must be restarted because restarting Watchdog alone does not reload the DLL inside MultiCharts.
 
 Keep Developer mode disabled during normal operation. Enable its research
 controls only after a MultiCharts/module update has produced an unrecognized

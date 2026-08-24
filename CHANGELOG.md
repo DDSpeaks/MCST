@@ -1,5 +1,39 @@
 ﻿# Changelog
 
+## 1.114-R37
+
+- Added the canonical MIT License with
+  `Copyright (c) 2026 Mika Tättäläinen`.
+- Included `LICENSE` in the generated portable Windows package.
+- Added release validation for the license text, copyright holder, and runtime
+  package mapping.
+- Updated GitHub publication, maintainer, installation, README, release-note,
+  build, and validation documentation for licensed public distribution.
+- Retained all R36 runtime behavior, Tracker Bridge V178, and Protocol V2.
+
+## 1.114-R36
+
+- Added `.gitignore` protection for active INI files, credentials, keys, build
+  output, runtime reports, and research captures.
+- Added `.gitattributes` with deterministic Windows/source/document line endings.
+- Added inert Watchdog and Compatibility `.ini.example` templates to the
+  source and generated portable user package.
+- Added a first-publication checklist covering GitHub Desktop, Actions
+  permissions, manual artifact validation, exact release tagging, package
+  inspection, and the repository owner's licensing decision.
+- Retained R35 GitHub build automation, Tracker Bridge V178, and Protocol V2.
+
+## 1.114-R35
+
+- Added a GitHub Actions Windows Release x64 build with source validation and
+  mandatory `MCST-LogicTests.exe` execution.
+- Added a tag-gated GitHub Release that publishes a portable runtime ZIP and
+  SHA-256 checksum; manual workflow runs create artifacts without publishing.
+- Added deterministic portable packaging that excludes user INI files,
+  credentials, test binaries, symbols, libraries, objects, and source code.
+- Added portable-install and GitHub release-maintainer documentation.
+- Retained all R34 monitoring behavior, Tracker Bridge V178, and Protocol V2.
+
 ## 1.114-R34
 
 - Added a prominent Developer-tool operating rule above the Help selector and

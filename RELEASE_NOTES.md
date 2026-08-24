@@ -1,7 +1,58 @@
-# MCST 1.114-R34 Update-Only Developer Guidance
+# MCST 1.114-R37 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
+
+## MIT License
+
+- MCST is now published under the permissive MIT License.
+- The copyright line is `Copyright (c) 2026 Mika Tättäläinen`.
+- The same `LICENSE` file is committed at the repository root and included in
+  every generated portable Windows package.
+- The license applies to MCST, not to MultiCharts, Saxo, Windows, or other
+  third-party products and services.
+
+## Retained publication safeguards
+
+- Added `.gitignore` protection for active INI files, credentials, private
+  keys, Visual Studio output, runtime reports, logs, and research captures.
+- Added `.gitattributes` so Windows projects, PowerShell scripts, source files,
+  Markdown, and workflow YAML use deterministic line endings.
+- Added safe `MCST-Watchdog.ini.example` and
+  `MCST-Compatibility.ini.example` reference templates. Both remain inert
+  under their packaged names; the compatibility candidate is disabled and has
+  no placeholder address that could be authorized accidentally.
+- Extended the portable Release ZIP with an `Examples` directory while still
+  rejecting every active `.ini`, credential, test executable, compiler output,
+  and source file.
+- Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
+  Actions permissions, the non-publishing test build, the exact R37 tag,
+  Release verification, and MIT License verification.
+
+The following R36 GitHub build and Release automation remains unchanged.
+
+## GitHub Release and portable user package
+
+- Added `.github/workflows/release.yml`, which validates the source, builds
+  `Release|x64` with Visual Studio 2022 tooling, and runs
+  `MCST-LogicTests.exe` on a GitHub Windows runner.
+- A manual Actions run uploads a 30-day package artifact for testing but does
+  not create a public Release.
+- Pushing the exact tag `v1.114-R37` creates a GitHub Release from
+  `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
+  checksum.
+- `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages
+  only the required EXE, DLL, PowerLanguage files, MIT License, and user documentation, and
+  rejects INI, credential-bearing configuration, PDB/LIB/OBJ, source, and test
+  files.
+- The portable package preserves existing user settings by containing no
+  active INI files. A new user can install it without Visual Studio or a C++
+  build environment.
+- Added release-maintainer and end-user instructions in
+  `Docs/GITHUB_RELEASES.md` and `Docs/PORTABLE_INSTALL.md`.
+
+All R34 Developer Help behavior and the following tested production behavior
+are retained unchanged.
 
 R27's Windows SDK header-order fix is retained: `ole2.h` and `oleauto.h`
 remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
@@ -19,7 +70,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Developer Mode help
 
-- R34 adds a prominent rule above the Help topic selector and repeats it inside
+- R34 added a prominent rule above the Help topic selector and repeats it inside
   every topic: Developer tools are normally needed only after a MultiCharts
   update, after a Charting.dll/ATOnPTracker.dll fingerprint change, or when a
   developer explicitly requests compatibility evidence. They are not part of
@@ -126,7 +177,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Installation note
 
-Rebuild and replace `MCST-Watchdog.exe`. Bridge V178 is unchanged from R33, so
-it does not need replacement for this Help-only update. If the DLL is replaced,
+Install the prebuilt GitHub Release ZIP or rebuild and replace
+`MCST-Watchdog.exe`. Bridge V178 is unchanged from R34. If the DLL is replaced,
 restart MultiCharts so Bridge V178 is loaded; restarting Watchdog alone does not
 replace the DLL running inside MultiCharts. Protocol V2 is unchanged.

@@ -1,0 +1,63 @@
+name: Build Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v1.114-R*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-x64:
+    name: Release x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Validate release source
+        shell: pwsh
+        run: .\Tools\Validate-Release.ps1
+
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild .\MCST.sln /m /restore /p:Configuration=Release /p:Platform=x64
+
+      - name: Run logic and regression tests
+        shell: pwsh
+        run: .\bin\Release\MCST-LogicTests.exe
+
+      - name: Create portable user package
+        shell: pwsh
+        run: |
+          $expectedTag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "" }
+          .\Tools\Build-PortableRelease.ps1 -OutputDirectory dist -ExpectedTag $expectedTag
+
+      - name: Upload testable package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCST-Watchdog-1.114-R37-Windows-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -LiteralPath .\dist -File |
+            Where-Object { $_.Extension -eq '.zip' -or $_.Name -like '*SHA256SUMS.txt' } |
+            ForEach-Object { $_.FullName }
+          if ($assets.Count -lt 2) { throw 'Release ZIP or checksum file is missing.' }
+          gh release create "${{ github.ref_name }}" $assets `
+            --title "MCST-Watchdog ${{ github.ref_name }}" `
+            --notes-file .\RELEASE_NOTES.md `
+            --verify-tag

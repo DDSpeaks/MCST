@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R34'
+$currentVersion = '1.114-R37'
 $currentBridgeBuild = 178
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -9,6 +9,8 @@ $currentProtocolVersion = 2
 
 $required = @(
     'MCST.sln',
+    '.gitignore',
+    '.gitattributes',
     'MCST.Shared\MCST.Shared.vcxproj',
     'MCST.Shared\MCBridgeProtocol.h',
     'MCST.Shared\TrackerRecoveryPolicy.h',
@@ -29,20 +31,28 @@ $required = @(
     'MCST.Watchdog\CompatibilityManager.cpp',
     'MCST.Watchdog\MultiChartsVersionDetector.cpp',
     'MCST.Tests\MCST.Tests.vcxproj',
+    'LICENSE',
     'README.md',
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R34.txt',
+    'BUILD_VALIDATION_R37.txt',
     'CHANGELOG.md',
+    '.github\workflows\release.yml',
+    'Examples\MCST-Watchdog.ini.example',
+    'Examples\MCST-Compatibility.ini.example',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
     'Docs\DEVELOPER_GUIDE.md',
     'Docs\USER_GUIDE.md',
     'Docs\COMPATIBILITY.md',
     'Docs\POSITION_CURRENCY_RESEARCH.md',
+    'Docs\GITHUB_RELEASES.md',
+    'Docs\FIRST_GITHUB_PUBLICATION.md',
+    'Docs\PORTABLE_INSTALL.md',
     'MCST.TrackerBridgeHost\README.md',
-    'Tools\UniversalApplicationMapper\README.md'
+    'Tools\UniversalApplicationMapper\README.md',
+    'Tools\Build-PortableRelease.ps1'
 )
 
 foreach ($item in $required) {
@@ -52,9 +62,60 @@ foreach ($item in $required) {
     }
 }
 
+$licenseText = Get-Content -LiteralPath (Join-Path $root 'LICENSE') -Raw
+foreach ($licenseToken in @(
+    'MIT License',
+    'Copyright (c) 2026 Mika Tättäläinen',
+    'Permission is hereby granted, free of charge',
+    'THE SOFTWARE IS PROVIDED "AS IS"'
+)) {
+    if ($licenseText -notmatch [regex]::Escape($licenseToken)) {
+        throw "MIT License contract token is missing: $licenseToken"
+    }
+}
+
 $historicalChangelogs = @(Get-ChildItem -LiteralPath $root -File -Filter 'CHANGELOG_*.txt')
 if ($historicalChangelogs.Count -ne 0) {
     throw 'Historical per-version CHANGELOG_*.txt files must not be included in the public production package.'
+}
+
+$activeIniFiles = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.ini')
+if ($activeIniFiles.Count -ne 0) {
+    throw "Active INI files must not be committed to the publication source package: $($activeIniFiles.FullName -join ', ')"
+}
+
+$publicationTextExtensions = @('.cpp', '.c', '.h', '.md', '.txt', '.ps1', '.yml', '.sln', '.vcxproj', '.rc', '.def', '.example')
+foreach ($publicationFile in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in $publicationTextExtensions }) {
+    $publicationText = Get-Content -LiteralPath $publicationFile.FullName -Raw
+    foreach ($privateFixture in @(
+        ('910792' + 'INET'),
+        ('977015' + 'INET'),
+        ('2015' + '4437'),
+        ('ddspeaks' + '@gmail.com'),
+        ('mcstockalerts.mika' + '@gmail.com')
+    )) {
+        if ($publicationText -match [regex]::Escape($privateFixture)) {
+            throw "Private production fixture found in publication source: $privateFixture in $($publicationFile.FullName)"
+        }
+    }
+}
+
+$gitIgnore = Get-Content -LiteralPath (Join-Path $root '.gitignore') -Raw
+foreach ($ignoreToken in @('bin/', 'obj/', 'dist/', '*.ini', '*.pfx', '*.key', 'MCST-Watchdog-StatusReport.*', 'MCST_Position_Currency_*')) {
+    if ($gitIgnore -notmatch [regex]::Escape($ignoreToken)) {
+        throw "Repository protection is missing from .gitignore: $ignoreToken"
+    }
+}
+
+$watchdogExample = Get-Content -LiteralPath (Join-Path $root 'Examples\MCST-Watchdog.ini.example') -Raw
+$compatibilityExample = Get-Content -LiteralPath (Join-Path $root 'Examples\MCST-Compatibility.ini.example') -Raw
+if ($watchdogExample -notmatch 'REFERENCE TEMPLATE ONLY' -or
+    $watchdogExample -notmatch 'enabled=false' -or
+    $watchdogExample -notmatch '(?m)^smtp_password=\r?$' -or
+    $compatibilityExample -notmatch 'REFERENCE TEMPLATE ONLY' -or
+    $compatibilityExample -notmatch 'enabled=false' -or
+    $compatibilityExample -notmatch 'UNVERIFIED') {
+    throw 'Safe inert INI example contract is missing.'
 }
 
 $solutionText = Get-Content -LiteralPath (Join-Path $root 'MCST.sln') -Raw
@@ -268,8 +329,8 @@ if ($testsProject -notmatch '<TargetName>MCST-LogicTests</TargetName>' -or
     $testsSource -notmatch 'font-size:1.5em' -or
     $testsSource -notmatch 'The fixed-width Status dot cell itself is still enlarged' -or
     $testsSource -notmatch 'Current month Realized P/L' -or
-    $testsSource -notmatch 'Current month Realized P/L 910792INET' -or
-    $testsSource -notmatch 'Current month Realized P/L 977015INET' -or
+    $testsSource -notmatch 'Current month Realized P/L DEMO100001' -or
+    $testsSource -notmatch 'Current month Realized P/L DEMO200002' -or
     $testsSource -notmatch 'EUR -13,18' -or
     $testsSource -notmatch 'EUR \+7,25' -or
     $testsSource -notmatch 'UNLISTED' -or
@@ -326,9 +387,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,34,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,34,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R34.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,37,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,37,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R37.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -551,6 +612,9 @@ $publicCurrentDocs = @(
     'Docs\ARCHITECTURE.md',
     'Docs\COMPATIBILITY.md',
     'Docs\POSITION_CURRENCY_RESEARCH.md',
+    'Docs\GITHUB_RELEASES.md',
+    'Docs\FIRST_GITHUB_PUBLICATION.md',
+    'Docs\PORTABLE_INSTALL.md',
     'MCST.TrackerBridgeHost\README.md'
 )
 foreach ($doc in $publicCurrentDocs) {
@@ -564,8 +628,15 @@ foreach ($doc in $publicCurrentDocs) {
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Status Report Alignment Cleanup" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion GitHub Publication-Ready Package" -or
     $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
+    $releaseNotes -notmatch 'GitHub Release' -or
+    $releaseNotes -notmatch 'SHA-256' -or
+    $releaseNotes -notmatch 'MIT License' -or
+    $releaseNotes -notmatch 'Mika Tättäläinen' -or
+    $releaseNotes -notmatch 'no\s+active INI' -or
+    $releaseNotes -notmatch '\.gitignore' -or
+    $releaseNotes -notmatch '\.ini\.example' -or
     $releaseNotes -notmatch 'Overall' -or
     $releaseNotes -notmatch 'Position History' -or
     $releaseNotes -notmatch 'visible in Accounts' -or
@@ -578,4 +649,48 @@ if ($releaseNotes -notmatch "MCST $escapedCurrentVersion Status Report Alignment
     throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, account totals, browser authentication detection, and self-recovery."
 }
 
-Write-Host "MCST $currentVersion Status Report Alignment Cleanup validation passed." -ForegroundColor Green
+$workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\release.yml') -Raw
+foreach ($workflowToken in @(
+    'windows-2022',
+    'actions/checkout@v4',
+    'microsoft/setup-msbuild@v2',
+    'actions/upload-artifact@v4',
+    'MCST-Watchdog-1.114-R37-Windows-x64',
+    'contents: write',
+    'Validate-Release.ps1',
+    'MCST-LogicTests.exe',
+    'Build-PortableRelease.ps1',
+    'v1.114-R*',
+    'gh release create',
+    '--verify-tag'
+)) {
+    if ($workflow -notmatch [regex]::Escape($workflowToken)) {
+        throw "GitHub Release workflow token is missing: $workflowToken"
+    }
+}
+
+$portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
+foreach ($packageToken in @(
+    '1.114-R37',
+    'MCST-Watchdog.exe',
+    'MCST-TrackerBridge.dll',
+    'MCST_Tracker_Bridge_Host.txt',
+    'MCST_Tracker_Bridge_Stop.txt',
+    'MCST-Watchdog.ini.example',
+    'MCST-Compatibility.ini.example',
+    "'LICENSE' = 'LICENSE'",
+    'PORTABLE_INSTALL.md',
+    'PACKAGE_MANIFEST.txt',
+    'SHA256SUMS.txt',
+    'MCST-LogicTests.exe',
+    "'.ini'",
+    "'.pdb'",
+    'Get-FileHash',
+    'Compress-Archive'
+)) {
+    if ($portableBuilder -notmatch [regex]::Escape($packageToken)) {
+        throw "Portable Release package contract token is missing: $packageToken"
+    }
+}
+
+Write-Host "MCST $currentVersion GitHub Publication-Ready Package validation passed." -ForegroundColor Green

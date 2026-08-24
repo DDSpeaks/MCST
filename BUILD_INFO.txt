@@ -1,26 +1,28 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R34
+MCST-Watchdog version: 1.114-R37
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Update-only Developer tool guidance
+Production change:     MIT-licensed GitHub publication package
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R34 production method
+R37 production method
 ---------------------
-1. Present each Developer action as a separate selectable Help topic.
-2. State globally and in every topic that Developer tools are normally for a
-   MultiCharts/module update, changed exact fingerprint, or developer request.
-3. Explain preparation, exact action, success, next step, failure, and safety to a new user.
-4. State that AT Capture changes only one chart strategy's AutoTrading ON/OFF state.
-5. Expose a persistent default-off Developer mode checkbox beside Reload Settings.
-6. Keep the research toolbar at 20 px versus the 34 px production controls.
-7. Exercise the help-topic and toolbar contracts in MCST-LogicTests.exe.
-8. Retain the shared TrackerRecoveryPolicy and Bridge V178 unchanged.
-9. Retain R30 report alignment, account-specific monthly Realized P/L, `(no rows)` output,
-   locale-aware history dates, and Saxo authentication detection.
+1. License MCST under MIT with Copyright (c) 2026 Mika Tättäläinen.
+2. Protect active INI settings, credentials, keys, build output, reports, and
+   research captures with repository-level ignore rules.
+3. Normalize Windows project/script and documentation/workflow line endings.
+4. Include inert Watchdog and Compatibility `.ini.example` templates.
+5. Validate the source and build MCST.sln as Release x64 on windows-2022.
+6. Run MCST-LogicTests.exe before packaging or publishing anything.
+7. Package only runtime binaries, PowerLanguage files, inert examples, MIT
+   License, user installation guide, release notes, and manifest.
+8. Upload a temporary artifact for manual workflow runs and publish only from
+   the exact existing R37 tag.
+9. Attach both the portable ZIP and its SHA-256 checksum.
+10. Retain R36 behavior, Tracker Bridge V178, and Protocol V2 unchanged.
 
 Retained production behavior
 ----------------------------

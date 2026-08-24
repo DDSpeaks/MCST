@@ -208,17 +208,17 @@ int RunLogicTests()
     snapshot.accounts.ok = true;
     snapshot.accounts.expectedColumns = 12;
     snapshot.accounts.rows = {
-        { L"Saxo Group live", L"910792INET", L"3 951,77", L"3 951,77", L"0,00", L"", L"", L"", L"", L"", L"", L"" },
-        { L"Saxo Group live", L"977015INET", L"-1 484,11", L"-1 484,11", L"0,00", L"", L"", L"", L"", L"", L"", L"" }
+        { L"Saxo Group live", L"DEMO100001", L"3 951,77", L"3 951,77", L"0,00", L"", L"", L"", L"", L"", L"", L"" },
+        { L"Saxo Group live", L"DEMO200002", L"-1 484,11", L"-1 484,11", L"0,00", L"", L"", L"", L"", L"", L"", L"" }
     };
     snapshot.openPositions.present = true;
     snapshot.openPositions.ok = true;
     snapshot.openPositions.expectedColumns = 8;
     snapshot.openPositions.rows = {
-        { L"Saxo", L"A", L"AAOI:xnas", L"Long", L"3", L"139,97", L"\u20ac 10,50", L"now" },
-        { L"Saxo", L"A", L"APLD:xnas", L"Long", L"15", L"30,76", L"EUR -2,25", L"now" },
-        { L"Saxo", L"A", L"BE:xnys", L"Long", L"2", L"236,00", L"$ 3,00", L"now" },
-        { L"Saxo", L"A", L"CLS:xnys", L"Long", L"1", L"333,84", L"USD \u20ac 4,00", L"now" }
+        { L"Saxo", L"A", L"DEMOA:xnas", L"Long", L"3", L"139,97", L"\u20ac 10,50", L"now" },
+        { L"Saxo", L"A", L"DEMOB:xnas", L"Long", L"15", L"30,76", L"EUR -2,25", L"now" },
+        { L"Saxo", L"A", L"DEMOC:xnys", L"Long", L"2", L"236,00", L"$ 3,00", L"now" },
+        { L"Saxo", L"A", L"DEMOD:xnys", L"Long", L"1", L"333,84", L"USD \u20ac 4,00", L"now" }
     };
 
     const std::wstring report = BuildStatusReport(status, snapshot);
@@ -403,7 +403,7 @@ int RunLogicTests()
         L"mcst-stale-critical",
         "The HTML report does not render an expired stale Tracker snapshot as Critical");
 
-    RequireContains(reportHtml, L"AAOI:xnas", "Symbol is missing from the one-line Open Positions section");
+    RequireContains(reportHtml, L"DEMOA:xnas", "Symbol is missing from the one-line Open Positions section");
     RequireContains(reportHtml, L"139,97", "Average Price is missing from the one-line Open Positions section");
     RequireContains(reportHtml, L"419,91", "Native Value is missing from the one-line Open Positions section");
     RequireContains(reportHtml, L"now", "Last Update is missing from the one-line Open Positions section");
@@ -422,7 +422,7 @@ int RunLogicTests()
 
     TrackerStatusSnapshot negativeSnapshot = snapshot;
     negativeSnapshot.openPositions.rows = {
-        { L"Saxo", L"A", L"APLD:xnas", L"Long", L"15", L"30,76", L"EUR -2,25", L"now" }
+        { L"Saxo", L"A", L"DEMOB:xnas", L"Long", L"15", L"30,76", L"EUR -2,25", L"now" }
     };
     const std::wstring negativeTotalHtml =
         BuildStatusReportHtml(BuildStatusReport(status, negativeSnapshot));
@@ -432,16 +432,16 @@ int RunLogicTests()
         throw std::runtime_error("Negative Open P/L detail and total are not both fully red");
 
     snapshot.openPositions.rows = {
-        { L"Saxo Group live", L"910792INET", L"AAOI:xnas", L"Long", L"3", L"139,970", L"\u20ac -3,64", L"now" },
-        { L"Saxo Group live", L"910792INET", L"APLD:xnas", L"Long", L"15", L"30,76000", L"\u20ac 8,84", L"now" },
-        { L"Saxo Group live", L"910792INET", L"BE:xnys", L"Long", L"2", L"236,000", L"\u20ac 10,99", L"now" },
-        { L"Saxo Group live", L"910792INET", L"CLS:xnys", L"Long", L"1", L"333,840", L"\u20ac 26,04", L"now" },
-        { L"Saxo Group live", L"910792INET", L"COHU:xnas", L"Long", L"8", L"56,430", L"\u20ac 10,12", L"now" },
-        { L"Saxo Group live", L"910792INET", L"IONQ:xnys", L"Long", L"11", L"43,820", L"\u20ac 17,83", L"now" },
-        { L"Saxo Group live", L"910792INET", L"IREN:xnas", L"Long", L"11", L"42,570", L"\u20ac 34,98", L"now" },
-        { L"Saxo Group live", L"910792INET", L"LWLG:xnas", L"Long", L"57", L"8,14920", L"\u20ac -15,27", L"now" },
-        { L"Saxo Group live", L"910792INET", L"MEI:xnys", L"Long", L"27", L"16,870", L"\u20ac 8,89", L"now" },
-        { L"Saxo Group live", L"910792INET", L"VECO:xnas", L"Long", L"9", L"53,367", L"\u20ac 7,90", L"now" }
+        { L"Saxo Group live", L"DEMO100001", L"DEMOA:xnas", L"Long", L"3", L"139,970", L"\u20ac -3,64", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOB:xnas", L"Long", L"15", L"30,76000", L"\u20ac 8,84", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOC:xnys", L"Long", L"2", L"236,000", L"\u20ac 10,99", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOD:xnys", L"Long", L"1", L"333,840", L"\u20ac 26,04", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOE:xnas", L"Long", L"8", L"56,430", L"\u20ac 10,12", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOF:xnys", L"Long", L"11", L"43,820", L"\u20ac 17,83", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOG:xnas", L"Long", L"11", L"42,570", L"\u20ac 34,98", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOH:xnas", L"Long", L"57", L"8,14920", L"\u20ac -15,27", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOI:xnys", L"Long", L"27", L"16,870", L"\u20ac 8,89", L"now" },
+        { L"Saxo Group live", L"DEMO100001", L"DEMOJ:xnas", L"Long", L"9", L"53,367", L"\u20ac 7,90", L"now" }
     };
     const std::wstring currentCaptureReport = BuildStatusReport(status, snapshot);
     RequireContains(
@@ -510,21 +510,21 @@ int RunLogicTests()
     snapshot.positionHistory.ok = true;
     snapshot.positionHistory.expectedColumns = 8;
     snapshot.positionHistory.rows = {
-        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"910792INET", L"IONQ:xnys", L"Flat", L"0", L"", L"EUR +5,60" },
-        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 17), L"Saxo", L"910792INET", L"APLD:xnas", L"Flat", L"0", L"", L"\u20ac -18,78" },
-        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"977015INET", L"SECOND:xnas", L"Flat", L"0", L"", L"EUR +7,25" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"DEMO100001", L"DEMOF:xnys", L"Flat", L"0", L"", L"EUR +5,60" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 17), L"Saxo", L"DEMO100001", L"DEMOB:xnas", L"Flat", L"0", L"", L"\u20ac -18,78" },
+        { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"DEMO200002", L"DEMOK:xnas", L"Flat", L"0", L"", L"EUR +7,25" },
         { dmyDate(local.tm_year + 1900, local.tm_mon + 1, 18), L"Saxo", L"UNLISTED", L"HIDDEN:xnas", L"Flat", L"0", L"", L"EUR +900,00" },
-        { dmyDate(previousMonthYear, previousMonth, 15), L"Saxo", L"910792INET", L"OLD:xnas", L"Flat", L"0", L"", L"EUR +100,00" }
+        { dmyDate(previousMonthYear, previousMonth, 15), L"Saxo", L"DEMO100001", L"DEMOL:xnas", L"Flat", L"0", L"", L"EUR +100,00" }
     };
     snapshot.accounts.rows = {
-        { L"Saxo Group live", L"910792INET", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" },
-        { L"Saxo Group live", L"977015INET", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" }
+        { L"Saxo Group live", L"DEMO100001", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" },
+        { L"Saxo Group live", L"DEMO200002", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"" }
     };
     status.trackerDateOrder = L"dmy";
     const std::wstring historyReport = BuildStatusReport(status, snapshot);
     RequireContains(
         historyReport,
-        L"Current month Realized P/L 910792INET",
+        L"Current month Realized P/L DEMO100001",
         "First visible account's Position History total is missing");
     RequireContains(
         historyReport,
@@ -532,7 +532,7 @@ int RunLogicTests()
         "Current-month realized P/L included the wrong rows or amount");
     RequireContains(
         historyReport,
-        L"Current month Realized P/L 977015INET",
+        L"Current month Realized P/L DEMO200002",
         "Second visible account's Position History total is missing");
     RequireContains(
         historyReport,
@@ -543,7 +543,7 @@ int RunLogicTests()
         L"EUR +900,00",
         "A Position History account absent from Accounts was included");
     const std::wstring realizedLine = FindLineContaining(historyReport, L"EUR -13,18");
-    if (DelimitedField(realizedLine, 0) != L"Current month Realized P/L 910792INET" ||
+    if (DelimitedField(realizedLine, 0) != L"Current month Realized P/L DEMO100001" ||
         DelimitedField(realizedLine, 1) != L"EUR -13,18" ||
         DelimitedField(realizedLine, 2) != L"[2 rows]")
     {
