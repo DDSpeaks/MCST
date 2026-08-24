@@ -326,7 +326,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.114-R31");
+    WriteValue(path, L"General", L"version", L"1.114-R33");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -568,6 +568,21 @@ bool SaveStatusReportSettings(bool enabled, const std::wstring& recipient, int i
     if (!ok)
     {
         errorOut = L"Windows could not write the Status Report settings to MCST-Watchdog.ini.";
+        return false;
+    }
+    errorOut.clear();
+    return true;
+}
+
+bool SaveDeveloperModeEnabled(bool enabled, std::wstring& errorOut)
+{
+    const std::wstring path = GetConfigPath();
+    const bool ok = WritePrivateProfileStringW(
+        L"Developer", L"enabled", enabled ? L"true" : L"false", path.c_str()) != FALSE;
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+    if (!ok)
+    {
+        errorOut = L"Windows could not save Developer mode to MCST-Watchdog.ini.";
         return false;
     }
     errorOut.clear();

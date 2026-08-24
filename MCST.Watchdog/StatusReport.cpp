@@ -757,7 +757,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.114-R31" },
+        { L"Watchdog version", L"1.114-R33" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },
@@ -908,7 +908,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
                 }
                 else
                 {
-                    result += L"&#9679;";
+                    result += L"<span class=\"mcst-status-dot\" style=\"font-size:1.5em;line-height:0.65;vertical-align:-0.08em;\">&#9679;</span>";
                 }
                 result += L"</span>";
 

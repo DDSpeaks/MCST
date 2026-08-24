@@ -4,6 +4,7 @@
 
 #include "MCTrackerBridge.h"
 #include "ExtractorSeh.h"
+#include "../MCST.Shared/TrackerRecoveryPolicy.h"
 #include "../MCST.Shared/MCBridgeProtocol.h"
 
 #include <windows.h>
@@ -43,7 +44,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 177;
+    constexpr int kBridgeVersion = 178;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -1206,8 +1207,6 @@ namespace
     std::vector<std::uintptr_t> g_recentTabViewHints;
     constexpr ULONGLONG kTabViewRecoveryCooldownMs = 30000;
     constexpr ULONGLONG kTabViewCandidateCacheTtlMs = 30000;
-    constexpr ULONGLONG kExpandedTabViewRecoveryCooldownMs = 2ull * 60ull * 1000ull;
-    constexpr ULONGLONG kWideTabViewRecoveryCooldownMs = 5ull * 60ull * 1000ull;
 
     void RememberTabViewHint(std::uintptr_t object)
     {
@@ -1229,18 +1228,6 @@ namespace
         const std::vector<std::uintptr_t> result = g_recentTabViewHints;
         ReleaseSRWLockShared(&g_tabViewHistoryLock);
         return result;
-    }
-
-    bool HeavyRecoveryTierIsDue(
-        std::atomic<ULONGLONG>& lastTick,
-        ULONGLONG now,
-        ULONGLONG cooldown)
-    {
-        const ULONGLONG previous = lastTick.load();
-        if (previous != 0 && now - previous < cooldown)
-            return false;
-        lastTick.store(now);
-        return true;
     }
 
     void InvalidateTabViewCaches()
@@ -12965,7 +12952,7 @@ DWORD sehCode = 0;
         return pagesOk > 0 && totalSeh == 0;
     }
 
-    void AppendV177RecoveryMetadata(
+    void AppendV178RecoveryMetadata(
         std::string& payload,
         bool attempted,
         bool tabViewFound,
@@ -12986,7 +12973,7 @@ DWORD sehCode = 0;
         payload.insert(markerEnd + 1, metadata.str());
     }
 
-    bool BuildV177StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    bool BuildV178StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
     {
         bool tabViewFound = false;
         bool compatibilityMatched = false;
@@ -13017,7 +13004,7 @@ DWORD sehCode = 0;
                 g_tabViewPersistentFailureActive.store(false);
                 g_tabViewRecoveryFailureStreak.store(0);
             }
-            AppendV177RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            AppendV178RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
             return initialBuilt;
         }
 
@@ -13028,7 +13015,7 @@ DWORD sehCode = 0;
         // allowed per 30-second window and ordinary snapshot reads continue.
         if (!TryBeginTabViewRecovery())
         {
-            AppendV177RecoveryMetadata(
+            AppendV178RecoveryMetadata(
                 payload,
                 false,
                 tabViewFound,
@@ -13041,29 +13028,19 @@ DWORD sehCode = 0;
 
         TabViewRecoveryModeScope recoveryModeScope;
 
-        struct RecoveryTier
-        {
-            const char* name;
-            ULONGLONG timeBudgetMs;
-            std::size_t byteBudget;
-        };
-        RecoveryTier tier{ "fast", 900, 16ull * 1024ull * 1024ull };
         const unsigned int failureStreak = g_tabViewRecoveryFailureStreak.load();
         const ULONGLONG recoveryStarted = GetTickCount64();
-        if (failureStreak >= 12 && HeavyRecoveryTierIsDue(
-                g_lastWideTabViewRecoveryTick,
+        const mcst::TrackerRecoveryPolicyDecision tier =
+            mcst::SelectTrackerRecoveryPolicy({
+                failureStreak,
                 recoveryStarted,
-                kWideTabViewRecoveryCooldownMs))
-        {
-            tier = { "wide", 2800, 128ull * 1024ull * 1024ull };
-        }
-        else if (failureStreak >= 4 && HeavyRecoveryTierIsDue(
-                     g_lastExpandedTabViewRecoveryTick,
-                     recoveryStarted,
-                     kExpandedTabViewRecoveryCooldownMs))
-        {
-            tier = { "expanded", 1800, 64ull * 1024ull * 1024ull };
-        }
+                g_lastExpandedTabViewRecoveryTick.load(),
+                g_lastWideTabViewRecoveryTick.load()
+            });
+        if (tier.stampWideTick)
+            g_lastWideTabViewRecoveryTick.store(recoveryStarted);
+        if (tier.stampExpandedTick)
+            g_lastExpandedTabViewRecoveryTick.store(recoveryStarted);
 
         {
             std::ostringstream trace;
@@ -13116,7 +13093,7 @@ DWORD sehCode = 0;
                << "; failure_streak=" << resultingFailureStreak;
         if (!recoveryDiagnostic.empty())
             result << "; " << recoveryDiagnostic;
-        AppendV177RecoveryMetadata(
+        AppendV178RecoveryMetadata(
             payload,
             true,
             freshTabViewFound,
@@ -13338,7 +13315,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV177StatusReportSnapshotWithRecovery(snapshot, responsePayload);
+            const bool built = BuildV178StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 

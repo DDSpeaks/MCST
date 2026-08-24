@@ -1,11 +1,25 @@
 ﻿# MCST Developer Guide
 
 
-## Status Report alignment build
+## Beginner Developer Help build
 
-MCST-Watchdog 1.114-R31 retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
+MCST-Watchdog 1.114-R33 replaces the long Help text with a two-pane Win32
+topic selector backed by `DeveloperHelpContent`. Each Developer action has
+Goal, Purpose, When, Preparation, Action, Success, Next step, Failure, and
+Safety sections. The same content is linked into `MCST-LogicTests.exe`, which
+rejects a missing topic or missing required guidance.
 
-R31 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177 adds progressive CATPTTabView recovery and exact scan diagnostics to V176's structural validation. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+The AT Capture contract is intentionally specific: on one chart, select one
+strategy and change only its AutoTrading state from ON to OFF or OFF to ON.
+The chart, workspace, strategy settings, and running MultiCharts process set
+must stay unchanged between snapshots. The Watchdog records the state; it does
+not perform the user's AutoTrading change.
+
+## Status Report alignment retained
+
+MCST-Watchdog 1.114-R33 retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
+
+R33 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177's progressive CATPTTabView recovery and exact scan diagnostics remain intact; V178 moves the tier decision to the shared, testable `TrackerRecoveryPolicy.h`. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
@@ -13,7 +27,7 @@ Recovery remains read-only. Bridge first uses the exact-profile locator, then su
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R31 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total.
+R33 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. There is no combined monthly account total.
 
 Identity and Latest Activity rows calculate one shared label width per section.
 System Status calculates common Name, State, Value, and Detail widths. Accounts
@@ -62,11 +76,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V177
+Internal build:  V178
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, V176 added targeted structural recovery, and V177 adds progressive diagnostic recovery without changing Protocol V2.
+V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, V176 added targeted structural recovery, V177 added progressive diagnostic recovery, and V178 shares its tier policy with LogicTests without changing Protocol V2.
 
 ### MCST.TrackerBridge
 
@@ -76,9 +90,11 @@ Watchdog-side Bridge client and Tracker snapshot parser.
 
 Shared protocol and status types used across projects.
 
-### MCST.Tests
+### MCST.LogicTests
 
-Release-build test executable for logic that can be tested independently from a live MultiCharts process.
+`MCST-LogicTests.exe` is the Release-build regression executable for logic that can be tested independently from a live MultiCharts process. It returns exit code `0` only when every test passes and prints the failing regression plus exit code `1` otherwise.
+
+Current coverage includes report layout and coloring, Open and Realized P/L aggregation, localized Tracker dates, stale-data escalation, Saxo authentication and broker-history decisions, and the shared fast/expanded/wide Tracker recovery policy. It deliberately does not connect to or manipulate a running MultiCharts process. A future live integration-test executable should remain separate because it depends on actual windows, modules, Bridge IPC, and runtime state.
 
 ## PowerLanguage host
 
@@ -101,7 +117,31 @@ enabled=false
 
 Research controls are hidden in production mode. The compact toolbar is deliberately centralized in `DashboardLayout` so additional compatibility tools can be added without consuming the normal production button row.
 
-Current controls are `AT Start`, `AT Capture`, `AT Finish`, `Tracker Capture`, `Open Compat`, and `Reload Compat`.
+The main window exposes `[Developer] enabled` as a persistent **Developer
+mode** checkbox immediately to the right of Reload Settings. The normalized
+default remains false. The research toolbar uses a 20-pixel button height and
+8-point labels, versus the normal production row's 34-pixel buttons.
+
+Current controls are `AT Start`, `AT Capture`, `AT Finish`, `Tracker Capture`, `Position CCY`, `Open Compat`, `Reload Compat`, and `Help`.
+
+### Developer control contract
+
+- `AT Start` creates/replaces the controlled AutoTrading research baseline.
+- `AT Capture` appends a settled post-change state. Before each capture the
+  user changes only one strategy's AutoTrading ON/OFF state on one chart;
+  multiple controlled captures are expected.
+- `AT Finish` analyzes the active session and writes `C:\Temp\MCST-Watchdog\AutoTradingResearch.txt`.
+- `Tracker Capture` requests the Bridge's passive read-only Tracker research bundle.
+- `Position CCY` runs the retained optional currency research against representative visible positions.
+- `Open Compat` opens the shared compatibility database but never validates or enables a candidate.
+- `Reload Compat` invalidates the Watchdog compatibility/read cache and requests fresh AutoTrading and Tracker evaluation. It cannot reload a DLL already hosted by MultiCharts.
+- `Help` opens a two-pane, selectable, non-mutating beginner guide containing
+  the purpose, preparation, output, recovery, and safety rules for every action.
+
+The AutoTrading research sequence is `AT Start`, change only the AutoTrading
+ON/OFF state of one strategy on one chart, then `AT Capture`; repeat that exact
+pair as needed and finally press `AT Finish`. These controls do not enable or
+disable production AutoTrading.
 
 ## MultiCharts internal-read safety
 

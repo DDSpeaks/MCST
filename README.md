@@ -1,29 +1,33 @@
 ﻿# MCST
 
-## Package: 1.114-R31 Progressive Tracker Recovery
+## Package: 1.114-R33 Beginner Developer Help
 
-This source package retains R30's report alignment, unified `(no rows)` output,
-account-specific monthly P/L, and Saxo authentication detection. R31 replaces
-repeated 20-40 second CATPTTabView searches with deadline-safe progressive
-recovery and records the exact candidate/scan outcome for each recovery attempt.
+This source package retains R32's tested recovery policy, report layout, larger
+status dots, account-specific monthly P/L, and Saxo authentication detection.
+R33 replaces the single long Developer Help document with a two-pane,
+button-selectable guide written for a user who has no prior knowledge of the
+research workflow. Each action now explains its goal, exact preparation,
+success result, next step, failure handling, and safety boundary.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R31**
+- MCST-Watchdog: **1.114-R33**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V177**
+- Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
 
 The Tracker Bridge product version, internal build, and protocol version are
 separate identifiers. V175 added optional `position_history`; V176 added the
-exact verified CATPTTabView vtable anchor; V177 adds progressive fast, expanded,
+exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded,
 and wide recovery tiers, retained allocation hints, and detailed recovery
-diagnostics. Protocol V2 is unchanged. R31 requires the V177 DLL in this
-package. The retained R16 `Position CCY` action still requires V171 or newer.
+diagnostics. V178 moves the tier decision into a shared, directly tested policy
+without changing the read-only recovery behavior. Protocol V2 is unchanged.
+R33 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+still requires V171 or newer.
 
 ## Runtime installation
 
@@ -136,10 +140,14 @@ enabled=false
 When enabled, a compact toolbar exposes research actions without competing visually with normal production controls:
 
 ```text
-AT Start | AT Capture | AT Finish | Tracker Capture | Position CCY | Open Compat | Reload Compat
+AT Start | AT Capture | AT Finish | Tracker Capture | Position CCY | Open Compat | Reload Compat | Help
 ```
 
 Developer tools are not required for normal monitoring.
+`Help` opens a two-pane selectable button-by-button guide. The AutoTrading
+research sequence is `AT Start` → change only one chart strategy's AutoTrading
+ON/OFF state → `AT Capture` (repeat as needed) → `AT Finish`.
+Tracker and compatibility actions are documented individually in `Docs/USER_GUIDE.md`.
 
 ## Building
 

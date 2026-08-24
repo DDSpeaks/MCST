@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
-  <PropertyGroup Label="Globals"><VCProjectVersion>17.0</VCProjectVersion><Keyword>Win32Proj</Keyword><ProjectGuid>{2FEC80B7-F430-4BF0-8193-690F4F8E3A1F}</ProjectGuid><RootNamespace>MCSTTests</RootNamespace><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <PropertyGroup Label="Globals"><VCProjectVersion>17.0</VCProjectVersion><Keyword>Win32Proj</Keyword><ProjectGuid>{2FEC80B7-F430-4BF0-8193-690F4F8E3A1F}</ProjectGuid><RootNamespace>MCSTLogicTests</RootNamespace><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><WholeProgramOptimization>true</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" /><ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets"><Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" /></ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup><TargetName>MCST-Tests</TargetName><OutDir>$(SolutionDir)bin\Release\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\Release\</IntDir></PropertyGroup>
+  <PropertyGroup><TargetName>MCST-LogicTests</TargetName><OutDir>$(SolutionDir)bin\Release\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\Release\</IntDir></PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile><RuntimeLibrary>MultiThreaded</RuntimeLibrary><WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp17</LanguageStandard><PreprocessorDefinitions>NDEBUG;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><Optimization>MaxSpeed</Optimization><FunctionLevelLinking>true</FunctionLevelLinking><IntrinsicFunctions>true</IntrinsicFunctions></ClCompile>
     <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences></Link>
@@ -18,8 +18,13 @@
     <ClCompile Include="../MCST.Watchdog/StatusReport.cpp" />
     <ClCompile Include="../MCST.Watchdog/TrackerDateParser.cpp" />
     <ClCompile Include="../MCST.Watchdog/BrokerMonitor.cpp" />
+    <ClCompile Include="../MCST.Watchdog/DeveloperHelpContent.cpp" />
+    <ClCompile Include="../MCST.Watchdog/DashboardLayout.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="../MCST.Shared/TrackerRecoveryPolicy.h" />
+    <ClInclude Include="../MCST.Watchdog/DeveloperHelpContent.h" />
+    <ClInclude Include="../MCST.Watchdog/DashboardLayout.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MCST.TrackerBridge/MCST.TrackerBridge.vcxproj"><Project>{FE0CE0D0-F3CD-49E7-A57A-844048EB5C40}</Project></ProjectReference>

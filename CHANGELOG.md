@@ -1,5 +1,37 @@
 ﻿# Changelog
 
+## 1.114-R33
+
+- Replaced the single long Developer Help document with a two-pane topic
+  selector covering every Developer toolbar action independently.
+- Added beginner-oriented Goal, Purpose, When to use, Preparation, Action,
+  Success, Next step, Failure, and Safe operation guidance for each tool.
+- Clarified that an AutoTrading capture changes only the AutoTrading ON/OFF
+  state of one strategy on one chart; no other chart or strategy setting is
+  changed between snapshots.
+- Added regression coverage for the complete help-topic set and the exact
+  controlled AT Capture instruction.
+- Added a persistent, default-off Developer mode checkbox to the right of
+  Reload Settings and reduced the research toolbar height to 20 pixels.
+- Retained Tracker Bridge V178 and Protocol V2 unchanged.
+
+## 1.114-R32
+
+- Renamed the Release regression executable to `MCST-LogicTests.exe` and the
+  solution project display name to `MCST.LogicTests`.
+- Added explicit pass/fail exit codes and failure diagnostics to LogicTests.
+- Moved the actual fast/expanded/wide Tracker recovery-tier decision into the
+  shared `TrackerRecoveryPolicy.h` and added threshold, budget, cooldown, and
+  fallback regression tests.
+- Bumped Tracker Bridge to V178; Protocol V2 and the read-only recovery budgets
+  remain unchanged.
+- Enlarged normal Status Report dots to `1.5em` while retaining the Overall dot
+  at `2em` and preserving the fixed-width status column.
+- Added a Developer toolbar Help button and a resizable, scrollable guide for
+  every Developer action, including the ordered AutoTrading research workflow.
+- Expanded the User and Developer guides with button-by-button purpose, usage,
+  output, and safety information.
+
 ## 1.114-R31
 
 - Added fast, expanded, and wide fingerprint-scoped CATPTTabView recovery tiers.

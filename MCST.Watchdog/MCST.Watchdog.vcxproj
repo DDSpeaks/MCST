@@ -27,6 +27,7 @@
     <ClCompile Include="BrokerAuthDetector.cpp" />
     <ClCompile Include="LogAlertEngine.cpp" />
     <ClCompile Include="DashboardLayout.cpp" />
+    <ClCompile Include="DeveloperHelpContent.cpp" />
     <ClCompile Include="MultiChartsVersionDetector.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -42,6 +43,7 @@
     <ClInclude Include="BrokerAuthDetector.h" />
     <ClInclude Include="LogAlertEngine.h" />
     <ClInclude Include="DashboardLayout.h" />
+    <ClInclude Include="DeveloperHelpContent.h" />
     <ClInclude Include="MultiChartsVersionDetector.h" />
   </ItemGroup>
   <ItemGroup><ResourceCompile Include="MCST.Watchdog.rc" /></ItemGroup>

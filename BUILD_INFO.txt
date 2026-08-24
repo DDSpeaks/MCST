@@ -1,22 +1,23 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R31
+MCST-Watchdog version: 1.114-R33
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V177, Protocol V2
-Production change:     Progressive CATPTTabView recovery and diagnostics
+Tracker Bridge:        Product 1.0, internal V178, Protocol V2
+Production change:     Beginner two-pane Developer Help
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R31 production method
+R33 production method
 ---------------------
-1. Prefer the exact fingerprint-scoped CATPTTabView locator before a process-wide RTTI scan.
-2. Suppress repeated broad scans after a confirmed persistent failure.
-3. Retry with fast, expanded, and wide byte/time budgets under separate cooldowns.
-4. Reuse up to eight previously accepted allocation neighborhoods as validated hints.
-5. Log candidate counts, scores, rejection reasons, limits, elapsed time, tier, and decision.
-6. Surface the Bridge CATPTTabView diagnostic in Watchdog status details.
-7. Retain R30 report alignment, account-specific monthly Realized P/L, `(no rows)` output,
+1. Present each Developer action as a separate selectable Help topic.
+2. Explain preparation, exact action, success, next step, failure, and safety to a new user.
+3. State that AT Capture changes only one chart strategy's AutoTrading ON/OFF state.
+4. Expose a persistent default-off Developer mode checkbox beside Reload Settings.
+5. Keep the research toolbar at 20 px versus the 34 px production controls.
+6. Exercise the help-topic and toolbar contracts in MCST-LogicTests.exe.
+7. Retain the shared TrackerRecoveryPolicy and Bridge V178 unchanged.
+8. Retain R30 report alignment, account-specific monthly Realized P/L, `(no rows)` output,
    locale-aware history dates, and Saxo authentication detection.
 
 Retained production behavior
@@ -37,3 +38,4 @@ R22/R23/R24 non-sticky recovery Bridge: V174
 R25 optional Position History Bridge: V175
 R26 targeted structural recovery Bridge: V176
 R31 progressive diagnostic recovery Bridge: V177
+R32 shared recovery-policy Bridge: V178

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <ctime>
 #include <iomanip>
@@ -6,8 +7,11 @@
 #include <string>
 #include <type_traits>
 #include "../MCST.Shared/MCBridgeProtocol.h"
+#include "../MCST.Shared/TrackerRecoveryPolicy.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 #include "../MCST.Watchdog/BrokerMonitor.h"
+#include "../MCST.Watchdog/DeveloperHelpContent.h"
+#include "../MCST.Watchdog/DashboardLayout.h"
 #include "../MCST.Watchdog/StatusReport.h"
 #include "../MCST.Watchdog/TrackerDateParser.h"
 
@@ -94,10 +98,42 @@ namespace
     }
 }
 
-int wmain()
+int RunLogicTests()
 {
     static_assert(sizeof(mcbridge::MessageHeader) == 20);
     static_assert(std::is_default_constructible_v<TrackerStatusSnapshot>);
+
+    const auto& helpTopics = GetDeveloperHelpTopics();
+    if (helpTopics.size() != 8 || helpTopics.front().buttonLabel != L"Overview")
+        throw std::runtime_error("Developer Help topic navigation is incomplete");
+    for (std::size_t index = 1; index < helpTopics.size(); ++index)
+    {
+        for (const wchar_t* heading : {
+            L"GOAL", L"WHAT THIS BUTTON DOES", L"WHEN TO USE IT",
+            L"BEFORE YOU PRESS IT", L"PRESS THE BUTTON", L"SUCCESS",
+            L"NEXT STEP", L"IF IT FAILS", L"SAFE OPERATION" })
+        {
+            if (helpTopics[index].content.find(heading) == std::wstring::npos)
+                throw std::runtime_error("A Developer Help topic lacks beginner guidance");
+        }
+    }
+    const auto captureTopic = std::find_if(
+        helpTopics.begin(), helpTopics.end(),
+        [](const DeveloperHelpTopic& topic) { return topic.buttonLabel == L"AT Capture"; });
+    if (captureTopic == helpTopics.end() ||
+        captureTopic->content.find(L"On ONE chart, choose ONE strategy") == std::wstring::npos ||
+        captureTopic->content.find(L"Change only that strategy's AutoTrading state") == std::wstring::npos ||
+        captureTopic->content.find(L"ON to OFF, or OFF to ON") == std::wstring::npos)
+    {
+        throw std::runtime_error("AT Capture does not identify the exact user-controlled change");
+    }
+    const DeveloperToolbarLayout developerToolbar = CalculateDeveloperToolbarLayout(700);
+    const RECT lastDeveloperButton = CalculateDeveloperToolbarButtonRect(developerToolbar, 7);
+    if (developerToolbar.buttonHeight >= 34 || developerToolbar.buttonHeight > 20 ||
+        lastDeveloperButton.right > 920)
+    {
+        throw std::runtime_error("Developer toolbar is not visibly smaller or does not fit the Dashboard");
+    }
 
     mcst::WatchdogSystemStatus status;
     status.overall = mcst::HealthState::Healthy;
@@ -110,7 +146,47 @@ int wmain()
     status.lastReport = L"2026-08-22 11:00";
     status.lastAlert = L"None";
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 177;
+    snapshot.bridgeVersion = 178;
+
+    const auto fastRecovery = mcst::SelectTrackerRecoveryPolicy({ 0, 1000, 0, 0 });
+    if (fastRecovery.tier != mcst::TrackerRecoveryTier::Fast ||
+        fastRecovery.timeBudgetMs != 900 ||
+        fastRecovery.byteBudget != 16ull * 1024ull * 1024ull)
+    {
+        throw std::runtime_error("Initial Tracker recovery tier is not fast");
+    }
+
+    const auto expandedRecovery = mcst::SelectTrackerRecoveryPolicy({ 4, 120000, 0, 0 });
+    if (expandedRecovery.tier != mcst::TrackerRecoveryTier::Expanded ||
+        expandedRecovery.timeBudgetMs != 1800 ||
+        expandedRecovery.byteBudget != 64ull * 1024ull * 1024ull ||
+        !expandedRecovery.stampExpandedTick)
+    {
+        throw std::runtime_error("Four failures do not select expanded Tracker recovery");
+    }
+
+    const auto expandedCooldown = mcst::SelectTrackerRecoveryPolicy({ 7, 180000, 120000, 0 });
+    if (expandedCooldown.tier != mcst::TrackerRecoveryTier::Fast)
+        throw std::runtime_error("Expanded Tracker recovery cooldown is not enforced");
+
+    const auto wideRecovery = mcst::SelectTrackerRecoveryPolicy({ 12, 600000, 0, 0 });
+    if (wideRecovery.tier != mcst::TrackerRecoveryTier::Wide ||
+        wideRecovery.timeBudgetMs != 2800 ||
+        wideRecovery.byteBudget != 128ull * 1024ull * 1024ull ||
+        !wideRecovery.stampWideTick)
+    {
+        throw std::runtime_error("Twelve failures do not select wide Tracker recovery");
+    }
+
+    const auto wideCooldownExpandedFallback =
+        mcst::SelectTrackerRecoveryPolicy({ 15, 700000, 400000, 600000 });
+    if (wideCooldownExpandedFallback.tier != mcst::TrackerRecoveryTier::Expanded)
+        throw std::runtime_error("Wide cooldown does not fall back to an available expanded tier");
+
+    const auto bothHeavyTiersCoolingDown =
+        mcst::SelectTrackerRecoveryPolicy({ 15, 700000, 650000, 600000 });
+    if (bothHeavyTiersCoolingDown.tier != mcst::TrackerRecoveryTier::Fast)
+        throw std::runtime_error("Heavy-tier cooldowns do not fall back to fast recovery");
     snapshot.protocolVersion = 2;
     snapshot.atonpTrackerLoaded = true;
     snapshot.atonpTrackerPeTimestamp = 0x6A5E694F;
@@ -221,6 +297,10 @@ int wmain()
         reportHtml,
         L"class=\"mcst-status-overall-dot\"",
         "Overall Status dot does not use a nested size-only element");
+    RequireContains(
+        reportHtml,
+        L"class=\"mcst-status-dot\" style=\"font-size:1.5em;line-height:0.65",
+        "Normal System Status dots are not large enough to identify their color");
     const std::size_t dotCellStart = reportHtml.find(L"class=\"mcst-status-dot-cell\"");
     const std::size_t dotCellTagEnd = reportHtml.find(L'>', dotCellStart);
     if (dotCellStart == std::wstring::npos || dotCellTagEnd == std::wstring::npos ||
@@ -545,6 +625,24 @@ int wmain()
         throw std::runtime_error("The newest broker-state event outside the ten-row display window did not win");
     }
 
-    std::wcout << L"MCST foundation smoke tests passed.\n";
+    std::wcout << L"MCST logic and regression tests passed.\n";
     return 0;
+}
+
+int wmain()
+{
+    try
+    {
+        return RunLogicTests();
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "MCST logic and regression tests FAILED: " << error.what() << '\n';
+        return 1;
+    }
+    catch (...)
+    {
+        std::cerr << "MCST logic and regression tests FAILED: unknown exception\n";
+        return 1;
+    }
 }

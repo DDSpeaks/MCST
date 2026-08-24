@@ -34,11 +34,10 @@ struct DeveloperToolbarLayout
 {
     int left = 28;
     int top = 0;
-    int buttonWidth = 116;
-    int buttonHeight = 24;
+    int buttonWidth = 104;
+    int buttonHeight = 20;
     int horizontalGap = 6;
 };
 
 DeveloperToolbarLayout CalculateDeveloperToolbarLayout(int productionButtonY);
 RECT CalculateDeveloperToolbarButtonRect(const DeveloperToolbarLayout& layout, int buttonIndex);
-

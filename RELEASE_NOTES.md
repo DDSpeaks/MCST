@@ -1,10 +1,45 @@
-# MCST 1.114-R31 Progressive Tracker Recovery
+# MCST 1.114-R33 Beginner Developer Help
 
-Tracker Bridge internal build: V177  
+Tracker Bridge internal build: V178  
 Bridge protocol: V2
 
 R27's Windows SDK header-order fix is retained: `ole2.h` and `oleauto.h`
 remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
+
+## Logic and regression tests
+
+- The Release test executable is now named `MCST-LogicTests.exe`; the Visual
+  Studio solution displays the project as `MCST.LogicTests`.
+- Test failures are reported with a nonzero exit code and a readable diagnostic.
+- The production fast/expanded/wide Tracker recovery decision now lives in the
+  shared `TrackerRecoveryPolicy.h`. Both Bridge V178 and LogicTests call that
+  exact policy instead of maintaining duplicate decision logic.
+- LogicTests verifies thresholds, budgets, cooldowns, and expanded fallback
+  when the wide tier remains inside its cooldown.
+
+## Developer Mode help
+
+- Help now opens a resizable two-pane window. The left pane selects `Overview`,
+  `AT Start`, `AT Capture`, `AT Finish`, `Tracker Capture`, `Position CCY`,
+  `Open Compat`, or `Reload Compat`; the right pane shows the selected guide.
+- Every action explains its goal, purpose, use case, prerequisites, exact user
+  action, success evidence, next step, failure recovery, and safety boundary.
+- `AT Capture` explicitly instructs the user to select one strategy on one
+  chart and change only that strategy's AutoTrading state from ON to OFF or
+  OFF to ON. It warns against changing settings, charts, workspaces, or the
+  MultiCharts process set between captures.
+- Help content is shared with LogicTests so missing topics and essential
+  beginner instructions fail the regression test.
+- A default-off **Developer mode** checkbox now appears to the right of Reload
+  Settings and saves `[Developer] enabled`. Research buttons are visibly
+  shorter than the normal production controls (20 pixels versus 34 pixels).
+
+## More visible Status Report indicators
+
+- Normal System Status dots are enlarged from the base 15-pixel glyph to a
+  nested `1.5em` glyph. Their color is now easier to recognize on mobile mail.
+- The `OVERALL STATUS` dot remains the largest at `2em`; both sizes remain
+  inside the same fixed-width Dot column, so row alignment does not change.
 
 ## Progressive CATPTTabView recovery
 
@@ -34,7 +69,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
   Different marker lengths and iOS Mail's bold-font metrics can no longer move
   the following columns. The large Overall dot occupies the same Dot column as
   every normal-size component dot.
-- R31 retains the fixed-width Overall Name, Dot, and State elements at the normal
+- R33 retains the fixed-width Overall Name, Dot, and State elements at the normal
   font size. Bold text and the double-size dot live in nested elements, so CSS
   no longer doubles the physical width of the `4ch` Dot column.
 - Accounts cells are trimmed before layout and numeric columns are right-aligned.
@@ -86,6 +121,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Installation note
 
-Rebuild and replace both `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll`.
-Restart MultiCharts so Bridge V177 is loaded; restarting Watchdog alone does not
+Rebuild and replace `MCST-Watchdog.exe`. Bridge V178 is unchanged from R32, so
+it does not need replacement for this Help-only update. If the DLL is replaced,
+restart MultiCharts so Bridge V178 is loaded; restarting Watchdog alone does not
 replace the DLL running inside MultiCharts. Protocol V2 is unchanged.

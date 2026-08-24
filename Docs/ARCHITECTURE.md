@@ -50,13 +50,13 @@ The Bridge runs inside MultiCharts and provides a stable Tracker snapshot bounda
 
 ```text
 Product version: 1.0
-Internal build:  V177
+Internal build:  V178
 Protocol:        V2
 ```
 
-The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling, V171 added fingerprint-scoped currency verification, V172 added bounded Tracker recovery, V173 added monitoring-only Logs history, V174 made failed recovery non-sticky, V175 added optional Position History capture, V176 added fingerprint-scoped structural recovery, and V177 adds progressive diagnostic recovery. Protocol V2 remains unchanged.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling, V171 added fingerprint-scoped currency verification, V172 added bounded Tracker recovery, V173 added monitoring-only Logs history, V174 made failed recovery non-sticky, V175 added optional Position History capture, V176 added fingerprint-scoped structural recovery, V177 added progressive diagnostic recovery, and V178 shares the tier-selection policy with LogicTests. Protocol V2 remains unchanged.
 
-Recovery is deliberately read-only. V177 tries the exact-profile locator before process-wide discovery, retains validated allocator-neighborhood hints, and suppresses repeated broad scans after persistent failure. Fast, expanded, and wide recovery tiers grow the byte budget under independent cooldowns while remaining within a normal Watchdog request deadline. Every tier logs candidates, scores, rejection evidence, limits, elapsed time, and decision. V176's exact V147 vtable RVA `0x1D78C8` and structural acceptance rules remain unchanged.
+Recovery is deliberately read-only. V177 introduced the exact-profile locator before process-wide discovery, retained validated allocator-neighborhood hints, and suppressed repeated broad scans after persistent failure. V178 preserves that behavior but selects fast, expanded, and wide budgets through `MCST.Shared/TrackerRecoveryPolicy.h`, allowing the actual production decision to be regression-tested. Every tier still logs candidates, scores, rejection evidence, limits, elapsed time, and decision. V176's exact V147 vtable RVA `0x1D78C8` and structural acceptance rules remain unchanged.
 
 If live data is still incomplete, the last complete tables may be displayed with an explicit stale timestamp. A stale snapshot remains Attention during the configured grace period (10 minutes by default) and escalates to Critical afterwards; a wholly unreadable current snapshot with no last-good data is immediately Critical. Stale Recent Logs are never sent to broker or log-alert evaluation.
 

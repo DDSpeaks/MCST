@@ -24,7 +24,7 @@
     <Link><SubSystem>Windows</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences><GenerateDebugInformation>false</GenerateDebugInformation><ModuleDefinitionFile>MCTrackerBridge.def</ModuleDefinitionFile></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="MCTrackerBridge.cpp" /><ClCompile Include="ExtractorSeh.c" /></ItemGroup>
-  <ItemGroup><ClInclude Include="MCTrackerBridge.h" /><ClInclude Include="ExtractorSeh.h" /><ClInclude Include="..\MCST.Shared\MCBridgeProtocol.h" /></ItemGroup>
+  <ItemGroup><ClInclude Include="MCTrackerBridge.h" /><ClInclude Include="ExtractorSeh.h" /><ClInclude Include="..\MCST.Shared\MCBridgeProtocol.h" /><ClInclude Include="..\MCST.Shared\TrackerRecoveryPolicy.h" /></ItemGroup>
   <ItemGroup><None Include="MCTrackerBridge.def" /><None Include="PowerLanguage\MCST_Tracker_Bridge_Host.txt" /><None Include="PowerLanguage\MCST_Tracker_Bridge_Stop.txt" /></ItemGroup>
   <ItemGroup><ResourceCompile Include="MCST.TrackerBridgeHost.rc" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

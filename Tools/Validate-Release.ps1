@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R31'
-$currentBridgeBuild = 177
+$currentVersion = '1.114-R33'
+$currentBridgeBuild = 178
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -11,6 +11,7 @@ $required = @(
     'MCST.sln',
     'MCST.Shared\MCST.Shared.vcxproj',
     'MCST.Shared\MCBridgeProtocol.h',
+    'MCST.Shared\TrackerRecoveryPolicy.h',
     'MCST.TrackerBridge\MCST.TrackerBridge.vcxproj',
     'MCST.TrackerBridge\TrackerBridgeReader.h',
     'MCST.TrackerBridge\TrackerBridgeReader.cpp',
@@ -21,6 +22,8 @@ $required = @(
     'MCST.Watchdog\MCST.Watchdog.vcxproj',
     'MCST.Watchdog\MCST.Watchdog.rc',
     'MCST.Watchdog\main.cpp',
+    'MCST.Watchdog\DeveloperHelpContent.h',
+    'MCST.Watchdog\DeveloperHelpContent.cpp',
     'MCST.Watchdog\TrackerDateParser.h',
     'MCST.Watchdog\TrackerDateParser.cpp',
     'MCST.Watchdog\CompatibilityManager.cpp',
@@ -30,7 +33,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R31.txt',
+    'BUILD_VALIDATION_R33.txt',
     'CHANGELOG.md',
     'Docs\INSTALLATION.md',
     'Docs\ARCHITECTURE.md',
@@ -95,12 +98,35 @@ if ($watchdogMain -match [regex]::Escape('std::wstring message = diagnostic;')) 
 if ($watchdogMain -notmatch 'Tracker Capture' -or
     $watchdogMain -notmatch 'Position CCY' -or
     $watchdogMain -notmatch 'Open Compat' -or
-    $watchdogMain -notmatch 'Reload Compat') {
+    $watchdogMain -notmatch 'Reload Compat' -or
+    $watchdogMain -notmatch 'kDeveloperHelpTopics' -or
+    $watchdogMain -notmatch 'MCST-Watchdog Developer Mode Help') {
     throw 'Required Tracker compatibility and Position Currency Developer controls are missing.'
 }
 if ($watchdogMain -notmatch 'MCST_Position_Currency_Reference_' -or
     $watchdogMain -notmatch 'CapturePositionCurrencyResearch') {
     throw 'Position Currency research reference/capture workflow is missing from Watchdog.'
+}
+if ($watchdogMain -notmatch 'kCheckDeveloperMode' -or
+    $watchdogMain -notmatch 'SaveDeveloperModeEnabled' -or
+    $watchdogMain -notmatch 'BS_AUTOCHECKBOX') {
+    throw 'Persistent Dashboard Developer mode checkbox is missing.'
+}
+$developerHelp = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
+foreach ($helpTopic in @('AT Start', 'AT Capture', 'AT Finish', 'Tracker Capture', 'Position CCY', 'Open Compat', 'Reload Compat')) {
+    if ($developerHelp -notmatch [regex]::Escape($helpTopic)) {
+        throw "Developer Help topic is missing: $helpTopic"
+    }
+}
+foreach ($helpHeading in @('GOAL', 'WHAT THIS BUTTON DOES', 'WHEN TO USE IT', 'BEFORE YOU PRESS IT', 'PRESS THE BUTTON', 'SUCCESS', 'NEXT STEP', 'IF IT FAILS', 'SAFE OPERATION')) {
+    if ($developerHelp -notmatch [regex]::Escape($helpHeading)) {
+        throw "Developer Help instruction section is missing: $helpHeading"
+    }
+}
+foreach ($captureInstruction in @('On ONE chart, choose ONE strategy', "Change only that strategy's AutoTrading state", 'ON to OFF, or OFF to ON')) {
+    if ($developerHelp -notmatch [regex]::Escape($captureInstruction)) {
+        throw "AT Capture beginner instruction is missing: $captureInstruction"
+    }
 }
 if ($watchdogMain -notmatch 'configRevision' -or
     $watchdogMain -notmatch 'staleConfigurationResult' -or
@@ -157,6 +183,8 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'AppendMonitorLines' -or
     $statusReportSource -notmatch 'OVERALL STATUS' -or
     $statusReportSource -notmatch 'font-size:2em' -or
+    $statusReportSource -notmatch 'font-size:1.5em' -or
+    $statusReportSource -notmatch 'mcst-status-dot' -or
     $statusReportSource -notmatch 'out << L"\(no rows\)\\n"' -or
     $statusReportSource -notmatch 'kMonitorNameWidth = 18' -or
     $statusReportSource -notmatch 'kMonitorStateWidth = 14' -or
@@ -212,7 +240,9 @@ if ($statusReportSource -match [regex]::Escape('<table role=\"presentation\"')) 
 
 $testsSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
 $testsProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\MCST.Tests.vcxproj') -Raw
-if ($testsProject -notmatch 'StatusReport\.cpp' -or
+$recoveryPolicy = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\TrackerRecoveryPolicy.h') -Raw
+if ($testsProject -notmatch '<TargetName>MCST-LogicTests</TargetName>' -or
+    $testsProject -notmatch 'StatusReport\.cpp' -or
     $testsProject -notmatch 'TrackerDateParser\.cpp' -or
     $testsProject -notmatch 'BrokerMonitor\.cpp' -or
     $testsSource -notmatch 'EUR \+8,25' -or
@@ -230,6 +260,7 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'Signed Accounts values do not end in the same column' -or
     $testsSource -notmatch 'System Status detail columns are not aligned' -or
     $testsSource -notmatch 'font-size:2em' -or
+    $testsSource -notmatch 'font-size:1.5em' -or
     $testsSource -notmatch 'The fixed-width Status dot cell itself is still enlarged' -or
     $testsSource -notmatch 'Current month Realized P/L' -or
     $testsSource -notmatch 'Current month Realized P/L 910792INET' -or
@@ -256,7 +287,13 @@ if ($testsProject -notmatch 'StatusReport\.cpp' -or
     $testsSource -notmatch 'No connection to Saxo Group trading system' -or
     $testsSource -notmatch 'UIC is not valid' -or
     $testsSource -notmatch 'brokerDecision\.status\.value != L"Connected"' -or
-    $testsSource -notmatch 'Broker authentication required') {
+    $testsSource -notmatch 'Broker authentication required' -or
+    $testsSource -notmatch 'SelectTrackerRecoveryPolicy' -or
+    $testsSource -notmatch 'TrackerRecoveryTier::Expanded' -or
+    $testsSource -notmatch 'TrackerRecoveryTier::Wide' -or
+    $testsSource -notmatch 'logic and regression tests passed' -or
+    $recoveryPolicy -notmatch 'failureStreak >= 12' -or
+    $recoveryPolicy -notmatch 'failureStreak >= 4') {
     throw 'One-line Open Positions placement, size, or color regression test is missing.'
 }
 
@@ -284,9 +321,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,31,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,31,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R31.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,33,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,33,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R33.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -297,14 +334,14 @@ if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).pa
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
-if ($bridgeRc -notmatch 'FILEVERSION 1,0,177,0' -or
-    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.177.0\0"')) {
-    throw 'Tracker Bridge Windows file version is not aligned with internal V177.'
+if ($bridgeRc -notmatch 'FILEVERSION 1,0,178,0' -or
+    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.178.0\0"')) {
+    throw 'Tracker Bridge Windows file version is not aligned with internal V178.'
 }
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV177StatusReportSnapshotWithRecovery',
+    'BuildV178StatusReportSnapshotWithRecovery',
     'TabViewRecoveryModeScope',
     '~TabViewRecoveryModeScope',
     'g_tabViewRecoveryModeActive.store(false)',
@@ -327,8 +364,9 @@ foreach ($recoveryToken in @(
     'structurally_rejected',
     'accepted_candidates',
     'decision = "no_candidates"',
-    'kExpandedTabViewRecoveryCooldownMs',
-    'kWideTabViewRecoveryCooldownMs',
+    'SelectTrackerRecoveryPolicy',
+    'stampExpandedTick',
+    'stampWideTick',
     'process-wide discovery deferred during persistent recovery',
     'pagesRead < 3'
 )) {

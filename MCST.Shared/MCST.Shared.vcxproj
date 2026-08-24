@@ -17,6 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="MCBridgeProtocol.h" />
+    <ClInclude Include="TrackerRecoveryPolicy.h" />
     <ClInclude Include="WatchdogSystemStatus.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" /><ImportGroup Label="ExtensionTargets" />

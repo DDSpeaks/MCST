@@ -96,7 +96,7 @@ The current-month Realized P/L remains available when there are no current open 
 
 Numeric Positions History dates support DMY, MDY, and YMD layouts. The default `[Tracker] date_order=auto` uses unambiguous rows and the Windows user locale. Set the value to `dmy`, `mdy`, or `ymd` only when an override is necessary. Invalid rows are excluded instead of guessed.
 
-If a current Tracker table read fails after the bounded automatic retries, Watchdog keeps trying on every normal refresh. When a complete earlier snapshot exists, its Accounts, Open Positions, optional Position History, and Recent Logs may remain visible for context. The Dashboard and Status Report show **STALE** data as Attention for `stale_critical_after_minutes` (10 minutes by default), then escalate it to **CRITICAL**. Reports distinguish the last Tracker attempt from the last complete snapshot. Bridge V177 uses progressively wider CATPTTabView recovery tiers without repeatedly blocking on the old 20-40 second broad search. Tracker and Recent Logs details show the tier and whether the result was accepted, missing, structurally insufficient, or ambiguous.
+If a current Tracker table read fails after the bounded automatic retries, Watchdog keeps trying on every normal refresh. When a complete earlier snapshot exists, its Accounts, Open Positions, optional Position History, and Recent Logs may remain visible for context. The Dashboard and Status Report show **STALE** data as Attention for `stale_critical_after_minutes` (10 minutes by default), then escalate it to **CRITICAL**. Reports distinguish the last Tracker attempt from the last complete snapshot. Bridge V178 uses progressively wider CATPTTabView recovery tiers without repeatedly blocking on the old 20-40 second broad search. Tracker and Recent Logs details show the tier and whether the result was accepted, missing, structurally insufficient, or ambiguous.
 
 When the dedicated `MultiCharts (OpenAPI Web App)` Saxo login window remains
 open past the configured delay, Broker monitoring raises an authentication
@@ -129,16 +129,38 @@ Developer Mode is disabled by default:
 enabled=false
 ```
 
-When enabled, the compact Developer toolbar contains:
+The Dashboard also shows an unchecked **Developer mode** box at the right of
+**Reload Settings**. Check it to show the compact research toolbar; clear it to
+hide the toolbar again. The choice is saved to `[Developer] enabled` in
+`MCST-Watchdog.ini`. The research buttons are only 20 pixels high, clearly
+smaller than the normal 34-pixel production buttons.
 
-- **AT Start** — begins a controlled AutoTrading research session.
-- **AT Capture** — captures the current AutoTrading research state.
-- **AT Finish** — completes/analyzes the AutoTrading research session.
-- **Tracker Capture** — requests the passive Tracker research bundle from the Bridge and opens the research-output location.
-- **Open Compat** — opens `MCST-Compatibility.ini`.
-- **Reload Compat** — forces a fresh compatibility evaluation for AutoTrading and Tracker.
+When enabled, the compact Developer toolbar contains the following controls.
+The **Help** button opens a two-pane beginner guide. Choose a button name on
+the left; the right pane then explains its goal, preparation, exact action,
+success result, next step, failure handling, and safety boundary.
+
+- **AT Start** — starts a new controlled AutoTrading research session and records its baseline. Press this first while MultiCharts is stable and the expected active-strategy count is visible. Starting again replaces an unfinished session.
+- **AT Capture** — appends the current AutoTrading state to the active session.
+  On one chart, choose one strategy and change only that strategy's AutoTrading
+  state from ON to OFF or OFF to ON. Do not change the strategy settings,
+  chart, workspace, or number of MultiCharts instances. Wait for the state to
+  settle and press Capture once. It may be repeated after another single,
+  controlled AutoTrading state change.
+- **AT Finish** — completes and analyzes the active AutoTrading session. Use it after Start and at least one useful Capture. The result is written to `C:\Temp\MCST-Watchdog\AutoTradingResearch.txt`.
+- **Tracker Capture** — requests a passive, read-only Tracker research bundle from the Bridge and opens the research-output location. Use it when Accounts, Open Positions, Position History, or Recent Logs cannot be read after a MultiCharts update.
+- **Position CCY** — performs the optional, read-only Position Currency research. Keep representative open positions visible. Normal Open P/L reporting does not require this action.
+- **Open Compat** — opens `C:\MCExtras\MCST-Compatibility.ini`. Disabled candidate sections are evidence only; do not enable unverified values.
+- **Reload Compat** — re-reads verified compatibility data, bypasses the AutoTrading cache, and requests a fresh Tracker snapshot. Replacing the Bridge DLL still requires restarting MultiCharts.
+- **Help** — opens the selectable Developer Mode guide without starting any research operation.
 
 These controls are intentionally smaller than normal production buttons and are hidden in normal operation.
+
+The normal AutoTrading sequence is therefore **AT Start → change only one
+chart strategy's AutoTrading ON/OFF state → AT Capture** (repeat as needed)
+**→ AT Finish**. The user makes the ON/OFF change in MultiCharts; the Watchdog
+button only records it. Do not use the three AT buttons as production
+AutoTrading controls; they only collect and analyze compatibility evidence.
 
 ### Tracker profile workflow
 

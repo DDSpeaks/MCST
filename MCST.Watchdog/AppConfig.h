@@ -101,3 +101,4 @@ bool SaveStatusReportSettings(bool enabled, const std::wstring& recipient, int i
 bool SaveAutoTradingSettings(bool enabled, int minimumActive, int intervalMinutes, bool alertEmail, bool recoveryEmail, std::wstring& errorOut);
 bool SaveEmailSettings(bool enabled, const std::wstring& server, int port, bool useSsl, const std::wstring& user, const std::wstring& password, const std::wstring& from, const std::wstring& alertTo, const std::wstring& reportTo, std::wstring& errorOut);
 bool SaveHeartbeatSettings(bool enabled, int intervalMinutes, bool sendOnStartup, std::wstring& errorOut);
+bool SaveDeveloperModeEnabled(bool enabled, std::wstring& errorOut);

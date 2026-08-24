@@ -1,7 +1,7 @@
 ﻿#include <windows.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,177,0
+ FILEVERSION 1,0,178,0
  PRODUCTVERSION 1,0,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
@@ -15,12 +15,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "MCST\0"
             VALUE "FileDescription", "MCST Tracker Bridge\0"
-            VALUE "FileVersion", "1.0.177.0\0"
+            VALUE "FileVersion", "1.0.178.0\0"
             VALUE "InternalName", "MCST-TrackerBridge.dll\0"
             VALUE "OriginalFilename", "MCST-TrackerBridge.dll\0"
             VALUE "ProductName", "MCST Tracker Bridge\0"
             VALUE "ProductVersion", "1.0\0"
-            VALUE "Comments", "Release 1.0; internal bridge build V177; protocol V2; progressive Tracker self-recovery\0"
+            VALUE "Comments", "Release 1.0; internal bridge build V178; protocol V2; progressive Tracker self-recovery\0"
         END
     END
     BLOCK "VarFileInfo"

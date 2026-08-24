@@ -19,6 +19,7 @@
 #include "BrokerAuthDetector.h"
 #include "LogAlertEngine.h"
 #include "DashboardLayout.h"
+#include "DeveloperHelpContent.h"
 #include "MultiChartsVersionDetector.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
@@ -66,6 +67,8 @@ namespace
     constexpr int kButtonOpenCompatibility = 1016;
     constexpr int kButtonReloadCompatibility = 1017;
     constexpr int kButtonPositionCurrencyResearch = 1018;
+    constexpr int kButtonDeveloperHelp = 1019;
+    constexpr int kCheckDeveloperMode = 1020;
     constexpr int kMenuConfigure = 3001;
     constexpr int kMenuAction1 = 3002;
     constexpr int kMenuAction2 = 3003;
@@ -81,6 +84,9 @@ namespace
     constexpr int kSimpleField7 = 3116;
     constexpr int kSimpleCheck1 = 3120;
     constexpr int kSimpleCheck2 = 3121;
+    constexpr int kDeveloperHelpClose = 3201;
+    constexpr int kDeveloperHelpTopics = 3202;
+    constexpr int kDeveloperHelpText = 3203;
     constexpr int kStatusSettingsEnabled = 2001;
     constexpr int kStatusSettingsRecipient = 2002;
     constexpr int kStatusSettingsInterval = 2003;
@@ -144,6 +150,8 @@ namespace
     HWND g_positionCurrencyResearchButton = nullptr;
     HWND g_openCompatibilityButton = nullptr;
     HWND g_reloadCompatibilityButton = nullptr;
+    HWND g_developerHelpButton = nullptr;
+    HWND g_developerModeCheckbox = nullptr;
     HWND g_reloadSettingsButton = nullptr;
     HWND g_testEmailButton = nullptr;
     HWND g_autoMenuButton = nullptr;
@@ -296,6 +304,8 @@ namespace
         if (g_openFolderButton) MoveWindow(g_openFolderButton, 278, y, 120, 34, TRUE);
         if (g_openSettingsButton) MoveWindow(g_openSettingsButton, 408, y, 130, 34, TRUE);
         if (g_reloadSettingsButton) MoveWindow(g_reloadSettingsButton, 548, y, 150, 34, TRUE);
+        if (g_developerModeCheckbox)
+            MoveWindow(g_developerModeCheckbox, (std::max)(730, static_cast<int>(client.right) - 190), y + 7, 162, 22, TRUE);
         const DeveloperToolbarLayout developerLayout = CalculateDeveloperToolbarLayout(y);
         if (g_app.config.developerModeEnabled)
         {
@@ -306,6 +316,7 @@ namespace
             const RECT positionCurrencyRect = CalculateDeveloperToolbarButtonRect(developerLayout, 4);
             const RECT openCompatRect = CalculateDeveloperToolbarButtonRect(developerLayout, 5);
             const RECT reloadCompatRect = CalculateDeveloperToolbarButtonRect(developerLayout, 6);
+            const RECT helpRect = CalculateDeveloperToolbarButtonRect(developerLayout, 7);
             if (g_autoTradingDiagnosticsButton) MoveWindow(g_autoTradingDiagnosticsButton, startRect.left, startRect.top, startRect.right - startRect.left, startRect.bottom - startRect.top, TRUE);
             if (g_autoTradingCaptureButton) MoveWindow(g_autoTradingCaptureButton, captureRect.left, captureRect.top, captureRect.right - captureRect.left, captureRect.bottom - captureRect.top, TRUE);
             if (g_autoTradingFinishButton) MoveWindow(g_autoTradingFinishButton, finishRect.left, finishRect.top, finishRect.right - finishRect.left, finishRect.bottom - finishRect.top, TRUE);
@@ -313,6 +324,7 @@ namespace
             if (g_positionCurrencyResearchButton) MoveWindow(g_positionCurrencyResearchButton, positionCurrencyRect.left, positionCurrencyRect.top, positionCurrencyRect.right - positionCurrencyRect.left, positionCurrencyRect.bottom - positionCurrencyRect.top, TRUE);
             if (g_openCompatibilityButton) MoveWindow(g_openCompatibilityButton, openCompatRect.left, openCompatRect.top, openCompatRect.right - openCompatRect.left, openCompatRect.bottom - openCompatRect.top, TRUE);
             if (g_reloadCompatibilityButton) MoveWindow(g_reloadCompatibilityButton, reloadCompatRect.left, reloadCompatRect.top, reloadCompatRect.right - reloadCompatRect.left, reloadCompatRect.bottom - reloadCompatRect.top, TRUE);
+            if (g_developerHelpButton) MoveWindow(g_developerHelpButton, helpRect.left, helpRect.top, 70, helpRect.bottom - helpRect.top, TRUE);
         }
         else
         {
@@ -337,6 +349,11 @@ namespace
             if (control)
                 ShowWindow(control, showResearch);
         }
+        if (g_developerHelpButton)
+            ShowWindow(g_developerHelpButton, showResearch);
+        if (g_developerModeCheckbox)
+            SendMessageW(g_developerModeCheckbox, BM_SETCHECK,
+                g_app.config.developerModeEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
         LayoutButtons(hwnd);
     }
 
@@ -1214,6 +1231,138 @@ namespace
             ShellExecuteW(hwnd, L"open", L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt", nullptr, nullptr, SW_SHOWNORMAL);
     }
 
+    void UpdateDeveloperHelpTopic(HWND hwnd)
+    {
+        const HWND list = GetDlgItem(hwnd, kDeveloperHelpTopics);
+        int selected = static_cast<int>(SendMessageW(list, LB_GETCURSEL, 0, 0));
+        const auto& topics = GetDeveloperHelpTopics();
+        if (selected < 0 || static_cast<std::size_t>(selected) >= topics.size())
+            selected = 0;
+        SetWindowTextW(GetDlgItem(hwnd, kDeveloperHelpText), topics[selected].content.c_str());
+        SendMessageW(GetDlgItem(hwnd, kDeveloperHelpText), EM_SETSEL, 0, 0);
+        SendMessageW(GetDlgItem(hwnd, kDeveloperHelpText), EM_SCROLLCARET, 0, 0);
+    }
+
+    LRESULT CALLBACK DeveloperHelpProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        (void)lParam;
+        switch (message)
+        {
+        case WM_CREATE:
+        {
+            HWND heading = CreateWindowW(L"STATIC", L"Developer Mode Help - choose a button to see exact instructions",
+                WS_CHILD | WS_VISIBLE, 18, 14, 900, 28, hwnd, nullptr, nullptr, nullptr);
+            HWND choose = CreateWindowW(L"STATIC", L"CHOOSE A BUTTON",
+                WS_CHILD | WS_VISIBLE, 18, 52, 220, 22, hwnd, nullptr, nullptr, nullptr);
+            HWND list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+                18, 78, 220, 410, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpTopics)), nullptr, nullptr);
+            const auto& topics = GetDeveloperHelpTopics();
+            for (const auto& topic : topics)
+                SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(topic.buttonLabel.c_str()));
+            SendMessageW(list, LB_SETCURSEL, 0, 0);
+            HWND note = CreateWindowW(L"STATIC",
+                L"Research tools only. They do not switch live trading on or off.",
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 18, 502, 220, 50, hwnd, nullptr, nullptr, nullptr);
+            HWND text = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE |
+                ES_AUTOVSCROLL | ES_READONLY,
+                254, 52, 696, 500, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpText)), nullptr, nullptr);
+            HWND close = CreateWindowW(L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                860, 564, 90, 32, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpClose)), nullptr, nullptr);
+            SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_headerFont), TRUE);
+            SendMessageW(choose, WM_SETFONT, reinterpret_cast<WPARAM>(g_labelFont), TRUE);
+            SendMessageW(list, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+            SendMessageW(note, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+            SendMessageW(text, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+            SendMessageW(close, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+            UpdateDeveloperHelpTopic(hwnd);
+            return 0;
+        }
+        case WM_SIZE:
+        {
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            const int contentHeight = (std::max)(180, static_cast<int>(client.bottom) - 126);
+            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpTopics), 18, 78, 220,
+                (std::max)(120, contentHeight - 64), TRUE);
+            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpText), 254, 52,
+                (std::max)(300, static_cast<int>(client.right) - 272), contentHeight, TRUE);
+            MoveWindow(GetDlgItem(hwnd, kDeveloperHelpClose),
+                (std::max)(18, static_cast<int>(client.right) - 108),
+                (std::max)(60, static_cast<int>(client.bottom) - 48), 90, 32, TRUE);
+            return 0;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wParam) == kDeveloperHelpTopics && HIWORD(wParam) == LBN_SELCHANGE)
+            {
+                UpdateDeveloperHelpTopic(hwnd);
+                return 0;
+            }
+            if (LOWORD(wParam) == kDeveloperHelpClose)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    void ShowDeveloperHelp(HWND owner)
+    {
+        static bool registered = false;
+        constexpr wchar_t className[] = L"MCSTDeveloperHelpWindow";
+        if (!registered)
+        {
+            WNDCLASSW wc{};
+            wc.lpfnWndProc = DeveloperHelpProc;
+            wc.hInstance = GetModuleHandleW(nullptr);
+            wc.lpszClassName = className;
+            wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+            if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+                return;
+            registered = true;
+        }
+
+        HWND window = CreateWindowExW(WS_EX_DLGMODALFRAME, className,
+            L"MCST-Watchdog Developer Mode Help",
+            WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | WS_POPUP,
+            CW_USEDEFAULT, CW_USEDEFAULT, 1000, 660,
+            owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!window)
+            return;
+
+        RECT ownerRect{}, dialogRect{};
+        GetWindowRect(owner, &ownerRect);
+        GetWindowRect(window, &dialogRect);
+        SetWindowPos(window, HWND_TOP,
+            ownerRect.left + ((ownerRect.right - ownerRect.left) - (dialogRect.right - dialogRect.left)) / 2,
+            ownerRect.top + ((ownerRect.bottom - ownerRect.top) - (dialogRect.bottom - dialogRect.top)) / 2,
+            0, 0, SWP_NOSIZE);
+        EnableWindow(owner, FALSE);
+        ShowWindow(window, SW_SHOW);
+        UpdateWindow(window);
+        MSG msg{};
+        while (IsWindow(window) && GetMessageW(&msg, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(window, &msg))
+            {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        EnableWindow(owner, TRUE);
+        SetForegroundWindow(owner);
+    }
+
     Gdiplus::Color IndicatorTopColor(mcst::HealthState state, BYTE alpha = 255)
     {
         switch (state)
@@ -1282,7 +1431,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R31", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R33", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1373,7 +1522,7 @@ namespace
         g_labelFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
         g_statusFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
         g_monoFont = CreateUiFont(10, FW_NORMAL, L"Consolas", FIXED_PITCH | FF_MODERN);
-        g_developerButtonFont = CreateUiFont(9, FW_NORMAL, L"Segoe UI");
+        g_developerButtonFont = CreateUiFont(8, FW_NORMAL, L"Segoe UI");
     }
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1393,15 +1542,20 @@ namespace
             g_positionCurrencyResearchButton = CreateWindowW(L"BUTTON", L"Position CCY", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonPositionCurrencyResearch)), nullptr, nullptr);
             g_openCompatibilityButton = CreateWindowW(L"BUTTON", L"Open Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenCompatibility)), nullptr, nullptr);
             g_reloadCompatibilityButton = CreateWindowW(L"BUTTON", L"Reload Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 816, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadCompatibility)), nullptr, nullptr);
+            g_developerHelpButton = CreateWindowW(L"BUTTON", L"Help", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 934, 648, 70, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonDeveloperHelp)), nullptr, nullptr);
+            g_developerModeCheckbox = CreateWindowW(L"BUTTON", L"Developer mode",
+                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
+                730, 697, 162, 22, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCheckDeveloperMode)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
             g_testEmailButton = CreateWindowW(L"BUTTON", L"Send Test Email", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 788, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTestEmail)), nullptr, nullptr);
             g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 212, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
             g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 314, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
             g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 348, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
             g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 382, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
-            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
+            for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton, g_developerModeCheckbox, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
-            for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton })
+            for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_developerButtonFont), TRUE);
             UpdateDeveloperControlVisibility(hwnd);
             SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
@@ -1429,7 +1583,7 @@ namespace
         case WM_GETMINMAXINFO:
         {
             auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-            info->ptMinTrackSize.x = 760;
+            info->ptMinTrackSize.x = 920;
             info->ptMinTrackSize.y = 680;
             return 0;
         }
@@ -1441,6 +1595,26 @@ namespace
             case kButtonStatusMenu: ShowRowMenu(hwnd, g_statusMenuButton, kButtonStatusMenu); return 0;
             case kButtonEmailMenu: ShowRowMenu(hwnd, g_emailMenuButton, kButtonEmailMenu); return 0;
             case kButtonHeartbeatMenu: ShowRowMenu(hwnd, g_heartbeatMenuButton, kButtonHeartbeatMenu); return 0;
+            case kButtonDeveloperHelp:
+                ShowDeveloperHelp(hwnd);
+                return 0;
+            case kCheckDeveloperMode:
+                if (HIWORD(wParam) == BN_CLICKED)
+                {
+                    const bool enabled = SendMessageW(g_developerModeCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                    std::wstring error;
+                    if (!SaveDeveloperModeEnabled(enabled, error))
+                    {
+                        SendMessageW(g_developerModeCheckbox, BM_SETCHECK,
+                            g_app.config.developerModeEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+                        MessageBoxW(hwnd, error.c_str(), L"Developer mode", MB_OK | MB_ICONERROR);
+                        return 0;
+                    }
+                    g_app.config.developerModeEnabled = enabled;
+                    UpdateDeveloperControlVisibility(hwnd);
+                    return 0;
+                }
+                break;
             case kButtonRefresh:
                 StartRefresh(hwnd, true);
                 return 0;
@@ -1565,7 +1739,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R31", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R33", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2092,7 +2266,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R31 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R33 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2163,7 +2337,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R31 - Progressive Tracker Recovery",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R33 - Beginner Developer Help",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);
