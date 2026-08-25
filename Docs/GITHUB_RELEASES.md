@@ -21,14 +21,14 @@ run does not create a public GitHub Release.
 Commit the release source and push a tag that exactly matches the version:
 
 ```powershell
-git tag v1.114-R37
-git push origin v1.114-R37
+git tag v1.114-R38
+git push origin v1.114-R38
 ```
 
 The tag starts the same validated build and then creates a GitHub Release with:
 
-- `MCST-Watchdog-1.114-R37-Windows-x64.zip`
-- `MCST-Watchdog-1.114-R37-SHA256SUMS.txt`
+- `MCST-Watchdog-1.114-R38-Windows-x64.zip`
+- `MCST-Watchdog-1.114-R38-SHA256SUMS.txt`
 - the repository's `RELEASE_NOTES.md` as the Release description
 
 `Build-PortableRelease.ps1` rejects a tag whose name does not match the source
@@ -39,7 +39,7 @@ version. `gh release create --verify-tag` also requires the tag to exist.
 The user package contains only the required runtime and integration files:
 
 ```text
-MCST-Watchdog-1.114-R37-Windows-x64/
+MCST-Watchdog-1.114-R38-Windows-x64/
   MCExtras/
     MCST-Watchdog.exe
     MCST-TrackerBridge.dll

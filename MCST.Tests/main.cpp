@@ -242,9 +242,9 @@ int RunLogicTests()
     const std::wstring totalLine = FindLineContaining(report, L"EUR +8,25");
     if (DelimitedField(totalLine, 0) != L"Total Open P/L" ||
         DelimitedField(totalLine, 1) != L"EUR +8,25" ||
-        DelimitedField(totalLine, 2) != L"[2 rows]")
+        !DelimitedField(totalLine, 2).empty())
     {
-        throw std::runtime_error("Open P/L total is not aligned below the Open P/L detail column");
+        throw std::runtime_error("Open P/L total is not aligned or still contains a width-expanding comment");
     }
     RequireContains(
         report,
@@ -545,10 +545,18 @@ int RunLogicTests()
     const std::wstring realizedLine = FindLineContaining(historyReport, L"EUR -13,18");
     if (DelimitedField(realizedLine, 0) != L"Current month Realized P/L DEMO100001" ||
         DelimitedField(realizedLine, 1) != L"EUR -13,18" ||
-        DelimitedField(realizedLine, 2) != L"[2 rows]")
+        !DelimitedField(realizedLine, 2).empty())
     {
-        throw std::runtime_error("Realized P/L is not aligned below the Open P/L column");
+        throw std::runtime_error("Realized P/L is not aligned or still contains a width-expanding comment");
     }
+    RequireNotContains(
+        historyReport,
+        L"not totalled]",
+        "Realized P/L still contains the removed row-count comment");
+    RequireNotContains(
+        historyReport,
+        L"unambiguous currency]",
+        "Realized P/L still contains the removed explanatory comment");
     RequireContains(
         BuildStatusReportHtml(historyReport),
         L"<span style=\"color:#B4232A;font-weight:600;\">EUR -13,18</span>",

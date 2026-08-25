@@ -1,9 +1,21 @@
-# MCST 1.114-R37 GitHub Publication-Ready Package
+# MCST 1.114-R38 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
 
-## MIT License
+## Compact Open Positions P/L summaries
+
+- Removed the bracketed row-count comment from `Total Open P/L`.
+- Removed row-count, excluded-row, and ambiguous-currency comments from each
+  account-specific `Current month Realized P/L` row.
+- The report still displays the calculated amount, `not calculated`, or
+  `not available`; only the width-expanding explanation column was removed.
+- P/L arithmetic, currency validation, visible-account filtering, colors, and
+  alignment remain unchanged.
+- Added regression checks requiring the summary comment column to remain empty.
+- Tracker Bridge V178 and Protocol V2 are unchanged.
+
+## Retained MIT License
 
 - MCST is now published under the permissive MIT License.
 - The copyright line is `Copyright (c) 2026 Mika Tättäläinen`.
@@ -26,7 +38,7 @@ Bridge protocol: V2
   rejecting every active `.ini`, credential, test executable, compiler output,
   and source file.
 - Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
-  Actions permissions, the non-publishing test build, the exact R37 tag,
+  Actions permissions, the non-publishing test build, the exact R38 tag,
   Release verification, and MIT License verification.
 
 The following R36 GitHub build and Release automation remains unchanged.
@@ -38,7 +50,7 @@ The following R36 GitHub build and Release automation remains unchanged.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.114-R37` creates a GitHub Release from
+- Pushing the exact tag `v1.114-R38` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages

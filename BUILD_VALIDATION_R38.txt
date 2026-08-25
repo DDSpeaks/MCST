@@ -1,0 +1,98 @@
+MCST 1.114-R38 / Tracker Bridge V178 validation
+================================================
+
+Automated source checks
+-----------------------
+- R38 StatusReport, TrackerDateParser, BrokerMonitor, TrackerRecoveryPolicy,
+  DeveloperHelpContent,
+  and MCST.LogicTests portable regression build passed during package
+  preparation on 25 August 2026.
+- R38 source version, required-file, project XML, recovery-token, workflow,
+  portable-package contract, and delimiter checks passed during package
+  preparation.
+- The canonical MIT License, `Copyright (c) 2026 Mika Tättäläinen`, and the
+  portable-package LICENSE mapping passed source validation.
+- The Windows-hosted GitHub workflow must complete once after repository upload;
+  this Linux preparation environment cannot execute MSBuild or PowerShell.
+- Run Tools\Validate-Release.ps1 from a Windows PowerShell prompt.
+- Build MCST.sln as Release x64 with Visual Studio 2022 and the Windows SDK.
+- Run MCST-LogicTests.exe; every logic and regression test must pass.
+
+Required functional checks
+--------------------------
+1. Confirm OVERALL STATUS is bold, separated from the component rows, has a
+   largest dot in the exact same vertical column as every component dot,
+   and does not repeat its state.
+   Inspect the HTML if necessary: `font-size:2em` belongs to the nested
+   `mcst-status-overall-dot`, never the outer fixed-width `mcst-status-dot-cell`.
+   Every component dot must use the nested `mcst-status-dot` at `1.5em`, so its
+   color remains immediately recognizable on a mobile screen.
+2. Confirm System Status descriptions and all Latest Activity values begin in
+   identical columns on desktop and iOS Mail.
+3. Confirm positive and negative Accounts numbers end at the same character
+   column, including values with a leading minus sign.
+4. Confirm every Open Positions record stays on one logical line and all Open
+   P/L amounts and totals share the same vertical column.
+5. With no open positions, confirm the section says `(no rows)` and
+   omits the nine position column headings while retaining monthly results.
+6. With two visible Accounts, confirm each has a separate current-month
+   Realized P/L and a Position History row for a third account is absent.
+   Confirm Total Open P/L and current-month Realized P/L rows have an empty
+   third/comment cell: no bracketed row counts or currency explanations may
+   widen the report.
+7. Verify DMY, MDY, and YMD samples or set [Tracker] date_order explicitly.
+8. Leave a verified V147 Tracker read stale past a recovery cooldown and confirm
+   `tabview_recovery_start`, `tabview_recovery_scan`, and a final recovery result
+   are written to the execution trace.
+9. Confirm persistent failure retries remain under the Watchdog deadline and
+   expanded/wide attempts occur no more often than their documented cooldowns.
+10. Confirm the Dashboard or Status Report includes the CATPTTabView decision,
+    candidate count, scores, and scan counters.
+11. Open the MultiCharts Saxo authentication browser. Confirm an authentication
+   alert after the configured delay and privacy-safe diagnostics.
+12. Confirm `BrokerAuthDetector.cpp` compiles with the installed Windows SDK;
+   COM/OLE headers must precede `UIAutomation.h` and this translation unit must
+   not define `WIN32_LEAN_AND_MEAN`.
+13. Enable Developer Mode, press Help, and confirm the left pane lists Overview,
+    AT Start, AT Capture, AT Finish, Tracker Capture, Position CCY, Open Compat,
+    and Reload Compat. Select every topic and confirm its complete instructions
+    appear in the right pane.
+14. In AT Capture, confirm the preparation explicitly says to choose one
+    strategy on one chart and change only its AutoTrading state ON-to-OFF or
+    OFF-to-ON. Confirm the page also identifies the output, next step, failure
+    recovery, and read-only safety boundary.
+15. Confirm Developer mode is unchecked on a new/default configuration, is
+    located to the right of Reload Settings, immediately shows/hides the
+    research toolbar, and persists `[Developer] enabled` after restart.
+16. Confirm every research button is 20 pixels high and visibly shorter than
+    the 34-pixel normal production buttons.
+17. Confirm the Help window visibly says Developer tools are normally used only
+    after a MultiCharts update or developer request. Open every topic and
+    confirm its text also covers changed Charting.dll/ATOnPTracker.dll
+    fingerprints and says the tools are not for normal monitoring.
+
+Deployment checks
+-----------------
+- Replace MCST-Watchdog.exe. Bridge V178 is unchanged from R35.
+- If the Bridge DLL is nevertheless replaced, restart MultiCharts and confirm
+  the loaded Bridge reports internal V178.
+- Confirm Bridge protocol V2 and the expected ATOnPTracker fingerprint.
+- Inspect a saved report in the target desktop and mobile mail clients.
+
+GitHub release checks
+---------------------
+1. Run Build Windows release manually and confirm it uploads the portable ZIP
+   and SHA-256 file as a workflow artifact without creating a Release.
+2. Push tag v1.114-R38 and confirm the tag-gated job publishes both assets.
+3. Extract the ZIP and confirm it contains only MCExtras runtime binaries,
+   PowerLanguage host files, inert `.ini.example` templates, LICENSE,
+   INSTALL.md, RELEASE_NOTES.md, and the manifest.
+4. Confirm the ZIP contains no active INI, credential, PDB, LIB, OBJ, source,
+   private key, or MCST-LogicTests.exe file.
+5. Compare Get-FileHash output with the published SHA256SUMS value.
+6. Confirm `.gitignore` blocks active INI files, credentials, keys, build
+   output, reports, and research captures before the first commit.
+7. Confirm both `.ini.example` templates remain inert and the Compatibility
+   candidate remains disabled and unverified.
+8. Confirm repository and portable-package LICENSE files are identical and
+   retain `Copyright (c) 2026 Mika Tättäläinen`.

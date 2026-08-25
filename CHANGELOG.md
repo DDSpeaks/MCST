@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## 1.114-R38
+
+- Removed bracketed row-count and currency-explanation comments from Open
+  Positions P/L summary rows so they cannot widen the report columns.
+- Retained the Total Open P/L amount and each visible account's current-month
+  Realized P/L amount or concise availability state.
+- Added regression checks for empty summary-comment cells.
+- Retained all R37 behavior, Tracker Bridge V178, Protocol V2, and MIT license.
+
 ## 1.114-R37
 
 - Added the canonical MIT License with

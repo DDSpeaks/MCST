@@ -505,32 +505,31 @@ namespace
             }
         }
 
-        auto unavailable = [&](const std::wstring& account, const std::wstring& reason)
+        auto unavailable = [&](const std::wstring& account)
         {
             std::vector<std::wstring> row(outputColumns);
             row[0] = account.empty()
                 ? L"Current month Realized P/L"
                 : L"Current month Realized P/L " + account;
             row[1] = L"not available";
-            row[2] = L"[" + reason + L"]";
             rows.push_back(std::move(row));
         };
 
         if (visibleAccounts.empty())
         {
-            unavailable(L"", L"no account number is visible in Accounts");
+            unavailable(L"");
             return rows;
         }
         if (!section.present)
         {
             for (const auto& account : visibleAccounts)
-                unavailable(account, L"Position History was not supplied by the Bridge");
+                unavailable(account);
             return rows;
         }
         if (!section.ok)
         {
             for (const auto& account : visibleAccounts)
-                unavailable(account, L"Position History read failed");
+                unavailable(account);
             return rows;
         }
 
@@ -552,7 +551,7 @@ namespace
         if (order == TrackerDateOrder::Auto)
         {
             for (const auto& account : visibleAccounts)
-                unavailable(account, L"date order was ambiguous");
+                unavailable(account);
             return rows;
         }
 
@@ -561,8 +560,6 @@ namespace
         CurrentLocalYearMonth(currentYear, currentMonth);
 
         std::map<std::wstring, std::map<std::wstring, double>> totalsByAccount;
-        std::map<std::wstring, std::map<std::wstring, std::size_t>> countedRowsByAccount;
-        std::map<std::wstring, std::size_t> rowsNotTotaledByAccount;
         std::size_t datesNotParsed = 0;
         for (const auto& row : section.rows)
         {
@@ -588,11 +585,6 @@ namespace
                 TryExtractKnownCurrency(row[7], currency))
             {
                 totalsByAccount[account][currency] += realizedPl;
-                ++countedRowsByAccount[account][currency];
-            }
-            else
-            {
-                ++rowsNotTotaledByAccount[account];
             }
         }
 
@@ -604,7 +596,6 @@ namespace
                 std::vector<std::wstring> row(outputColumns);
                 row[0] = L"Current month Realized P/L " + account;
                 row[1] = L"not calculated";
-                row[2] = L"[no current-month row with an unambiguous currency]";
                 rows.push_back(std::move(row));
                 continue;
             }
@@ -614,10 +605,6 @@ namespace
                 std::vector<std::wstring> row(outputColumns);
                 row[0] = L"Current month Realized P/L " + account;
                 row[1] = total.first + L" " + FormatReportNumber(total.second, true);
-                row[2] = L"[" + std::to_wstring(countedRowsByAccount[account][total.first]) + L" rows";
-                if (rowsNotTotaledByAccount[account] != 0)
-                    row[2] += L"; " + std::to_wstring(rowsNotTotaledByAccount[account]) + L" not totalled";
-                row[2] += L"]";
                 rows.push_back(std::move(row));
             }
         }
@@ -626,8 +613,7 @@ namespace
         {
             std::vector<std::wstring> row(outputColumns);
             row[0] = L"Position History dates skipped";
-            row[2] = L"[" + std::to_wstring(datesNotParsed) + L" rows; expected " +
-                std::wstring(TrackerDateOrderName(order)) + L"]";
+            row[1] = std::to_wstring(datesNotParsed);
             rows.push_back(std::move(row));
         }
         return rows;
@@ -647,7 +633,6 @@ namespace
         std::vector<std::vector<std::wstring>> rows;
         rows.reserve(section.rows.size());
         std::map<std::wstring, double> openPlTotalsByCurrency;
-        std::map<std::wstring, std::size_t> openPlRowsByCurrency;
         std::size_t openPlRowsNotTotaled = 0;
 
         for (const auto& source : section.rows)
@@ -683,7 +668,6 @@ namespace
                 TryExtractKnownCurrency(row[1], openPlCurrency))
             {
                 openPlTotalsByCurrency[openPlCurrency] += openPl;
-                ++openPlRowsByCurrency[openPlCurrency];
             }
             else
             {
@@ -699,7 +683,6 @@ namespace
             std::vector<std::wstring> totalRow(headers.size());
             totalRow[0] = L"Total Open P/L";
             totalRow[1] = total.first + L" " + FormatReportNumber(total.second, true);
-            totalRow[2] = L"[" + std::to_wstring(openPlRowsByCurrency[total.first]) + L" rows]";
             totalRows.push_back(std::move(totalRow));
         }
         const auto historyTotalRows =
@@ -757,7 +740,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.114-R37" },
+        { L"Watchdog version", L"1.114-R38" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },

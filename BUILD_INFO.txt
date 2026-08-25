@@ -1,28 +1,22 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R37
+MCST-Watchdog version: 1.114-R38
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     MIT-licensed GitHub publication package
+Production change:     Compact Open Positions P/L summary rows
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R37 production method
+R38 production method
 ---------------------
-1. License MCST under MIT with Copyright (c) 2026 Mika Tättäläinen.
-2. Protect active INI settings, credentials, keys, build output, reports, and
-   research captures with repository-level ignore rules.
-3. Normalize Windows project/script and documentation/workflow line endings.
-4. Include inert Watchdog and Compatibility `.ini.example` templates.
-5. Validate the source and build MCST.sln as Release x64 on windows-2022.
-6. Run MCST-LogicTests.exe before packaging or publishing anything.
-7. Package only runtime binaries, PowerLanguage files, inert examples, MIT
-   License, user installation guide, release notes, and manifest.
-8. Upload a temporary artifact for manual workflow runs and publish only from
-   the exact existing R37 tag.
-9. Attach both the portable ZIP and its SHA-256 checksum.
-10. Retain R36 behavior, Tracker Bridge V178, and Protocol V2 unchanged.
+1. Keep the P/L summary labels and amounts in their established columns.
+2. Leave the summary comment column empty so explanatory text cannot widen it.
+3. Preserve all arithmetic, currency gates, account filtering, and colors.
+4. Validate the source and build MCST.sln as Release x64 on windows-2022.
+5. Run MCST-LogicTests.exe before packaging or publishing anything.
+6. Retain R37's MIT-licensed publication package, Tracker Bridge V178, and
+   Protocol V2 unchanged.
 
 Retained production behavior
 ----------------------------

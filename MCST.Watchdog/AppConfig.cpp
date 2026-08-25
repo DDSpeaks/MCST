@@ -326,7 +326,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.114-R37");
+    WriteValue(path, L"General", L"version", L"1.114-R38");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
