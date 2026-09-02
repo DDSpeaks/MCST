@@ -1,17 +1,22 @@
 ﻿# MCST
 
-## Package: 1.114-R38 GitHub Publication-Ready Package
+## Package: 1.114-R39 MultiCharts Health
 
-This source package retains R37's MIT-licensed, reproducible GitHub Actions
-release path and all earlier monitoring behavior. R38 removes the explanatory
-row-count and currency comments from Open Positions P/L summary rows so those
-comments can no longer widen the report columns on desktop or mobile mail.
+This source package adds lightweight health monitoring for every running
+MultiCharts desktop process while retaining the MIT-licensed, reproducible
+GitHub Actions release path and all earlier monitoring behavior.
+
+The new first dashboard row reports process count, UI responsiveness, the
+visible `q / s` processing backlog, per-process CPU use, private memory,
+handles, GDI/USER objects, and unexpected process disappearance. Checks are
+sampled during the existing Watchdog refresh cycle and use bounded reads; no
+external heartbeat service or active interaction with MultiCharts is required.
 
 MCST is a Windows monitoring suite for MultiCharts. Its production application, **MCST-Watchdog**, provides an at-a-glance operational view of MultiCharts health, Tracker data, AutoTrading state, broker connectivity, recent-log alerts, scheduled status reports, heartbeat reporting, system resources, and MultiCharts compatibility.
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R38**
+- MCST-Watchdog: **1.114-R39**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -24,12 +29,12 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-R38 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+R39 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.114-R38` runs the Windows Release x64 build, executes
+Pushing tag `v1.114-R39` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

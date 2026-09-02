@@ -10,10 +10,38 @@ The overall status summarizes the subsystem rows. Green/OK represents a verified
 
 1. Start MultiCharts and make sure the MCST Tracker Bridge host is running in each monitored MultiCharts instance.
 2. Start `C:\MCExtras\MCST-Watchdog.exe`.
-3. Confirm the expected status for Bridge, Tracker Snapshot, AutoTrading, Broker, Recent Logs, Status Reports, Email, and Heartbeat.
+3. Confirm the expected status for MultiCharts Health, Bridge, Tracker Snapshot, AutoTrading, Broker, Recent Logs, Status Reports, Email, and Heartbeat.
 4. Leave Watchdog running during trading operation.
 
 The Dashboard uses **Latest Activity** as its single activity summary. There is no separate Recent Activity section.
+
+## MultiCharts Health
+
+The first status row covers every running MultiCharts desktop process, including
+an empty auxiliary instance. It shows the number of instances and summarizes UI
+responsiveness, the visible processing queue, and combined MultiCharts CPU use.
+
+- `OK` means the detected instances respond and no queue/resource threshold is
+  currently exceeded.
+- `WARNING` can indicate a recently terminated instance, a missing main window,
+  a queue delayed for at least 3 seconds, CPU above 90% of one logical core for
+  three samples, high resource-object counts, or low available system memory.
+- `CRITICAL` can indicate no running MultiCharts process, repeated UI
+  non-response, a queue delayed for at least 10 seconds, at least 1,000 queued
+  items, queue growth across three samples, or a near-exhausted system/resource
+  limit.
+
+The `q / s` notation is MultiCharts' visible backlog: `q` is the queued item
+count and `s` is the age/delay in seconds. A short transient is not treated as a
+failure. Watchdog waits for repeated or threshold-crossing evidence and performs
+these checks only during its normal refresh cycle.
+
+The status report includes a per-process table with PID, state, CPU (100% means
+one logical core), private memory, handle count, GDI/USER objects, queue depth,
+and queue delay. If one instance disappears while others remain, MultiCharts
+Health warns and AutoTrading is rescanned immediately. The existing minimum
+active-strategy rule then makes loss of a trading instance critical, while loss
+of an empty auxiliary instance remains a warning.
 
 ## Configuration
 

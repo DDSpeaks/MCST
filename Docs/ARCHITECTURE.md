@@ -25,6 +25,7 @@ TrackerBridgeClient
             v
        MCST-Watchdog
             |
+            +-- MultiCharts Health Monitor
             +-- Broker State Engine
             +-- Log Alert Engine
             +-- AutoTrading Reader
@@ -71,6 +72,15 @@ unavailable instead of changing Broker/Tracker health.
 ### MCST-Watchdog
 
 Watchdog combines Tracker snapshots, AutoTrading state, broker/log monitoring, scheduled reporting, email, resources, and compatibility diagnostics into one operational state.
+
+`MultiChartsHealthMonitor` independently enumerates all running
+`MultiCharts.exe` and `MultiCharts64.exe` processes. During the existing refresh
+cycle it samples process resources, sends a bounded non-mutating `WM_NULL`
+responsiveness probe to each main window, and reads the visible `q / s` backlog
+from status controls. It never clicks, types, places orders, or modifies process
+memory. A process-set change invalidates the cached aggregate AutoTrading count
+once, allowing the existing minimum-active rule to determine whether a vanished
+instance carried trading strategies.
 
 ### Developer and research tools
 

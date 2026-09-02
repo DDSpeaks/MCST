@@ -1,5 +1,20 @@
 ﻿# Changelog
 
+## 1.114-R39
+
+- Added lightweight health monitoring for every running MultiCharts desktop
+  process as the first Dashboard status row.
+- Added bounded UI responsiveness, visible `q / s` queue, CPU, private memory,
+  handle, GDI/USER-object, process-disappearance, and available-memory checks.
+- Added a per-process MultiCharts table to status reports plus health transition
+  alert and recovery emails using the existing email configuration.
+- A changed MultiCharts process set now forces one immediate AutoTrading rescan,
+  distinguishing a lost empty instance from a lost trading instance through the
+  existing minimum-active requirement.
+- Moved the compact Dashboard header upward to make room for the new row.
+- Retained Tracker Bridge V178, Protocol V2, and all R38 monitoring/reporting
+  behavior.
+
 ## 1.114-R38
 
 - Removed bracketed row-count and currency-explanation comments from Open

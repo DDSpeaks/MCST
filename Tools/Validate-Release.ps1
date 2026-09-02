@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R38'
+$currentVersion = '1.114-R39'
 $currentBridgeBuild = 178
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -30,13 +30,15 @@ $required = @(
     'MCST.Watchdog\TrackerDateParser.cpp',
     'MCST.Watchdog\CompatibilityManager.cpp',
     'MCST.Watchdog\MultiChartsVersionDetector.cpp',
+    'MCST.Watchdog\MultiChartsHealthMonitor.h',
+    'MCST.Watchdog\MultiChartsHealthMonitor.cpp',
     'MCST.Tests\MCST.Tests.vcxproj',
     'LICENSE',
     'README.md',
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R38.txt',
+    'BUILD_VALIDATION_R39.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
     'Examples\MCST-Watchdog.ini.example',
@@ -375,7 +377,8 @@ if ($watchdogProject -notmatch '<WholeProgramOptimization>false</WholeProgramOpt
     $watchdogProject -notmatch '<EnableCOMDATFolding>false</EnableCOMDATFolding>' -or
     $watchdogProject -notmatch '<OptimizeReferences>false</OptimizeReferences>' -or
     $watchdogProject -notmatch 'UIAutomationCore\.lib' -or
-    $watchdogProject -notmatch 'OleAut32\.lib') {
+    $watchdogProject -notmatch 'OleAut32\.lib' -or
+    $watchdogProject -notmatch 'MultiChartsHealthMonitor\.cpp') {
     throw 'Required MCST-Watchdog production Release settings have changed.'
 }
 
@@ -392,9 +395,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,38,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,38,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R38.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,39,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,39,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R39.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -607,6 +610,23 @@ foreach ($requiredDetectedKey in @(
     }
 }
 
+$multiChartsHealthMonitor = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsHealthMonitor.cpp') -Raw
+foreach ($healthToken in @(
+    'SendMessageTimeoutW',
+    'GetProcessMemoryInfo',
+    'GetProcessHandleCount',
+    'GetGuiResources',
+    'ReadQueueIndicator',
+    'queueAgeSeconds >= 10',
+    'queueGrowthSamples >= 3',
+    'cpuCorePercent >= 90.0',
+    'highCpuSamples >= 3'
+)) {
+    if ($multiChartsHealthMonitor -notmatch [regex]::Escape($healthToken)) {
+        throw "MultiCharts Health monitor contract token is missing: $healthToken"
+    }
+}
+
 $publicCurrentDocs = @(
     'README.md',
     'RELEASE_NOTES.md',
@@ -660,7 +680,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v4',
     'microsoft/setup-msbuild@v2',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.114-R38-Windows-x64',
+    'MCST-Watchdog-1.114-R39-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -676,7 +696,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.114-R38',
+    '1.114-R39',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

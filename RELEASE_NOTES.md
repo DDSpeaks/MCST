@@ -1,7 +1,28 @@
-# MCST 1.114-R38 GitHub Publication-Ready Package
+# MCST 1.114-R39 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
+
+## MultiCharts Health
+
+- Added `MultiCharts Health` as the first dashboard status row and moved the
+  header upward to preserve the compact layout.
+- Monitors every running `MultiCharts.exe` and `MultiCharts64.exe` process,
+  including empty auxiliary instances, without clicking or modifying anything
+  in MultiCharts.
+- Detects repeated UI non-response, a growing or old visible `q / s` backlog,
+  high handle/GDI/USER-object counts, low available system memory, and a
+  recently disappeared MultiCharts process.
+- Reports per-process PID, state, CPU use (100% equals one logical core),
+  private memory, handles, GDI/USER objects, queue depth, and queue age in the
+  scheduled status report.
+- A disappeared process triggers one immediate AutoTrading rescan. Loss of an
+  empty auxiliary instance is a warning; loss of a trading instance becomes
+  critical when the existing minimum-active-strategy requirement is missed.
+- Sends an alert on WARNING/CRITICAL transitions and a recovery message when
+  MultiCharts Health returns to OK, using the existing email configuration.
+- Uses the existing refresh cycle, a 250 ms bounded responsiveness probe, and
+  bounded accessibility reads. No external heartbeat was added.
 
 ## Compact Open Positions P/L summaries
 
@@ -38,7 +59,7 @@ Bridge protocol: V2
   rejecting every active `.ini`, credential, test executable, compiler output,
   and source file.
 - Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
-  Actions permissions, the non-publishing test build, the exact R38 tag,
+  Actions permissions, the non-publishing test build, the exact R39 tag,
   Release verification, and MIT License verification.
 
 The following R36 GitHub build and Release automation remains unchanged.
@@ -50,7 +71,7 @@ The following R36 GitHub build and Release automation remains unchanged.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.114-R38` creates a GitHub Release from
+- Pushing the exact tag `v1.114-R39` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages

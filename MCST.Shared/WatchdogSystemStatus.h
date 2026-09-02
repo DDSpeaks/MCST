@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -39,10 +40,51 @@ namespace mcst
         std::wstring text;
     };
 
+    struct MultiChartsProcessStatus
+    {
+        unsigned long processId = 0;
+        HealthState state = HealthState::Unknown;
+        bool mainWindowFound = false;
+        bool responsive = false;
+        int unresponsiveSamples = 0;
+        bool cpuAvailable = false;
+        double cpuCorePercent = 0.0; // 100% equals one fully used logical core.
+        bool resourcesAvailable = false;
+        std::size_t workingSetBytes = 0;
+        std::size_t privateMemoryBytes = 0;
+        unsigned long handleCount = 0;
+        unsigned long gdiObjects = 0;
+        unsigned long userObjects = 0;
+        bool queueIndicatorFound = false;
+        unsigned long queueCount = 0;
+        unsigned long queueAgeSeconds = 0;
+        int queueGrowthSamples = 0;
+        int highCpuSamples = 0;
+    };
+
+    struct MultiChartsHealthSnapshot
+    {
+        HealthState state = HealthState::Unknown;
+        std::wstring value;
+        std::wstring detail;
+        std::size_t processCount = 0;
+        std::size_t unresponsiveProcessCount = 0;
+        std::size_t sustainedHighCpuProcessCount = 0;
+        unsigned long maximumQueueCount = 0;
+        unsigned long maximumQueueAgeSeconds = 0;
+        unsigned long recentlyDisappearedProcessId = 0;
+        bool processSetChanged = false;
+        double totalCpuCorePercent = 0.0;
+        std::size_t totalPrivateMemoryBytes = 0;
+        unsigned long long availableSystemMemoryBytes = 0;
+        std::vector<MultiChartsProcessStatus> processes;
+    };
+
     struct WatchdogSystemStatus
     {
         HealthState overall = HealthState::Unknown;
 
+        MonitorStatus multiChartsHealth;
         MonitorStatus bridge;
         MonitorStatus trackerSnapshot;
         MonitorStatus autoTrading;
@@ -102,6 +144,8 @@ namespace mcst
         std::size_t privateMemoryBytes = 0;
         unsigned long handleCount = 0;
         std::wstring uptime;
+
+        MultiChartsHealthSnapshot multiChartsProcesses;
 
         std::vector<ActivityItem> activity;
     };

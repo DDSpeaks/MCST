@@ -1,22 +1,24 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R38
+MCST-Watchdog version: 1.114-R39
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Compact Open Positions P/L summary rows
+Production change:     Lightweight MultiCharts process health monitoring
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R38 production method
+R39 production method
 ---------------------
-1. Keep the P/L summary labels and amounts in their established columns.
-2. Leave the summary comment column empty so explanatory text cannot widen it.
-3. Preserve all arithmetic, currency gates, account filtering, and colors.
+1. Enumerate every MultiCharts desktop process without modifying it.
+2. Sample UI response, visible queue delay, CPU, memory, handles, and GUI objects
+   during the existing Watchdog refresh cycle.
+3. Put MultiCharts Health first and retain the compact Dashboard layout.
 4. Validate the source and build MCST.sln as Release x64 on windows-2022.
 5. Run MCST-LogicTests.exe before packaging or publishing anything.
-6. Retain R37's MIT-licensed publication package, Tracker Bridge V178, and
+6. Retain R38's MIT-licensed publication package, Tracker Bridge V178, and
    Protocol V2 unchanged.
+7. Force one AutoTrading rescan when the MultiCharts process set changes.
 
 Retained production behavior
 ----------------------------

@@ -60,6 +60,7 @@ namespace
     {
         const std::vector<std::pair<std::wstring, mcst::MonitorStatus>> rows = {
             { L"OVERALL STATUS", { status.overall, L"", L"" } },
+            { L"MultiCharts Health", status.multiChartsHealth },
             { L"Bridge", status.bridge },
             { L"Tracker Snapshot", status.trackerSnapshot },
             { L"AutoTrading", status.autoTrading },
@@ -176,6 +177,59 @@ namespace
             << std::left << std::setw(22) << L"Private memory" << (status.privateMemoryBytes / (1024 * 1024)) << L" MB\n"
             << std::left << std::setw(22) << L"Handles" << status.handleCount << L'\n'
             << std::left << std::setw(22) << L"Uptime" << status.uptime << L'\n';
+    }
+
+    void AppendMultiChartsProcesses(std::wostringstream& out, const mcst::WatchdogSystemStatus& status)
+    {
+        out << L"\nMULTICHARTS PROCESSES\n"
+            << L"--------------------------------------------------------------------------------\n";
+        if (status.multiChartsProcesses.processes.empty())
+        {
+            out << L"(no MultiCharts processes found)\n";
+            return;
+        }
+
+        out << std::left << std::setw(10) << L"PID"
+            << std::setw(14) << L"State"
+            << std::right << std::setw(11) << L"CPU/core"
+            << std::setw(12) << L"Private MB"
+            << std::setw(10) << L"Handles"
+            << std::setw(8) << L"GDI"
+            << std::setw(9) << L"USER"
+            << std::setw(10) << L"Queue"
+            << std::setw(9) << L"Delay" << L'\n'
+            << L"--------------------------------------------------------------------------------\n";
+
+        for (const auto& process : status.multiChartsProcesses.processes)
+        {
+            std::wstring cpu = L"n/a";
+            if (process.cpuAvailable)
+            {
+                std::wostringstream formatted;
+                formatted << std::fixed << std::setprecision(0) << process.cpuCorePercent << L"%";
+                cpu = formatted.str();
+            }
+            const std::wstring queue = process.queueIndicatorFound
+                ? std::to_wstring(process.queueCount) + L" q"
+                : L"clear";
+            const std::wstring delay = process.queueIndicatorFound
+                ? std::to_wstring(process.queueAgeSeconds) + L" s"
+                : L"0 s";
+
+            out << std::left << std::setw(10) << process.processId
+                << std::setw(14) << mcst::HealthStateText(process.state)
+                << std::right << std::setw(11) << cpu
+                << std::setw(12) << (process.privateMemoryBytes / (1024 * 1024))
+                << std::setw(10) << process.handleCount
+                << std::setw(8) << process.gdiObjects
+                << std::setw(9) << process.userObjects
+                << std::setw(10) << queue
+                << std::setw(9) << delay << L'\n';
+        }
+
+        if (status.multiChartsProcesses.recentlyDisappearedProcessId != 0)
+            out << L"Recently terminated PID: " << status.multiChartsProcesses.recentlyDisappearedProcessId << L'\n';
+        out << L"CPU/core uses 100% to mean one fully occupied logical processor.\n";
     }
 
     std::wstring SingleLineCell(std::wstring value)
@@ -740,7 +794,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.114-R38" },
+        { L"Watchdog version", L"1.114-R39" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },
@@ -772,6 +826,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L'\n';
 
     AppendSystemResources(out, status);
+    AppendMultiChartsProcesses(out, status);
 
     if (!status.lastError.empty())
         out << L"\nLATEST ERROR\n------------\n" << status.lastError << L'\n';

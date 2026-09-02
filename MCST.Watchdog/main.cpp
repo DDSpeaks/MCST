@@ -21,6 +21,7 @@
 #include "DashboardLayout.h"
 #include "DeveloperHelpContent.h"
 #include "MultiChartsVersionDetector.h"
+#include "MultiChartsHealthMonitor.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 
@@ -128,6 +129,8 @@ namespace
         LogAlertEngine logAlertEngine;
         bool scheduledStatusReportEmailInFlight = false;
         bool heartbeatEmailInFlight = false;
+        bool multiChartsHealthObserved = false;
+        bool multiChartsHealthEmailInFlight = false;
     };
 
     AppState g_app;
@@ -332,10 +335,10 @@ namespace
         }
         const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
         const int menuX = rowLayout.overflowButtonX;
-        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 216, 30, 24, TRUE);
-        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 318, 30, 24, TRUE);
-        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 352, 30, 24, TRUE);
-        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 386, 30, 24, TRUE);
+        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 236, 30, 24, TRUE);
+        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 338, 30, 24, TRUE);
+        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 372, 30, 24, TRUE);
+        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 406, 30, 24, TRUE);
     }
 
     void UpdateDeveloperControlVisibility(HWND hwnd)
@@ -595,6 +598,7 @@ namespace
         bool includeBroker)
     {
         status.overall = mcst::HealthState::Healthy;
+        status.overall = Worst(status.overall, status.multiChartsHealth.state);
         status.overall = Worst(status.overall, status.bridge.state);
         status.overall = Worst(status.overall, status.trackerSnapshot.state);
         status.overall = Worst(status.overall, status.recentLogs.state);
@@ -884,9 +888,23 @@ namespace
             AddActivity(result.status, mcst::HealthState::Critical, L"Tracker snapshot failed");
         }
 
+        result.status.multiChartsProcesses = ReadMultiChartsHealth();
+        result.status.multiChartsHealth = {
+            result.status.multiChartsProcesses.state,
+            result.status.multiChartsProcesses.value,
+            result.status.multiChartsProcesses.detail
+        };
+
         if (config.autoTradingMonitoringEnabled)
         {
-            const AutoTradingReadResult autoTrading = ReadAutoTradingStatus(config.autoTradingCheckMinutes, forceAutoTradingRefresh);
+            // A disappeared MC process invalidates an earlier aggregate
+            // AutoTrading count. Bypass the normal cache once so the existing
+            // minimum-active check can distinguish an empty auxiliary instance
+            // (health WARNING) from a lost trading instance (overall CRITICAL).
+            const bool processSetChanged = result.status.multiChartsProcesses.processSetChanged;
+            const AutoTradingReadResult autoTrading = ReadAutoTradingStatus(
+                config.autoTradingCheckMinutes,
+                forceAutoTradingRefresh || processSetChanged);
             if (autoTrading.succeeded)
             {
                 result.status.lastAutoTradingRead = FormatLocalTime(autoTrading.lastSuccessfulRead);
@@ -1436,7 +1454,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 20, client.right - 28, 64 }, L"MCST-Watchdog 1.114-R38", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R39", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1448,7 +1466,7 @@ namespace
         }
 
         const int overallDotLeft = client.right - 350;
-        const int overallDotTop = 28;
+        const int overallDotTop = 16;
         BYTE overallAlpha = 255;
         if (status.overall == mcst::HealthState::Healthy)
         {
@@ -1458,11 +1476,11 @@ namespace
         }
         DrawModernIndicator(dc, overallDotLeft, overallDotTop, 27, status.overall, overallAlpha);
 
-        DrawTextSimple(dc, { client.right - 318, 20, client.right - 28, 64 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { client.right - 318, 8, client.right - 28, 52 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
         HPEN divider = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
         HGDIOBJ oldPen = SelectObject(dc, divider);
-        MoveToEx(dc, 28, 74, nullptr); LineTo(dc, client.right - 28, 74);
+        MoveToEx(dc, 28, 62, nullptr); LineTo(dc, client.right - 28, 62);
         SelectObject(dc, oldPen);
         DeleteObject(divider);
 
@@ -1470,11 +1488,12 @@ namespace
         const std::wstring updateText = status.lastSuccessfulUpdate.time_since_epoch().count() == 0
             ? L"Last successful system update: waiting for first successful update"
             : L"Last successful system update: " + FormatClock(status.lastSuccessfulUpdate) + L"  (" + FormatAge(status.lastSuccessfulUpdate) + L")" + mcSuffix;
-        DrawTextSimple(dc, { 28, 80, client.right - 250, 106 }, updateText, g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        DrawTextSimple(dc, { client.right - 245, 80, client.right - 28, 106 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 66, client.right - 250, 92 }, updateText, g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { client.right - 245, 66, client.right - 28, 92 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-        DrawTextSimple(dc, { 28, 108, client.right - 28, 138 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        int y = 144;
+        DrawTextSimple(dc, { 28, 94, client.right - 28, 124 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        int y = 130;
+        DrawStatusRow(dc, y, L"MultiCharts Health", status.multiChartsHealth, client.right); y += 34;
         DrawStatusRow(dc, y, L"Bridge", status.bridge, client.right); y += 34;
         DrawStatusRow(dc, y, L"Tracker Snapshot", status.trackerSnapshot, client.right); y += 34;
         DrawStatusRow(dc, y, L"AutoTrading", status.autoTrading, client.right); y += 34;
@@ -1554,10 +1573,10 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCheckDeveloperMode)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
             g_testEmailButton = CreateWindowW(L"BUTTON", L"Send Test Email", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 788, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTestEmail)), nullptr, nullptr);
-            g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 212, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
-            g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 314, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
-            g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 348, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
-            g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 382, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
+            g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 236, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
+            g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 338, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
+            g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 372, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
+            g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 406, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
             for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton, g_developerModeCheckbox, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton })
@@ -1744,7 +1763,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R38", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R39", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -1953,6 +1972,8 @@ namespace
                 const bool previouslyShowingStaleTrackerData = g_app.status.trackerDataStale;
                 const bool previouslyCriticalStaleTrackerData = g_app.status.trackerDataStaleCritical;
                 const mcst::HealthState previousTrackerState = g_app.status.trackerSnapshot.state;
+                const mcst::HealthState previousMultiChartsHealthState = g_app.status.multiChartsHealth.state;
+                const bool multiChartsHealthPreviouslyObserved = g_app.multiChartsHealthObserved;
                 const int active = result->status.autoTradingActive;
                 TrackerStatusSnapshot liveSnapshot = std::move(result->snapshot);
                 const bool liveTrackerSnapshotComplete = IsCompleteTrackerSnapshot(liveSnapshot);
@@ -2077,6 +2098,41 @@ namespace
                     MonitoringLogs(liveSnapshot), result->brokerAuthentication, g_app.config, monitorNow);
                 g_app.status.broker = brokerDecision.status;
                 RecalculateOverallStatus(g_app.status, g_app.config, true);
+
+                const bool multiChartsHealthChanged = !multiChartsHealthPreviouslyObserved ||
+                    g_app.status.multiChartsHealth.state != previousMultiChartsHealthState;
+                g_app.multiChartsHealthObserved = true;
+                if (multiChartsHealthChanged)
+                {
+                    const bool recovered = multiChartsHealthPreviouslyObserved &&
+                        g_app.status.multiChartsHealth.state == mcst::HealthState::Healthy;
+                    const std::wstring healthEvent = recovered
+                        ? L"MultiCharts health recovered: " + g_app.status.multiChartsHealth.value + L" - " + g_app.status.multiChartsHealth.detail
+                        : L"MultiCharts health changed to " +
+                            std::wstring(mcst::HealthStateText(g_app.status.multiChartsHealth.state)) + L": " +
+                            g_app.status.multiChartsHealth.value + L" - " + g_app.status.multiChartsHealth.detail;
+                    AddActivity(g_app.status, g_app.status.multiChartsHealth.state, healthEvent);
+
+                    const bool shouldEmail = g_app.config.emailEnabled &&
+                        !g_app.config.alertEmailTo.empty() &&
+                        !g_app.multiChartsHealthEmailInFlight &&
+                        (g_app.status.multiChartsHealth.state == mcst::HealthState::Attention ||
+                         g_app.status.multiChartsHealth.state == mcst::HealthState::Critical || recovered);
+                    if (shouldEmail)
+                    {
+                        g_app.multiChartsHealthEmailInFlight = true;
+                        g_app.lastAlert = FormatLocalTime(monitorNow) + L" - " + healthEvent;
+                        g_app.status.lastAlert = g_app.lastAlert;
+                        const std::wstring report = BuildStatusReport(g_app.status, g_app.snapshot);
+                        SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config,
+                            recovered ? L"MCST-Watchdog MULTICHARTS RECOVERED"
+                                      : L"MCST-Watchdog MULTICHARTS HEALTH ALERT",
+                            BuildAlertWithStatusReportHtml(healthEvent, report), true,
+                            recovered ? L"MultiCharts health recovery email"
+                                      : L"MultiCharts health alert email",
+                            true, g_app.config.alertEmailTo);
+                    }
+                }
                 if (brokerDecision.stateChanged)
                 {
                     if (brokerDecision.status.state == mcst::HealthState::Healthy)
@@ -2209,6 +2265,9 @@ namespace
                     g_app.scheduledStatusReportEmailInFlight = false;
                 else if (result->eventText == L"Heartbeat email")
                     g_app.heartbeatEmailInFlight = false;
+                else if (result->eventText == L"MultiCharts health alert email" ||
+                         result->eventText == L"MultiCharts health recovery email")
+                    g_app.multiChartsHealthEmailInFlight = false;
 
                 g_app.status.email = result->ok
                     ? mcst::MonitorStatus{ mcst::HealthState::Healthy, L"Ready", L"Last send succeeded" }
@@ -2271,7 +2330,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R38 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R39 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2342,7 +2401,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R38 - Compact P/L Totals",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R39 - MultiCharts Health",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);
