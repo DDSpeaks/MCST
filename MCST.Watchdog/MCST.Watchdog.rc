@@ -1,8 +1,8 @@
 ﻿#include <windows.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,114,43,0
- PRODUCTVERSION 1,114,43,0
+ FILEVERSION 1,114,44,0
+ PRODUCTVERSION 1,114,44,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -15,11 +15,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "MCST\0"
             VALUE "FileDescription", "MCST-Watchdog\0"
-            VALUE "FileVersion", "1.114-R43\0"
+            VALUE "FileVersion", "1.114-R44\0"
             VALUE "InternalName", "MCST-Watchdog.exe\0"
             VALUE "OriginalFilename", "MCST-Watchdog.exe\0"
             VALUE "ProductName", "MCST-Watchdog\0"
-            VALUE "ProductVersion", "1.114-R43\0"
+            VALUE "ProductVersion", "1.114-R44\0"
         END
     END
     BLOCK "VarFileInfo"

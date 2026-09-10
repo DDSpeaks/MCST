@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.114-R44
+
+- Raised the complete Developer tools panel by ten pixels, increasing its
+  visible separation from the production-button row from 8 to 18 pixels.
+- Added an activity-detail fallback: when an activity has no separate detail
+  field, its full description is also drawn in the wide right-hand detail
+  column while the compact left description remains available for scanning.
+- Retained the description, timestamp, and detail column alignment, uniform
+  20-pixel row height, text-only presentation, and bounded ten-event history.
+- Retained all R43 monitoring behavior, Tracker Bridge V178, and Protocol V2.
+
 ## 1.114-R43
 
 - Corrected the additional Latest Activity rows to use the exact same column

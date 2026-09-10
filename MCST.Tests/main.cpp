@@ -146,6 +146,7 @@ int RunLogicTests()
         developerToolbar.panelTop >= developerToolbar.labelTop ||
         developerToolbar.labelTop >= developerToolbar.top ||
         developerToolbar.top + developerToolbar.buttonHeight >= developerToolbar.panelBottom ||
+        700 - developerToolbar.panelBottom < 18 ||
         lastDeveloperButton.right > 920)
     {
         throw std::runtime_error("Developer toolbar is not visibly smaller or does not fit the Dashboard");

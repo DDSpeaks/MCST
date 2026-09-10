@@ -20,10 +20,10 @@ DeveloperToolbarLayout CalculateDeveloperToolbarLayout(int productionButtonY)
     DeveloperToolbarLayout layout;
     // Developer tools occupy their own labelled panel. The button row remains
     // clearly separated from the normal 34 px production controls below it.
-    layout.panelTop = productionButtonY - 64;
-    layout.panelBottom = productionButtonY - 8;
+    layout.panelTop = productionButtonY - 74;
+    layout.panelBottom = productionButtonY - 18;
     layout.labelTop = layout.panelTop + 6;
-    layout.top = productionButtonY - layout.buttonHeight - 12;
+    layout.top = productionButtonY - layout.buttonHeight - 22;
     return layout;
 }
 
