@@ -1468,34 +1468,22 @@ namespace
             RGB(58, 82, 116), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
-    void DrawActivityHistory(HDC dc, const std::vector<mcst::ActivityItem>& activity, int& y, int bottom, int width)
+    void DrawLatestActivityRows(HDC dc, const std::vector<mcst::ActivityItem>& activity,
+        int& y, int bottom, int width, int rowHeight)
     {
-        constexpr int rowHeight = 22;
-        constexpr int timeLeft = 34;
-        constexpr int timeRight = 86;
-        constexpr int indicatorLeft = 94;
-        constexpr int textLeft = 116;
-
-        if (activity.empty() || y + rowHeight > bottom)
-            return;
-
-        HPEN divider = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
-        HGDIOBJ oldPen = SelectObject(dc, divider);
-        MoveToEx(dc, 34, y + 6, nullptr);
-        LineTo(dc, width - 28, y + 6);
-        SelectObject(dc, oldPen);
-        DeleteObject(divider);
-        y += 14;
+        constexpr int labelLeft = 34;
+        constexpr int labelRight = 184;
+        constexpr int valueLeft = 194;
 
         for (const auto& item : activity)
         {
             if (y + rowHeight > bottom)
                 break;
 
-            DrawTextSimple(dc, { timeLeft, y, timeRight, y + rowHeight }, FormatClock(item.time),
-                g_bodyFont, RGB(104, 109, 118), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            DrawModernIndicator(dc, indicatorLeft, y + 6, 10, item.state);
-            DrawTextSimple(dc, { textLeft, y, width - 28, y + rowHeight }, item.text,
+            DrawTextSimple(dc, { labelLeft, y, labelRight, y + rowHeight }, item.text,
+                g_bodyFont, RGB(68, 73, 82),
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            DrawTextSimple(dc, { valueLeft, y, width / 2 - 10, y + rowHeight }, FormatLocalTime(item.time),
                 g_bodyFont, RGB(35, 39, 47),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             y += rowHeight;
@@ -1514,7 +1502,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R41", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R43", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1569,16 +1557,17 @@ namespace
         constexpr int latestLabelLeft = 34;
         constexpr int latestLabelRight = 184;
         constexpr int latestValueLeft = 194;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 22 }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 22 }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        y += 22;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 22 }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 22 }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 22 }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        y += 22;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 22 }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 22 }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 22 }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        constexpr int latestRowHeight = 20;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += latestRowHeight;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + latestRowHeight }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += latestRowHeight;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + latestRowHeight }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         const int productionButtonY = (std::max)(620, static_cast<int>(client.bottom) - 58);
 
@@ -1588,8 +1577,9 @@ namespace
         }
         else
         {
-            y += 22;
-            DrawActivityHistory(dc, status.activity, y, productionButtonY - 10, client.right);
+            y += latestRowHeight;
+            DrawLatestActivityRows(dc, status.activity, y, productionButtonY - 10,
+                client.right, latestRowHeight);
         }
     }
 
@@ -1834,7 +1824,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R41", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R43", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2401,7 +2391,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R41 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R43 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2472,7 +2462,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R41 - Adaptive Latest Activity",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R43 - Matched Latest Activity",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

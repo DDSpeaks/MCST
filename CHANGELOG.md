@@ -1,5 +1,30 @@
 ﻿# Changelog
 
+## 1.114-R43
+
+- Corrected the additional Latest Activity rows to use the exact same column
+  order as the original summary rows: description at left and full local date
+  and time in the adjacent value column.
+- Removed the remaining time-first presentation introduced in R41/R42.
+- Kept all activity rows text-only with the same font, colors, 20-pixel row
+  height, and no status indicators or separators.
+- Retained the bounded ten-event history and all R42 monitoring behavior.
+
+## 1.114-R42
+
+- Corrected the R41 activity-history presentation: the retained activity rows
+  no longer use System Status indicators, separators, or status-row styling.
+- Developer mode off now presents the existing bounded ten-event history as
+  uniform Latest Activity text rows with time on the left and event text on the
+  right.
+- Reduced every Latest Activity row to the same compact 20-pixel height and
+  shows as many complete rows as fit above the production buttons.
+- Developer mode on retains the compact three-row layout and its dedicated
+  Developer tools panel.
+- No monitoring, alerting, or stored event-history behavior was changed.
+- Retained all R41 and R40 monitoring behavior, Tracker Bridge V178, Protocol
+  V2, and the MIT license.
+
 ## 1.114-R41
 
 - Made Latest Activity adaptive to the available Dashboard space.

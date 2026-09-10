@@ -1,23 +1,23 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R41
+MCST-Watchdog version: 1.114-R43
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Adaptive Latest Activity event history
+Production change:     Matched Latest Activity column order
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R41 production method
+R43 production method
 ---------------------
 1. Keep MultiCharts Health first and retain the compact System Status layout.
-2. Expand Latest Activity with retained events when Developer mode is off.
+2. Show event description first and its full local timestamp second.
 3. Preserve the compact three-row summary when Developer tools are visible.
 4. Validate the source and build MCST.sln as Release x64 on windows-2022.
 5. Run MCST-LogicTests.exe before packaging or publishing anything.
 6. Retain R38's MIT-licensed publication package, Tracker Bridge V178, and
    Protocol V2 unchanged.
-7. Reuse the bounded ten-event history without adding polling or monitoring load.
+7. Keep System Status indicators and styling out of Latest Activity.
 
 Retained production behavior
 ----------------------------

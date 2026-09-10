@@ -3,7 +3,7 @@
 
 ## Beginner Developer Help build
 
-MCST-Watchdog 1.114-R41 retains R33's two-pane Win32 topic selector backed by
+MCST-Watchdog 1.114-R43 retains R33's two-pane Win32 topic selector backed by
 `DeveloperHelpContent` and adds a persistent operating-boundary notice. It
 states that these controls are normally used only after a MultiCharts update,
 after an exact Charting.dll or ATOnPTracker.dll fingerprint change, or at a
@@ -22,9 +22,9 @@ not perform the user's AutoTrading change.
 
 ## Status Report alignment retained
 
-MCST-Watchdog 1.114-R41 places `MultiCharts Health` first, uses 30-pixel compact status-row spacing, and separates Developer tools into a labelled read-only diagnostics panel. Latest Activity uses compact 22-pixel rows and, when Developer mode is off, fills the available space above the production buttons with the newest entries from the existing bounded ten-event history. When Developer mode is on, the original three-row summary remains compact. It retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged report component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
+MCST-Watchdog 1.114-R43 places `MultiCharts Health` first, uses 30-pixel compact status-row spacing, and separates Developer tools into a labelled read-only diagnostics panel. Latest Activity uses uniform 20-pixel text rows and, when Developer mode is off, fills the available space above the production buttons with as many complete entries as fit from the existing bounded ten-event history. Every additional row follows the original summary-row order: event description at left and full local timestamp in the adjacent value column. Activity rows use no health-state indicators or System Status styling. When Developer mode is on, the original three-row summary remains compact. It retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged report component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
 
-R41 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177's progressive CATPTTabView recovery and exact scan diagnostics remain intact; V178 moves the tier decision to the shared, testable `TrackerRecoveryPolicy.h`. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+R43 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177's progressive CATPTTabView recovery and exact scan diagnostics remain intact; V178 moves the tier decision to the shared, testable `TrackerRecoveryPolicy.h`. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
@@ -32,7 +32,7 @@ Recovery remains read-only. Bridge first uses the exact-profile locator, then su
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
-R41 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. Their third/comment cells remain empty so row counts and currency explanations cannot widen the report. There is no combined monthly account total.
+R43 retains the nine-column order and all R30 report formatting. Total Open P/L and each visible account's current-month Realized P/L place their labels in the Symbol column and amounts in the Open P/L column. Their third/comment cells remain empty so row counts and currency explanations cannot widen the report. There is no combined monthly account total.
 
 Identity and Latest Activity rows calculate one shared label width per section.
 System Status calculates common Name, State, Value, and Detail widths. Accounts

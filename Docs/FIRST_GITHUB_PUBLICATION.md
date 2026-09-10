@@ -41,21 +41,21 @@ run must:
 
 Download and inspect that artifact before tagging the release.
 
-## 4. Publish R41
+## 4. Publish R43
 
 From a terminal opened in the repository root:
 
 ```powershell
-git tag -a v1.114-R41 -m "MCST-Watchdog 1.114-R41"
-git push origin v1.114-R41
+git tag -a v1.114-R43 -m "MCST-Watchdog 1.114-R43"
+git push origin v1.114-R43
 ```
 
 Do not create the Release manually in the GitHub web interface. The tag starts
 the validated workflow, which creates the Release and attaches:
 
 ```text
-MCST-Watchdog-1.114-R41-Windows-x64.zip
-MCST-Watchdog-1.114-R41-SHA256SUMS.txt
+MCST-Watchdog-1.114-R43-Windows-x64.zip
+MCST-Watchdog-1.114-R43-SHA256SUMS.txt
 ```
 
 ## 5. Confirm the MIT License

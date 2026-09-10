@@ -1,13 +1,15 @@
 ﻿# MCST
 
-## Package: 1.114-R41 Adaptive Latest Activity
+## Package: 1.114-R43 Matched Latest Activity Columns
 
-This source package makes Latest Activity adapt to the available Dashboard
-space. With Developer mode off, the newest retained events fill the free area
-above the main production buttons. With Developer mode on, the compact
-three-row summary remains in place and the labelled diagnostics panel keeps its
-dedicated space. The implementation reuses the existing bounded ten-event
-history and adds no monitoring or polling load.
+This source package makes every Latest Activity row follow the original
+summary-row structure: description on the left and full local date and time in
+the adjacent value column. The existing bounded ten-event history remains
+text-only, with no status indicators or separator styling. All Latest Activity
+rows use the same compact 20-pixel height, and as many complete rows as fit are
+shown above the production buttons. Developer mode retains the compact
+three-row summary and its dedicated diagnostics panel. Monitoring behavior is
+unchanged.
 
 The new first dashboard row reports process count, UI responsiveness, the
 visible `q / s` processing backlog, per-process CPU use, private memory,
@@ -19,7 +21,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R41**
+- MCST-Watchdog: **1.114-R43**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -32,12 +34,12 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-R41 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+R43 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.114-R41` runs the Windows Release x64 build, executes
+Pushing tag `v1.114-R43` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

@@ -1,18 +1,20 @@
-# MCST 1.114-R41 GitHub Publication-Ready Package
+# MCST 1.114-R43 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
 
-## Adaptive Latest Activity
+## Matched Latest Activity columns
 
 - When Developer mode is off, Latest Activity uses the available space above
-  the main production buttons to show the newest retained activity events.
-- Each added row shows the event time, health-state indicator, and concise
-  event text, with safe ellipsis handling for long messages.
+  the main production buttons to show the existing bounded ten-event history.
+- Every row uses the original compact text layout: event description on the
+  left and full local date and time in the adjacent value column.
+- Removed the status-colored indicators and separator styling mistakenly used
+  for these activity rows in R41.
 - When Developer mode is on, the existing three compact summary rows remain
   unchanged and the Developer tools panel retains its dedicated space.
-- The existing bounded ten-event history is reused, so the change adds no new
-  polling, background work, or MultiCharts monitoring load.
+- The existing history is reused, so the change adds no new polling,
+  background work, or MultiCharts monitoring load.
 
 ## Retained refined Dashboard layout
 
@@ -85,7 +87,7 @@ Bridge protocol: V2
   rejecting every active `.ini`, credential, test executable, compiler output,
   and source file.
 - Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
-  Actions permissions, the non-publishing test build, the exact R41 tag,
+  Actions permissions, the non-publishing test build, the exact R43 tag,
   Release verification, and MIT License verification.
 
 The following R36 GitHub build and Release automation remains unchanged.
@@ -97,7 +99,7 @@ The following R36 GitHub build and Release automation remains unchanged.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.114-R41` creates a GitHub Release from
+- Pushing the exact tag `v1.114-R43` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages

@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.114-R41'
+$currentVersion = '1.114-R43'
 $currentBridgeBuild = 178
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -38,7 +38,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_R41.txt',
+    'BUILD_VALIDATION_R43.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
     'Examples\MCST-Watchdog.ini.example',
@@ -176,13 +176,16 @@ if ($watchdogMain -notmatch 'kCheckDeveloperMode' -or
     throw 'Persistent Dashboard Developer mode checkbox is missing.'
 }
 if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
-    $watchdogMain -notmatch 'DrawActivityHistory' -or
+    $watchdogMain -notmatch 'DrawLatestActivityRows' -or
     $watchdogMain -notmatch 'status.activity' -or
+    $watchdogMain -notmatch 'constexpr int latestRowHeight = 20' -or
+    $watchdogMain -notmatch 'labelRight, y \+ rowHeight \}, item.text' -or
+    $watchdogMain -notmatch 'width / 2 - 10, y \+ rowHeight \}, FormatLocalTime\(item.time\)' -or
     $watchdogMain -notmatch 'productionButtonY - 10' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
-    throw 'R41 adaptive activity history, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+    throw 'R43 matched Latest Activity columns, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
 $developerHelp = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
 foreach ($helpTopic in @('AT Start', 'AT Capture', 'AT Finish', 'Tracker Capture', 'Position CCY', 'Open Compat', 'Reload Compat')) {
@@ -404,9 +407,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,114,41,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,41,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R41.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,114,43,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,114,43,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.114-R43.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -689,7 +692,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v4',
     'microsoft/setup-msbuild@v2',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.114-R41-Windows-x64',
+    'MCST-Watchdog-1.114-R43-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -705,7 +708,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.114-R41',
+    '1.114-R43',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',
