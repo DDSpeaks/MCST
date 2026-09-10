@@ -142,7 +142,10 @@ int RunLogicTests()
     }
     const DeveloperToolbarLayout developerToolbar = CalculateDeveloperToolbarLayout(700);
     const RECT lastDeveloperButton = CalculateDeveloperToolbarButtonRect(developerToolbar, 7);
-    if (developerToolbar.buttonHeight >= 34 || developerToolbar.buttonHeight > 20 ||
+    if (developerToolbar.buttonHeight >= 34 || developerToolbar.buttonHeight > 24 ||
+        developerToolbar.panelTop >= developerToolbar.labelTop ||
+        developerToolbar.labelTop >= developerToolbar.top ||
+        developerToolbar.top + developerToolbar.buttonHeight >= developerToolbar.panelBottom ||
         lastDeveloperButton.right > 920)
     {
         throw std::runtime_error("Developer toolbar is not visibly smaller or does not fit the Dashboard");

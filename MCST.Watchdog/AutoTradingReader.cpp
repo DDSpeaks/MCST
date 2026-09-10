@@ -351,7 +351,7 @@ namespace
             result.lastSuccessfulRead = result.lastAttempt;
         std::wostringstream diagnostic;
         diagnostic << L"Processes " << result.processesScanned
-                   << L", strategy objects " << result.strategyObjectsFound
+                   << L", charts " << result.strategyObjectsFound
                    << L", active " << result.activeStrategies
                    << L", read failures " << result.readFailures;
         if (processIds.empty())
@@ -361,7 +361,7 @@ namespace
         else if (!anyProfileMatched)
             diagnostic << L". " << compatibilityFailure;
         else if (result.strategyObjectsFound == 0)
-            diagnostic << L". The selected compatibility profile found no strategy objects.";
+            diagnostic << L". The selected compatibility profile found no charts.";
         if (!result.compatibilityProfile.empty())
             diagnostic << L". Profile: " << result.compatibilityProfile;
         result.diagnostic = diagnostic.str();
@@ -1076,7 +1076,7 @@ bool RunAutoTradingToggleVerification(const std::wstring& reportPath, const std:
         out << L"MCST-Watchdog AutoTrading Toggle Verification 0.573\n"
             << L"=====================================================\n\n"
             << L"BASELINE CAPTURED\n\n"
-            << L"Expected current state: 19 strategy objects, 18 ON, 1 OFF.\n"
+            << L"Expected current state: 19 charts, 18 ON, 1 OFF.\n"
             << L"Now turn exactly ONE currently active strategy AutoTrading OFF.\n"
             << L"Do not close charts or MultiCharts. Then press 'AT Compare' once.\n\n";
         for (SIZE_T i = 0; i < current.size(); ++i)

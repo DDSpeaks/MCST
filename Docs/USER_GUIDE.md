@@ -15,6 +15,17 @@ The overall status summarizes the subsystem rows. Green/OK represents a verified
 
 The Dashboard uses **Latest Activity** as its single activity summary. There is no separate Recent Activity section.
 
+System Status uses compact but readable rows. Latest Activity is intentionally
+tighter because its timestamps and counters are short. When Developer mode is
+enabled, its controls appear in a separate pale blue-grey panel labelled
+**DEVELOPER TOOLS · READ-ONLY DIAGNOSTICS** above the normal production buttons.
+The panel is visually distinct because these controls are maintenance and
+compatibility tools rather than normal monitoring actions.
+
+AutoTrading counts are described to the user as **charts**. The source code may
+still use the word `object` where it specifically refers to an internal C++
+memory object rather than a user-visible chart.
+
 ## MultiCharts Health
 
 The first status row covers every running MultiCharts desktop process, including
@@ -166,10 +177,10 @@ enabled=false
 The Dashboard also shows an unchecked **Developer mode** box at the right of
 **Reload Settings**. Check it to show the compact research toolbar; clear it to
 hide the toolbar again. The choice is saved to `[Developer] enabled` in
-`MCST-Watchdog.ini`. The research buttons are only 20 pixels high, clearly
+`MCST-Watchdog.ini`. The research buttons are only 22 pixels high, clearly
 smaller than the normal 34-pixel production buttons.
 
-When enabled, the compact Developer toolbar contains the following controls.
+When enabled, the labelled Developer toolbar contains the following controls.
 The **Help** button opens a two-pane beginner guide. Choose a button name on
 the left; the right pane then explains its goal, preparation, exact action,
 success result, next step, failure handling, and safety boundary.

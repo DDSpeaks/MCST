@@ -301,7 +301,7 @@ namespace
     {
         RECT client{};
         GetClientRect(hwnd, &client);
-        const int y = (std::max)(590, static_cast<int>(client.bottom) - 58);
+        const int y = (std::max)(620, static_cast<int>(client.bottom) - 58);
         if (g_refreshButton) MoveWindow(g_refreshButton, 28, y, 110, 34, TRUE);
         if (g_reportButton) MoveWindow(g_reportButton, 148, y, 120, 34, TRUE);
         if (g_openFolderButton) MoveWindow(g_openFolderButton, 278, y, 120, 34, TRUE);
@@ -335,10 +335,10 @@ namespace
         }
         const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
         const int menuX = rowLayout.overflowButtonX;
-        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 236, 30, 24, TRUE);
-        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 338, 30, 24, TRUE);
-        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 372, 30, 24, TRUE);
-        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 406, 30, 24, TRUE);
+        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 220, 30, 24, TRUE);
+        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 310, 30, 24, TRUE);
+        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 340, 30, 24, TRUE);
+        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 370, 30, 24, TRUE);
     }
 
     void UpdateDeveloperControlVisibility(HWND hwnd)
@@ -358,6 +358,7 @@ namespace
             SendMessageW(g_developerModeCheckbox, BM_SETCHECK,
                 g_app.config.developerModeEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
         LayoutButtons(hwnd);
+        InvalidateRect(hwnd, nullptr, FALSE);
     }
 
     struct StatusSettingsDialogState
@@ -915,7 +916,7 @@ namespace
                     belowMinimum ? mcst::HealthState::Critical : mcst::HealthState::Healthy,
                     std::to_wstring(autoTrading.activeStrategies) + L" Active",
                     L"Minimum required " + std::to_wstring(config.autoTradingMinimum) +
-                        L" - Objects found " + std::to_wstring(autoTrading.strategyObjectsFound) +
+                        L" - Charts found " + std::to_wstring(autoTrading.strategyObjectsFound) +
                         (result.status.multiChartsVersion.empty() ? L"" : L" - MC " + result.status.multiChartsVersion) +
                         (autoTrading.compatibilityProfile.empty() ? L"" : L" - " + autoTrading.compatibilityProfile)
                 };
@@ -1432,14 +1433,73 @@ namespace
     void DrawStatusRow(HDC dc, int y, const wchar_t* label, const mcst::MonitorStatus& item, int width)
     {
         const DashboardRowLayout layout = CalculateDashboardRowLayout(width);
-        DrawModernIndicator(dc, layout.indicatorX, y + 7, 17, item.state);
+        DrawModernIndicator(dc, layout.indicatorX, y + 6, 17, item.state);
 
-        DrawTextSimple(dc, { layout.labelLeft, y, layout.labelRight, y + 32 }, label, g_labelFont, RGB(28, 31, 36), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { layout.stateLeft, y, layout.stateRight, y + 32 }, mcst::HealthStateText(item.state), g_statusFont, StateColor(item.state), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { layout.descriptionLeft, y, layout.descriptionRight, y + 32 },
+        DrawTextSimple(dc, { layout.labelLeft, y, layout.labelRight, y + 28 }, label, g_labelFont, RGB(28, 31, 36), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { layout.stateLeft, y, layout.stateRight, y + 28 }, mcst::HealthStateText(item.state), g_statusFont, StateColor(item.state), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { layout.descriptionLeft, y, layout.descriptionRight, y + 28 },
             item.value + (item.detail.empty() ? L"" : L"  -  " + item.detail),
             g_bodyFont, RGB(45, 49, 56),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+
+    void DrawDeveloperToolsPanel(HDC dc, int clientWidth, int productionButtonY)
+    {
+        const DeveloperToolbarLayout layout = CalculateDeveloperToolbarLayout(productionButtonY);
+        const RECT panel = { 20, layout.panelTop, clientWidth - 20, layout.panelBottom };
+
+        HBRUSH panelBrush = CreateSolidBrush(RGB(244, 248, 253));
+        HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(187, 203, 222));
+        HGDIOBJ oldBrush = SelectObject(dc, panelBrush);
+        HGDIOBJ oldPen = SelectObject(dc, borderPen);
+        RoundRect(dc, panel.left, panel.top, panel.right, panel.bottom, 8, 8);
+        SelectObject(dc, oldPen);
+        SelectObject(dc, oldBrush);
+        DeleteObject(borderPen);
+        DeleteObject(panelBrush);
+
+        RECT accent = { panel.left, panel.top + 7, panel.left + 4, panel.bottom - 7 };
+        HBRUSH accentBrush = CreateSolidBrush(RGB(72, 111, 165));
+        FillRect(dc, &accent, accentBrush);
+        DeleteObject(accentBrush);
+
+        DrawTextSimple(dc, { 32, layout.labelTop, clientWidth - 32, layout.labelTop + 16 },
+            L"DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS", g_developerButtonFont,
+            RGB(58, 82, 116), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+
+    void DrawActivityHistory(HDC dc, const std::vector<mcst::ActivityItem>& activity, int& y, int bottom, int width)
+    {
+        constexpr int rowHeight = 22;
+        constexpr int timeLeft = 34;
+        constexpr int timeRight = 86;
+        constexpr int indicatorLeft = 94;
+        constexpr int textLeft = 116;
+
+        if (activity.empty() || y + rowHeight > bottom)
+            return;
+
+        HPEN divider = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
+        HGDIOBJ oldPen = SelectObject(dc, divider);
+        MoveToEx(dc, 34, y + 6, nullptr);
+        LineTo(dc, width - 28, y + 6);
+        SelectObject(dc, oldPen);
+        DeleteObject(divider);
+        y += 14;
+
+        for (const auto& item : activity)
+        {
+            if (y + rowHeight > bottom)
+                break;
+
+            DrawTextSimple(dc, { timeLeft, y, timeRight, y + rowHeight }, FormatClock(item.time),
+                g_bodyFont, RGB(104, 109, 118), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            DrawModernIndicator(dc, indicatorLeft, y + 6, 10, item.state);
+            DrawTextSimple(dc, { textLeft, y, width - 28, y + rowHeight }, item.text,
+                g_bodyFont, RGB(35, 39, 47),
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            y += rowHeight;
+        }
     }
 
     void PaintDashboard(HWND hwnd, HDC dc)
@@ -1454,7 +1514,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R39", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R41", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1492,34 +1552,45 @@ namespace
         DrawTextSimple(dc, { client.right - 245, 66, client.right - 28, 92 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
         DrawTextSimple(dc, { 28, 94, client.right - 28, 124 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        int y = 130;
-        DrawStatusRow(dc, y, L"MultiCharts Health", status.multiChartsHealth, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Bridge", status.bridge, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Tracker Snapshot", status.trackerSnapshot, client.right); y += 34;
-        DrawStatusRow(dc, y, L"AutoTrading", status.autoTrading, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Broker", status.broker, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Recent Logs", status.recentLogs, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Status Reports", status.statusReports, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Email", status.email, client.right); y += 34;
-        DrawStatusRow(dc, y, L"Heartbeat", status.heartbeat, client.right); y += 46;
+        int y = 128;
+        DrawStatusRow(dc, y, L"MultiCharts Health", status.multiChartsHealth, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Bridge", status.bridge, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Tracker Snapshot", status.trackerSnapshot, client.right); y += 30;
+        DrawStatusRow(dc, y, L"AutoTrading", status.autoTrading, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Broker", status.broker, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Recent Logs", status.recentLogs, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Status Reports", status.statusReports, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Email", status.email, client.right); y += 30;
+        DrawStatusRow(dc, y, L"Heartbeat", status.heartbeat, client.right); y += 36;
 
-        DrawTextSimple(dc, { 28, y, client.right - 28, y + 30 }, L"LATEST ACTIVITY", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        y += 34;
+        DrawTextSimple(dc, { 28, y, client.right - 28, y + 24 }, L"LATEST ACTIVITY", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += 26;
         const int middle = client.right / 2;
         constexpr int latestLabelLeft = 34;
         constexpr int latestLabelRight = 184;
         constexpr int latestValueLeft = 194;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        y += 32;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 28 }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        y += 32;
-        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 28 }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 28 }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 28 }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        y += 44;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 22 }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 22 }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += 22;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 22 }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 22 }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 22 }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += 22;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + 22 }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + 22 }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { middle + 10, y, client.right - 28, y + 22 }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        const int productionButtonY = (std::max)(620, static_cast<int>(client.bottom) - 58);
+
+        if (g_app.config.developerModeEnabled)
+        {
+            DrawDeveloperToolsPanel(dc, client.right, productionButtonY);
+        }
+        else
+        {
+            y += 22;
+            DrawActivityHistory(dc, status.activity, y, productionButtonY - 10, client.right);
+        }
     }
 
     HFONT CreateUiFont(int pointSize, int weight, const wchar_t* faceName, DWORD pitchAndFamily = DEFAULT_PITCH)
@@ -1546,7 +1617,7 @@ namespace
         g_labelFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
         g_statusFont = CreateUiFont(10, FW_SEMIBOLD, L"Segoe UI");
         g_monoFont = CreateUiFont(10, FW_NORMAL, L"Consolas", FIXED_PITCH | FF_MODERN);
-        g_developerButtonFont = CreateUiFont(8, FW_NORMAL, L"Segoe UI");
+        g_developerButtonFont = CreateUiFont(9, FW_SEMIBOLD, L"Segoe UI");
     }
 
     LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1573,10 +1644,10 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCheckDeveloperMode)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
             g_testEmailButton = CreateWindowW(L"BUTTON", L"Send Test Email", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 788, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTestEmail)), nullptr, nullptr);
-            g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 236, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
-            g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 338, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
-            g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 372, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
-            g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 406, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
+            g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 220, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
+            g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 310, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
+            g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 340, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
+            g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 370, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
             for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton, g_developerModeCheckbox, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton })
@@ -1608,7 +1679,7 @@ namespace
         {
             auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
             info->ptMinTrackSize.x = 920;
-            info->ptMinTrackSize.y = 680;
+            info->ptMinTrackSize.y = 720;
             return 0;
         }
 
@@ -1763,7 +1834,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R39", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R41", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2330,7 +2401,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R39 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R41 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2401,7 +2472,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R39 - MultiCharts Health",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R41 - Adaptive Latest Activity",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

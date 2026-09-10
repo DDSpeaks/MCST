@@ -18,9 +18,12 @@ DashboardRowLayout CalculateDashboardRowLayout(int clientWidth)
 DeveloperToolbarLayout CalculateDeveloperToolbarLayout(int productionButtonY)
 {
     DeveloperToolbarLayout layout;
-    // Keep an 8 px visual gap between the compact research toolbar and
-    // the normal 34 px production button row.
-    layout.top = productionButtonY - layout.buttonHeight - 8;
+    // Developer tools occupy their own labelled panel. The button row remains
+    // clearly separated from the normal 34 px production controls below it.
+    layout.panelTop = productionButtonY - 64;
+    layout.panelBottom = productionButtonY - 8;
+    layout.labelTop = layout.panelTop + 6;
+    layout.top = productionButtonY - layout.buttonHeight - 12;
     return layout;
 }
 

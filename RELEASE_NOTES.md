@@ -1,7 +1,33 @@
-# MCST 1.114-R39 GitHub Publication-Ready Package
+# MCST 1.114-R41 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
+
+## Adaptive Latest Activity
+
+- When Developer mode is off, Latest Activity uses the available space above
+  the main production buttons to show the newest retained activity events.
+- Each added row shows the event time, health-state indicator, and concise
+  event text, with safe ellipsis handling for long messages.
+- When Developer mode is on, the existing three compact summary rows remain
+  unchanged and the Developer tools panel retains its dedicated space.
+- The existing bounded ten-event history is reused, so the change adds no new
+  polling, background work, or MultiCharts monitoring load.
+
+## Retained refined Dashboard layout
+
+- Reduced System Status row spacing slightly while keeping every status line
+  readable and aligned.
+- Substantially reduced Latest Activity row spacing.
+- Moved Developer controls into a dedicated pale blue-grey panel labelled
+  `DEVELOPER TOOLS · READ-ONLY DIAGNOSTICS`.
+- Increased Developer button height and font slightly while keeping them
+  visually distinct from normal production controls.
+- Raised the minimum/default window height so persisted undersized layouts are
+  normalized and Developer controls cannot cover activity text.
+- Replaced user-facing AutoTrading `object/objects` wording with
+  `chart/charts`. Internal C++ object terminology remains unchanged where it
+  refers to actual memory objects.
 
 ## MultiCharts Health
 
@@ -59,7 +85,7 @@ Bridge protocol: V2
   rejecting every active `.ini`, credential, test executable, compiler output,
   and source file.
 - Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
-  Actions permissions, the non-publishing test build, the exact R39 tag,
+  Actions permissions, the non-publishing test build, the exact R41 tag,
   Release verification, and MIT License verification.
 
 The following R36 GitHub build and Release automation remains unchanged.
@@ -71,7 +97,7 @@ The following R36 GitHub build and Release automation remains unchanged.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.114-R39` creates a GitHub Release from
+- Pushing the exact tag `v1.114-R41` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages
@@ -121,7 +147,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
   beginner instructions fail the regression test.
 - A default-off **Developer mode** checkbox now appears to the right of Reload
   Settings and saves `[Developer] enabled`. Research buttons are visibly
-  shorter than the normal production controls (20 pixels versus 34 pixels).
+  shorter than the normal production controls (22 pixels versus 34 pixels).
 
 ## More visible Status Report indicators
 

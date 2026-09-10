@@ -82,7 +82,7 @@ struct AppConfig
     int windowLeft = -1;
     int windowTop = -1;
     int windowWidth = 980;
-    int windowHeight = 790;
+    int windowHeight = 810;
     bool windowMaximized = false;
 
     std::wstring reportPath;

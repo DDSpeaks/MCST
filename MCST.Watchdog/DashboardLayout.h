@@ -33,9 +33,12 @@ DashboardRowLayout CalculateDashboardRowLayout(int clientWidth);
 struct DeveloperToolbarLayout
 {
     int left = 28;
+    int panelTop = 0;
+    int panelBottom = 0;
+    int labelTop = 0;
     int top = 0;
     int buttonWidth = 104;
-    int buttonHeight = 20;
+    int buttonHeight = 22;
     int horizontalGap = 6;
 };
 

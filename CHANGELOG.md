@@ -1,5 +1,32 @@
 ﻿# Changelog
 
+## 1.114-R41
+
+- Made Latest Activity adaptive to the available Dashboard space.
+- When Developer mode is off, the panel now fills the space above the main
+  production buttons with the newest retained activity events.
+- When Developer mode is on, the existing compact three-row summary remains
+  unchanged so the read-only Developer tools panel keeps its dedicated space.
+- Reused the existing bounded ten-event history; no new polling, background
+  work, or monitoring load was added.
+- Retained all R40 Dashboard refinements, MultiCharts Health behavior, Tracker
+  Bridge V178, Protocol V2, and the MIT license.
+
+## 1.114-R40
+
+- Tightened Dashboard System Status spacing and substantially reduced Latest
+  Activity row spacing.
+- Added a dedicated pale blue-grey `DEVELOPER TOOLS · READ-ONLY DIAGNOSTICS`
+  panel so Developer controls cannot overlap operational text.
+- Increased Developer button height and font slightly while retaining a clear
+  distinction from normal production controls.
+- Increased the minimum and default Dashboard height for a more comfortable
+  layout and normalized previously undersized saved window heights.
+- Replaced user-facing AutoTrading object terminology with chart/charts while
+  preserving precise internal memory-object names in the source.
+- Retained all R39 MultiCharts Health behavior, Tracker Bridge V178, Protocol
+  V2, and the MIT license.
+
 ## 1.114-R39
 
 - Added lightweight health monitoring for every running MultiCharts desktop
