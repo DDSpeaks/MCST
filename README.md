@@ -1,8 +1,13 @@
 ﻿# MCST
 
-## Package: 1.114-R45 Aligned Activity Details
+## Package: 1.114-R46 Deduplicated and Aligned Activity
 
-This source package aligns the Latest Activity detail column to the exact same
+This source package fixes duplicate Latest Activity events while preserving
+genuine events created during an in-flight refresh. Exact duplicates are
+identified by timestamp, state, and text; the resulting history is sorted
+newest-first and limited to ten entries. The Latest Activity timestamp column
+now uses the same starting coordinate as the System Status state column. The
+Latest Activity detail column remains aligned to the exact same
 starting coordinate as the System Status description column. The shared
 alignment applies to Accounts/Uptime details and retained activity-history
 descriptions. It retains the original Latest Activity structure: a compact
@@ -24,7 +29,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R45**
+- MCST-Watchdog: **1.114-R46**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -37,12 +42,12 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-R45 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+R46 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.114-R45` runs the Windows Release x64 build, executes
+Pushing tag `v1.114-R46` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

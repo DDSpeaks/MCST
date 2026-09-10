@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="../MCST.Shared/TrackerRecoveryPolicy.h" />
+    <ClInclude Include="../MCST.Shared/ActivityHistory.h" />
     <ClInclude Include="../MCST.Watchdog/DeveloperHelpContent.h" />
     <ClInclude Include="../MCST.Watchdog/DashboardLayout.h" />
   </ItemGroup>

@@ -1,9 +1,16 @@
-# MCST 1.114-R45 GitHub Publication-Ready Package
+# MCST 1.114-R46 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
 
-## Aligned Activity details
+## Deduplicated and fully aligned Latest Activity
+
+- Fixed repeated activity groups caused by merging an already-carried history
+  back into itself after each refresh.
+- Exact duplicates are removed by timestamp, state, and text while genuine
+  events created during an in-flight refresh are retained.
+- Aligned the Latest Activity timestamp column with the System Status state
+  column using the same shared Dashboard layout coordinate.
 
 - Aligned the Latest Activity detail column with the System Status description
   column by using the same shared Dashboard layout coordinate.
@@ -96,7 +103,7 @@ Bridge protocol: V2
   rejecting every active `.ini`, credential, test executable, compiler output,
   and source file.
 - Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
-  Actions permissions, the non-publishing test build, the exact R45 tag,
+  Actions permissions, the non-publishing test build, the exact R46 tag,
   Release verification, and MIT License verification.
 
 The following R36 GitHub build and Release automation remains unchanged.
@@ -108,7 +115,7 @@ The following R36 GitHub build and Release automation remains unchanged.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.114-R45` creates a GitHub Release from
+- Pushing the exact tag `v1.114-R46` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages

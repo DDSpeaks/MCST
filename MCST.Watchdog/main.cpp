@@ -22,6 +22,7 @@
 #include "DeveloperHelpContent.h"
 #include "MultiChartsVersionDetector.h"
 #include "MultiChartsHealthMonitor.h"
+#include "../MCST.Shared/ActivityHistory.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 
@@ -1473,8 +1474,9 @@ namespace
     {
         constexpr int labelLeft = 34;
         constexpr int labelRight = 184;
-        constexpr int valueLeft = 194;
-        const int detailLeft = CalculateDashboardRowLayout(width).descriptionLeft;
+        const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(width);
+        const int valueLeft = rowLayout.stateLeft;
+        const int detailLeft = rowLayout.descriptionLeft;
 
         for (const auto& item : activity)
         {
@@ -1506,7 +1508,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R45", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.114-R46", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1560,9 +1562,10 @@ namespace
         const int middle = client.right / 2;
         constexpr int latestLabelLeft = 34;
         constexpr int latestLabelRight = 184;
-        constexpr int latestValueLeft = 194;
         constexpr int latestRowHeight = 20;
-        const int latestDetailLeft = CalculateDashboardRowLayout(client.right).descriptionLeft;
+        const DashboardRowLayout latestLayout = CalculateDashboardRowLayout(client.right);
+        const int latestValueLeft = latestLayout.stateLeft;
+        const int latestDetailLeft = latestLayout.descriptionLeft;
         DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += latestRowHeight;
@@ -1829,7 +1832,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R45", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.114-R46", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2310,11 +2313,7 @@ namespace
                     }
                 }
 
-                for (const auto& old : previousActivity)
-                {
-                    if (g_app.status.activity.size() >= 10) break;
-                    g_app.status.activity.push_back(old);
-                }
+                mcst::MergeActivityHistory(g_app.status.activity, previousActivity, 10);
                 g_app.refreshRunning = false;
             }
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2396,7 +2395,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R45 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.114-R46 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2467,7 +2466,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.114-R45 - Aligned Activity Details",
+            0, kWindowClass, L"MCST-Watchdog 1.114-R46 - Deduplicated Activity",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

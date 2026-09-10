@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.114-R46
+
+- Fixed activity-history duplication caused by appending `previousActivity`
+  after the same history had already been carried through `CollectStatus`.
+- Added a tested merge that removes exact duplicates by timestamp, state, and
+  text, retains genuine events created during an in-flight refresh, restores
+  newest-first order, and limits the history to ten entries.
+- Aligned the Latest Activity timestamp column with the System Status state
+  column through the shared `DashboardRowLayout.stateLeft` coordinate.
+- Retained the R45 shared detail-column alignment and all R44 panel spacing.
+
 ## 1.114-R45
 
 - Aligned the Latest Activity detail column to the exact same

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <ctime>
 #include <iomanip>
@@ -6,7 +7,9 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 #include "../MCST.Shared/MCBridgeProtocol.h"
+#include "../MCST.Shared/ActivityHistory.h"
 #include "../MCST.Shared/TrackerRecoveryPolicy.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 #include "../MCST.Watchdog/BrokerMonitor.h"
@@ -100,6 +103,26 @@ namespace
 
 int RunLogicTests()
 {
+    const auto activityBaseTime = std::chrono::system_clock::now();
+    std::vector<mcst::ActivityItem> currentActivity = {
+        { activityBaseTime + std::chrono::seconds(2), mcst::HealthState::Healthy, L"AutoTrading read: 75 active" },
+        { activityBaseTime, mcst::HealthState::Healthy, L"Broker connected" },
+        { activityBaseTime, mcst::HealthState::Healthy, L"Broker connected" }
+    };
+    const std::vector<mcst::ActivityItem> previousActivity = {
+        { activityBaseTime + std::chrono::seconds(3), mcst::HealthState::Attention, L"Concurrent event" },
+        { activityBaseTime + std::chrono::seconds(2), mcst::HealthState::Healthy, L"AutoTrading read: 75 active" },
+        { activityBaseTime, mcst::HealthState::Healthy, L"Broker connected" }
+    };
+    mcst::MergeActivityHistory(currentActivity, previousActivity, 10);
+    if (currentActivity.size() != 3 ||
+        currentActivity[0].text != L"Concurrent event" ||
+        currentActivity[1].text != L"AutoTrading read: 75 active" ||
+        currentActivity[2].text != L"Broker connected")
+    {
+        throw std::runtime_error("Activity history merge did not remove duplicates or retain chronological order");
+    }
+
     static_assert(sizeof(mcbridge::MessageHeader) == 20);
     static_assert(std::is_default_constructible_v<TrackerStatusSnapshot>);
 
