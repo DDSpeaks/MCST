@@ -1,18 +1,18 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R44
+MCST-Watchdog version: 1.114-R45
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Activity detail fallback and Developer panel spacing
+Production change:     Aligned Latest Activity detail column
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R44 production method
+R45 production method
 ---------------------
 1. Keep MultiCharts Health first and retain the compact System Status layout.
 2. Show event description first and its full local timestamp second.
-3. Repeat the description in the wide detail column when no separate detail exists.
+3. Align the activity detail column with the System Status description column.
 4. Raise Developer tools ten pixels above the production controls.
 5. Validate the source and build MCST.sln as Release x64 on windows-2022.
 6. Run MCST-LogicTests.exe before packaging or publishing anything.

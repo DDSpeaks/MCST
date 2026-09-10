@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## 1.114-R45
+
+- Aligned the Latest Activity detail column to the exact same
+  `DashboardRowLayout.descriptionLeft` coordinate used by System Status.
+- Applied the shared alignment to both the standard Accounts/Uptime details and
+  the repeated long descriptions in retained activity-history rows.
+- Shortened the timestamp cell to end ten pixels before the shared detail
+  column, preserving a clear visual gap without overlap.
+- Retained all R44 layout, monitoring, and activity-history behavior.
+
 ## 1.114-R44
 
 - Raised the complete Developer tools panel by ten pixels, increasing its
