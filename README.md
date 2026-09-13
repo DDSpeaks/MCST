@@ -1,6 +1,11 @@
 ﻿# MCST
 
-## Package: 1.114-R46 Deduplicated and Aligned Activity
+## Package: 1.20.0 First Public Semantic Release
+
+MCST-Watchdog 1.20.0 is the first public release using Semantic Versioning.
+It is based on the validated internal 1.114-R46 build and changes the public
+release identity and packaging only; the validated R46 monitoring behavior is
+retained unchanged.
 
 This source package fixes duplicate Latest Activity events while preserving
 genuine events created during an in-flight refresh. Exact duplicates are
@@ -29,7 +34,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.114-R46**
+- MCST-Watchdog: **1.20.0**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -42,12 +47,12 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-R46 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+Version 1.20.0 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.114-R46` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.0` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

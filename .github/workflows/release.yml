@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "v1.114-R*"
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -42,7 +42,7 @@ jobs:
       - name: Upload testable package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MCST-Watchdog-1.114-R46-Windows-x64
+          name: MCST-Watchdog-1.20.0-Windows-x64
           path: dist/*
           if-no-files-found: error
           retention-days: 30

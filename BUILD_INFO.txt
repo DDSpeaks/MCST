@@ -1,15 +1,15 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.114-R46
+MCST-Watchdog version: 1.20.0
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Deduplicated and fully aligned Latest Activity
+Production change:     First public Semantic Versioning release based on R46
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-R46 production method
----------------------
+1.20.0 production method
+------------------------
 1. Keep MultiCharts Health first and retain the compact System Status layout.
 2. Merge activity histories without exact duplicate timestamp/state/text rows.
 3. Preserve genuine events created while a refresh is running.

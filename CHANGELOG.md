@@ -1,7 +1,13 @@
 ﻿# Changelog
 
-## 1.114-R46
+## 1.20.0
 
+- Established the first public Semantic Versioning release, based on the
+  validated internal 1.114-R46 build.
+- Standardized public release tags as `vX.Y.Z`; the package builder continues
+  to require an exact match between the tag and source version.
+- Updated Windows version resources, package names, documentation, validation,
+  and release automation for version 1.20.0 without changing monitoring logic.
 - Fixed activity-history duplication caused by appending `previousActivity`
   after the same history had already been carried through `CollectStatus`.
 - Added a tested merge that removes exact duplicates by timestamp, state, and

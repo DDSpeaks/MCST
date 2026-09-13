@@ -1,7 +1,16 @@
-# MCST 1.114-R46 GitHub Publication-Ready Package
+# MCST 1.20.0 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
+
+## Public release identity
+
+- This is the first public MCST-Watchdog release using Semantic Versioning.
+- Version `1.20.0` is based on the validated internal `1.114-R46` build.
+- The public release conversion changes versioning, documentation, and
+  packaging metadata only; the validated monitoring logic is unchanged.
+- Future public release tags use the standard `vX.Y.Z` form. The package build
+  still rejects any tag that does not exactly match the source version.
 
 ## Deduplicated and fully aligned Latest Activity
 
@@ -103,10 +112,11 @@ Bridge protocol: V2
   rejecting every active `.ini`, credential, test executable, compiler output,
   and source file.
 - Added `Docs/FIRST_GITHUB_PUBLICATION.md`, covering repository creation,
-  Actions permissions, the non-publishing test build, the exact R46 tag,
+  Actions permissions, the non-publishing test build, the exact release tag,
   Release verification, and MIT License verification.
 
-The following R36 GitHub build and Release automation remains unchanged.
+The validated GitHub build and Release automation is retained, with its tag
+filter updated for public `vX.Y.Z` releases.
 
 ## GitHub Release and portable user package
 
@@ -115,7 +125,7 @@ The following R36 GitHub build and Release automation remains unchanged.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.114-R46` creates a GitHub Release from
+- Pushing the exact tag `v1.20.0` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages
