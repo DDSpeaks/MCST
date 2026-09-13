@@ -40,7 +40,7 @@ unverified addresses into production.
    restarting Watchdog alone cannot reload a DLL already loaded by MultiCharts.
 
 The package intentionally contains no active INI files, so installing it cannot
-overwrite the user's settings or credentials. Version 1.20.0 retains Tracker Bridge V178
+overwrite the user's settings or credentials. Version 1.20.1 retains Tracker Bridge V178
 and Protocol V2 from the validated internal R46 build; an installation already running V178 needs only
 the new Watchdog EXE.
 
@@ -50,7 +50,7 @@ The GitHub Release includes a `SHA256SUMS.txt` file. In PowerShell, verify the
 downloaded ZIP with:
 
 ```powershell
-Get-FileHash .\MCST-Watchdog-1.20.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\MCST-Watchdog-1.20.1-Windows-x64.zip -Algorithm SHA256
 ```
 
 Compare the displayed hash with the value in the checksum file before

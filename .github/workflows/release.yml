@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Validate release source
         shell: pwsh
@@ -42,7 +42,7 @@ jobs:
       - name: Upload testable package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MCST-Watchdog-1.20.0-Windows-x64
+          name: MCST-Watchdog-1.20.1-Windows-x64
           path: dist/*
           if-no-files-found: error
           retention-days: 30

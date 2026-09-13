@@ -1,25 +1,26 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.20.0
+MCST-Watchdog version: 1.20.1
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     First public Semantic Versioning release based on R46
+Production change:     Node.js 24-compatible GitHub Actions dependencies
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-1.20.0 production method
+1.20.1 production method
 ------------------------
-1. Keep MultiCharts Health first and retain the compact System Status layout.
-2. Merge activity histories without exact duplicate timestamp/state/text rows.
-3. Preserve genuine events created while a refresh is running.
-4. Align activity timestamp/detail columns with System Status columns two/three.
-5. Raise Developer tools ten pixels above the production controls.
-6. Validate the source and build MCST.sln as Release x64 on windows-2022.
-7. Run MCST-LogicTests.exe before packaging or publishing anything.
-8. Retain R38's MIT-licensed publication package, Tracker Bridge V178, and
+1. Use actions/checkout@v5 and microsoft/setup-msbuild@v3 with Node.js 24.
+2. Keep MultiCharts Health first and retain the compact System Status layout.
+3. Merge activity histories without exact duplicate timestamp/state/text rows.
+4. Preserve genuine events created while a refresh is running.
+5. Align activity timestamp/detail columns with System Status columns two/three.
+6. Raise Developer tools ten pixels above the production controls.
+7. Validate the source and build MCST.sln as Release x64 on windows-2022.
+8. Run MCST-LogicTests.exe before packaging or publishing anything.
+9. Retain R38's MIT-licensed publication package, Tracker Bridge V178, and
    Protocol V2 unchanged.
-9. Keep System Status indicators and styling out of Latest Activity.
+10. Keep System Status indicators and styling out of Latest Activity.
 
 Retained production behavior
 ----------------------------

@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 1.20.1
+
+- Updated `actions/checkout` from v4 to v5 for Node.js 24 compatibility.
+- Updated `microsoft/setup-msbuild` from v2 to v3 for Node.js 24 compatibility.
+- Corrected a stale Saxo sample regression assertion that still expected the
+  deliberately removed `[10 rows]` Open P/L summary comment. The test now
+  requires the label and amount in their intended columns and an empty comment
+  field, matching the production report contract.
+- Updated release validation, version resources, package names, and publication
+  instructions for the `v1.20.1` maintenance release.
+- Retained all 1.20.0 monitoring behavior, Tracker Bridge V178, Protocol V2,
+  and the MIT-licensed portable-package contract unchanged.
+
 ## 1.20.0
 
 - Established the first public Semantic Versioning release, based on the

@@ -1,16 +1,20 @@
-# MCST 1.20.0 GitHub Publication-Ready Package
+# MCST 1.20.1 GitHub Publication-Ready Package
 
 Tracker Bridge internal build: V178  
 Bridge protocol: V2
 
-## Public release identity
+## GitHub Actions compatibility fix
 
-- This is the first public MCST-Watchdog release using Semantic Versioning.
-- Version `1.20.0` is based on the validated internal `1.114-R46` build.
-- The public release conversion changes versioning, documentation, and
-  packaging metadata only; the validated monitoring logic is unchanged.
-- Future public release tags use the standard `vX.Y.Z` form. The package build
-  still rejects any tag that does not exactly match the source version.
+- Updated `actions/checkout` from v4 to v5 for its Node.js 24 runtime.
+- Updated `microsoft/setup-msbuild` from v2 to v3 for its Node.js 24 runtime.
+- The warning-producing Node.js 20 action generations are no longer used.
+- Corrected a stale regression assertion that expected the removed `[10 rows]`
+  text after the current Saxo Open P/L total. The production report was already
+  correct and remains unchanged.
+- Version `1.20.1` is based on `1.20.0` and the validated internal
+  `1.114-R46` build; monitoring logic and Tracker Bridge V178 are unchanged.
+- Public release tags use the standard `vX.Y.Z` form. The package build still
+  rejects any tag that does not exactly match the source version.
 
 ## Deduplicated and fully aligned Latest Activity
 
@@ -125,7 +129,7 @@ filter updated for public `vX.Y.Z` releases.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.20.0` creates a GitHub Release from
+- Pushing the exact tag `v1.20.1` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages

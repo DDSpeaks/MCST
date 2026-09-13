@@ -476,10 +476,11 @@ int RunLogicTests()
         L"EUR +106,68",
         "Current Saxo capture Open P/L total was not calculated correctly");
     const std::wstring currentTotalLine = FindLineContaining(currentCaptureReport, L"EUR +106,68");
-    if (DelimitedField(currentTotalLine, 1) != L"EUR +106,68" ||
-        DelimitedField(currentTotalLine, 2) != L"[10 rows]")
+    if (DelimitedField(currentTotalLine, 0) != L"Total Open P/L" ||
+        DelimitedField(currentTotalLine, 1) != L"EUR +106,68" ||
+        !DelimitedField(currentTotalLine, 2).empty())
     {
-        throw std::runtime_error("Current Saxo total is not in the Open P/L column");
+        throw std::runtime_error("Current Saxo total is not aligned or still contains a removed row-count comment");
     }
     if (currentCaptureReport.find(L"OPEN P/L ROWS NOT TOTALLED") != std::wstring::npos)
         throw std::runtime_error("Current Saxo capture unexpectedly excluded an Open P/L row");

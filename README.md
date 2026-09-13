@@ -1,11 +1,12 @@
 ﻿# MCST
 
-## Package: 1.20.0 First Public Semantic Release
+## Package: 1.20.1 GitHub Actions Compatibility Release
 
-MCST-Watchdog 1.20.0 is the first public release using Semantic Versioning.
-It is based on the validated internal 1.114-R46 build and changes the public
-release identity and packaging only; the validated R46 monitoring behavior is
-retained unchanged.
+MCST-Watchdog 1.20.1 is a maintenance release of the first public Semantic
+Versioning package. It updates the GitHub Actions dependencies to their
+Node.js 24 generations: `actions/checkout@v5` and
+`microsoft/setup-msbuild@v3`. It is based on version 1.20.0 and the validated
+internal 1.114-R46 build. Monitoring behavior is unchanged.
 
 This source package fixes duplicate Latest Activity events while preserving
 genuine events created during an in-flight refresh. Exact duplicates are
@@ -34,7 +35,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.0**
+- MCST-Watchdog: **1.20.1**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V178**
 - Bridge protocol: **V2**
@@ -47,12 +48,12 @@ exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded
 and wide recovery tiers, retained allocation hints, and detailed recovery
 diagnostics. V178 moves the tier decision into a shared, directly tested policy
 without changing the read-only recovery behavior. Protocol V2 is unchanged.
-Version 1.20.0 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
+Version 1.20.1 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
 still requires V171 or newer.
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.0` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.1` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release
