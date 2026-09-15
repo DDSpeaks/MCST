@@ -186,47 +186,38 @@ int RunLogicTests()
     status.lastReport = L"2026-08-22 11:00";
     status.lastAlert = L"None";
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 178;
+    snapshot.bridgeVersion = 179;
 
-    const auto fastRecovery = mcst::SelectTrackerRecoveryPolicy({ 0, 1000, 0, 0 });
-    if (fastRecovery.tier != mcst::TrackerRecoveryTier::Fast ||
-        fastRecovery.timeBudgetMs != 900 ||
-        fastRecovery.byteBudget != 16ull * 1024ull * 1024ull)
+    const auto initialRecovery = mcst::SelectTrackerRecoveryPolicy({ 0 });
+    if (initialRecovery.retryCooldownMs != 30ull * 1000ull ||
+        initialRecovery.targetedTimeBudgetMs != 100 ||
+        initialRecovery.targetedByteBudget != 8ull * 1024ull * 1024ull ||
+        initialRecovery.processWideTimeBudgetMs != 3000 ||
+        initialRecovery.processWideByteBudget != 512ull * 1024ull * 1024ull)
     {
-        throw std::runtime_error("Initial Tracker recovery tier is not fast");
+        throw std::runtime_error("Initial Tracker recovery budgets are incorrect");
     }
 
-    const auto expandedRecovery = mcst::SelectTrackerRecoveryPolicy({ 4, 120000, 0, 0 });
-    if (expandedRecovery.tier != mcst::TrackerRecoveryTier::Expanded ||
-        expandedRecovery.timeBudgetMs != 1800 ||
-        expandedRecovery.byteBudget != 64ull * 1024ull * 1024ull ||
-        !expandedRecovery.stampExpandedTick)
+    const auto shortFailureBackoff = mcst::SelectTrackerRecoveryPolicy({ 3 });
+    if (shortFailureBackoff.retryCooldownMs != 60ull * 1000ull)
+        throw std::runtime_error("Tracker recovery does not back off after three failures");
+
+    if (mcst::SelectTrackerRecoveryPolicy({ 2 }).retryCooldownMs != 30ull * 1000ull ||
+        mcst::SelectTrackerRecoveryPolicy({ 9 }).retryCooldownMs != 60ull * 1000ull)
     {
-        throw std::runtime_error("Four failures do not select expanded Tracker recovery");
+        throw std::runtime_error("Tracker recovery backoff boundary is incorrect");
     }
 
-    const auto expandedCooldown = mcst::SelectTrackerRecoveryPolicy({ 7, 180000, 120000, 0 });
-    if (expandedCooldown.tier != mcst::TrackerRecoveryTier::Fast)
-        throw std::runtime_error("Expanded Tracker recovery cooldown is not enforced");
+    const auto persistentFailureBackoff = mcst::SelectTrackerRecoveryPolicy({ 10 });
+    if (persistentFailureBackoff.retryCooldownMs != 5ull * 60ull * 1000ull)
+        throw std::runtime_error("Persistent Tracker recovery does not use the five-minute cooldown");
 
-    const auto wideRecovery = mcst::SelectTrackerRecoveryPolicy({ 12, 600000, 0, 0 });
-    if (wideRecovery.tier != mcst::TrackerRecoveryTier::Wide ||
-        wideRecovery.timeBudgetMs != 2800 ||
-        wideRecovery.byteBudget != 128ull * 1024ull * 1024ull ||
-        !wideRecovery.stampWideTick)
+    if (!mcst::TrackerRecoveryCooldownElapsed(30000, 0, 30000) ||
+        mcst::TrackerRecoveryCooldownElapsed(59999, 30000, 30000) ||
+        !mcst::TrackerRecoveryCooldownElapsed(60000, 30000, 30000))
     {
-        throw std::runtime_error("Twelve failures do not select wide Tracker recovery");
+        throw std::runtime_error("Tracker recovery cooldown boundary is incorrect");
     }
-
-    const auto wideCooldownExpandedFallback =
-        mcst::SelectTrackerRecoveryPolicy({ 15, 700000, 400000, 600000 });
-    if (wideCooldownExpandedFallback.tier != mcst::TrackerRecoveryTier::Expanded)
-        throw std::runtime_error("Wide cooldown does not fall back to an available expanded tier");
-
-    const auto bothHeavyTiersCoolingDown =
-        mcst::SelectTrackerRecoveryPolicy({ 15, 700000, 650000, 600000 });
-    if (bothHeavyTiersCoolingDown.tier != mcst::TrackerRecoveryTier::Fast)
-        throw std::runtime_error("Heavy-tier cooldowns do not fall back to fast recovery");
     snapshot.protocolVersion = 2;
     snapshot.atonpTrackerLoaded = true;
     snapshot.atonpTrackerPeTimestamp = 0x6A5E694F;

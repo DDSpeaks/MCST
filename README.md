@@ -1,12 +1,12 @@
 ﻿# MCST
 
-## Package: 1.20.1 GitHub Actions Compatibility Release
+## Package: 1.20.2 Tracker Recovery Fix
 
-MCST-Watchdog 1.20.1 is a maintenance release of the first public Semantic
-Versioning package. It updates the GitHub Actions dependencies to their
-Node.js 24 generations: `actions/checkout@v5` and
-`microsoft/setup-msbuild@v3`. It is based on version 1.20.0 and the validated
-internal 1.114-R46 build. Monitoring behavior is unchanged.
+MCST-Watchdog 1.20.2 adds Tracker Bridge V179. When a Tracker object can no
+longer be read through its cached route, V179 first revalidates the most recent
+object address, then scans its allocator neighborhood, and finally performs a
+bounded process-wide RTTI fallback. Long failure streaks use progressively
+longer retry intervals to keep monitoring overhead low.
 
 This source package fixes duplicate Latest Activity events while preserving
 genuine events created during an in-flight refresh. Exact duplicates are
@@ -35,9 +35,9 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.1**
+- MCST-Watchdog: **1.20.2**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V178**
+- Tracker Bridge internal build: **V179**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
@@ -46,14 +46,14 @@ The Tracker Bridge product version, internal build, and protocol version are
 separate identifiers. V175 added optional `position_history`; V176 added the
 exact verified CATPTTabView vtable anchor; V177 added progressive fast, expanded,
 and wide recovery tiers, retained allocation hints, and detailed recovery
-diagnostics. V178 moves the tier decision into a shared, directly tested policy
-without changing the read-only recovery behavior. Protocol V2 is unchanged.
-Version 1.20.1 keeps the V178 Bridge unchanged. The retained R16 `Position CCY` action
-still requires V171 or newer.
+diagnostics. V178 moved the tier decision into a shared policy. V179 replaces
+the slow expanded/wide targeted retries with validated-hint, optimized targeted,
+and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
+`Position CCY` action still requires V171 or newer.
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.1` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.2` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

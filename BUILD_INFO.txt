@@ -1,30 +1,27 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.20.1
+MCST-Watchdog version: 1.20.2
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V178, Protocol V2
-Production change:     Node.js 24-compatible GitHub Actions dependencies
+Tracker Bridge:        Product 1.0, internal V179, Protocol V2
+Production change:     Hint-first Tracker recovery with process-wide fallback
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-1.20.1 production method
+1.20.2 production method
 ------------------------
-1. Use actions/checkout@v5 and microsoft/setup-msbuild@v3 with Node.js 24.
-2. Keep MultiCharts Health first and retain the compact System Status layout.
-3. Merge activity histories without exact duplicate timestamp/state/text rows.
-4. Preserve genuine events created while a refresh is running.
-5. Align activity timestamp/detail columns with System Status columns two/three.
-6. Raise Developer tools ten pixels above the production controls.
+1. Revalidate the most recently accepted CATPTTabView address first.
+2. Scan the remembered allocator neighborhood first and in 256 KiB blocks.
+3. Fall back to a bounded process-wide RTTI scan after a targeted miss.
+4. Apply the same strict profile and structural acceptance checks to every stage.
+5. Back off retries from 30 seconds to 60 seconds and then five minutes.
+6. Keep all recovery operations read-only and Protocol V2 unchanged.
 7. Validate the source and build MCST.sln as Release x64 on windows-2022.
 8. Run MCST-LogicTests.exe before packaging or publishing anything.
-9. Retain R38's MIT-licensed publication package, Tracker Bridge V178, and
-   Protocol V2 unchanged.
-10. Keep System Status indicators and styling out of Latest Activity.
 
 Retained production behavior
 ----------------------------
-- 30-second bounded Tracker recovery cooldown and candidate-cache lifetime;
+- adaptive 30-second, 60-second, and five-minute Tracker recovery cooldowns;
 - configurable stale-data Attention-to-Critical escalation;
 - separate Tracker-attempt and last-complete-snapshot timestamps;
 - up to 200 live monitoring_logs rows for BrokerMonitor and LogAlertEngine;
@@ -41,3 +38,4 @@ R25 optional Position History Bridge: V175
 R26 targeted structural recovery Bridge: V176
 R31 progressive diagnostic recovery Bridge: V177
 R32 shared recovery-policy Bridge: V178
+1.20.2 hint-first/full-fallback recovery Bridge: V179

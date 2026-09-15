@@ -1,5 +1,24 @@
 ﻿# Changelog
 
+## 1.20.2
+
+- Bumped the Tracker Bridge internal build from V178 to V179 while retaining
+  Bridge Protocol V2.
+- Added direct, fully revalidated reuse of the most recently accepted
+  CATPTTabView address as the first recovery stage.
+- Prioritized remembered allocator neighborhoods and changed the targeted
+  locator to scan 256 KiB memory blocks instead of performing a protected read
+  for every pointer-sized value.
+- Added a bounded process-wide RTTI fallback immediately after a targeted miss.
+- Applied the exact verified profile vtable and strong structural acceptance
+  requirements to candidates returned by every recovery stage.
+- Replaced the fast/expanded/wide targeted retry loop with 30-second initial,
+  60-second intermediate, and five-minute persistent-failure cooldowns.
+- Added recovery-stage diagnostics and regression coverage for the new budgets
+  and backoff thresholds.
+- Retained the Watchdog Dashboard, monitoring behavior, MIT package safeguards,
+  Release x64 target, and Node.js 24-compatible GitHub Actions workflow.
+
 ## 1.20.1
 
 - Updated `actions/checkout` from v4 to v5 for Node.js 24 compatibility.

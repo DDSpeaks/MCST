@@ -3,7 +3,7 @@
 
 ## Beginner Developer Help build
 
-MCST-Watchdog 1.20.1 retains R33's two-pane Win32 topic selector backed by
+MCST-Watchdog 1.20.2 retains R33's two-pane Win32 topic selector backed by
 `DeveloperHelpContent` and adds a persistent operating-boundary notice. It
 states that these controls are normally used only after a MultiCharts update,
 after an exact Charting.dll or ATOnPTracker.dll fingerprint change, or at a
@@ -22,13 +22,13 @@ not perform the user's AutoTrading change.
 
 ## Status Report alignment retained
 
-MCST-Watchdog 1.20.1 places `MultiCharts Health` first, uses 30-pixel compact status-row spacing, and separates Developer tools into a labelled read-only diagnostics panel with an 18-pixel gap above the production controls. Latest Activity uses uniform 20-pixel text rows and, when Developer mode is off, fills the available space above the production buttons with as many complete entries as fit from the existing bounded ten-event history. Every additional row follows the original summary-row order: event description at left and full local timestamp in the adjacent value column. The timestamp and detail columns share the exact starting coordinates used by the System Status state and description columns. Because activity events have no separate detail field, the description is repeated in the wide right-hand detail column so long text remains readable. Activity history is merged by exact timestamp, state, and text identity, preventing refresh-time duplication while retaining genuine concurrent events. Activity rows use no health-state indicators or System Status styling. When Developer mode is on, the original three-row summary remains compact. It retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged report component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
+MCST-Watchdog 1.20.2 places `MultiCharts Health` first, uses 30-pixel compact status-row spacing, and separates Developer tools into a labelled read-only diagnostics panel with an 18-pixel gap above the production controls. Latest Activity uses uniform 20-pixel text rows and, when Developer mode is off, fills the available space above the production buttons with as many complete entries as fit from the existing bounded ten-event history. Every additional row follows the original summary-row order: event description at left and full local timestamp in the adjacent value column. The timestamp and detail columns share the exact starting coordinates used by the System Status state and description columns. Because activity events have no separate detail field, the description is repeated in the wide right-hand detail column so long text remains readable. Activity history is merged by exact timestamp, state, and text identity, preventing refresh-time duplication while retaining genuine concurrent events. Activity rows use no health-state indicators or System Status styling. When Developer mode is on, the original three-row summary remains compact. It retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged report component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
 
-R46 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V177's progressive CATPTTabView recovery and exact scan diagnostics remain intact; V178 moves the tier decision to the shared, testable `TrackerRecoveryPolicy.h`. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+Version 1.20.2 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V179 validates the latest object hint, searches remembered allocations in blocks, and performs a bounded process-wide RTTI fallback after a targeted miss. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
-Recovery remains read-only. Bridge first uses the exact-profile locator, then suppresses repeated process-wide scans after a confirmed persistent failure. Fast, expanded, and wide tiers use 16/64/128 MiB byte caps and 0.9/1.8/2.8 second time caps. Expanded and wide tiers have two- and five-minute cooldowns; fast recovery retains the 30-second cooldown. The exact V147 fingerprint supplies vtable RVA `0x1D78C8`; accepted candidates still require strong structural evidence. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
+Recovery remains read-only. Bridge first revalidates recent object hints, then scans the remembered allocator neighborhood with a 100 ms / 8 MiB cap. A miss triggers a process-wide RTTI fallback bounded to 3 seconds / 512 MiB. Retries use a 30-second cooldown initially, 60 seconds after three failures, and five minutes after ten failures. The exact V147 fingerprint supplies vtable RVA `0x1D78C8`; accepted candidates still require strong structural evidence. Bridge does not write MultiCharts memory, manipulate Tracker windows, send synthetic input, or call an unknown target function.
 
 If recovery is not immediate, Watchdog retains the last complete Tracker table snapshot for operational context. Tracker health is Attention during `stale_critical_after_minutes` (10 by default), then Critical. The Dashboard/status report show both the last Tracker attempt and the last complete snapshot. BrokerMonitor and LogAlertEngine always receive the current live Recent Logs result, never the retained stale rows.
 
@@ -86,11 +86,11 @@ Current identity:
 
 ```text
 Product version: 1.0
-Internal build:  V178
+Internal build:  V179
 Protocol:        V2
 ```
 
-V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, V176 added targeted structural recovery, V177 added progressive diagnostic recovery, and V178 shares its tier policy with LogicTests without changing Protocol V2.
+V156 added Tracker compatibility profiles, V171 added the retained R16 position-interface verification, V172 added bounded Bridge-local cache refresh, V173 added extended monitoring history, V174 made recovery failure non-sticky, V175 added optional Position History, V176 added targeted structural recovery, V177 added progressive diagnostic recovery, V178 shared its tier policy with LogicTests, and V179 adds validated-hint, optimized targeted, and bounded process-wide fallback recovery without changing Protocol V2.
 
 ### MCST.TrackerBridge
 
@@ -104,7 +104,7 @@ Shared protocol and status types used across projects.
 
 `MCST-LogicTests.exe` is the Release-build regression executable for logic that can be tested independently from a live MultiCharts process. It returns exit code `0` only when every test passes and prints the failing regression plus exit code `1` otherwise.
 
-Current coverage includes report layout and coloring, Open and Realized P/L aggregation, localized Tracker dates, stale-data escalation, Saxo authentication and broker-history decisions, and the shared fast/expanded/wide Tracker recovery policy. It deliberately does not connect to or manipulate a running MultiCharts process. A future live integration-test executable should remain separate because it depends on actual windows, modules, Bridge IPC, and runtime state.
+Current coverage includes report layout and coloring, Open and Realized P/L aggregation, localized Tracker dates, stale-data escalation, Saxo authentication and broker-history decisions, and the shared V179 recovery budgets and retry backoff policy. It deliberately does not connect to or manipulate a running MultiCharts process. A future live integration-test executable should remain separate because it depends on actual windows, modules, Bridge IPC, and runtime state.
 
 ## PowerLanguage host
 

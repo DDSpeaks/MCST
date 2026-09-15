@@ -44,7 +44,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 178;
+    constexpr int kBridgeVersion = 179;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -1201,11 +1201,8 @@ namespace
     std::atomic<bool> g_tabViewRecoveryModeActive{ false };
     std::atomic<bool> g_tabViewPersistentFailureActive{ false };
     std::atomic<unsigned int> g_tabViewRecoveryFailureStreak{ 0 };
-    std::atomic<ULONGLONG> g_lastExpandedTabViewRecoveryTick{ 0 };
-    std::atomic<ULONGLONG> g_lastWideTabViewRecoveryTick{ 0 };
     SRWLOCK g_tabViewHistoryLock = SRWLOCK_INIT;
     std::vector<std::uintptr_t> g_recentTabViewHints;
-    constexpr ULONGLONG kTabViewRecoveryCooldownMs = 30000;
     constexpr ULONGLONG kTabViewCandidateCacheTtlMs = 30000;
 
     void RememberTabViewHint(std::uintptr_t object)
@@ -1252,13 +1249,13 @@ namespace
         ReleaseSRWLockExclusive(&g_candidateCacheLock);
     }
 
-    bool TryBeginTabViewRecovery()
+    bool TryBeginTabViewRecovery(ULONGLONG cooldownMs)
     {
         const ULONGLONG now = GetTickCount64();
         ULONGLONG previous = g_lastTabViewRecoveryTick.load();
         for (;;)
         {
-            if (previous != 0 && now - previous < kTabViewRecoveryCooldownMs)
+            if (!mcst::TrackerRecoveryCooldownElapsed(now, previous, cooldownMs))
                 return false;
             if (g_lastTabViewRecoveryTick.compare_exchange_weak(previous, now))
             {
@@ -1272,9 +1269,9 @@ namespace
     {
         ~TabViewRecoveryModeScope()
         {
-            // Recovery mode describes only the currently executing bounded
-            // exact-profile scan. A failed scan must never suppress normal
-            // discovery on later Watchdog requests.
+            // Recovery mode describes only the currently executing read-only
+            // hint/targeted/process-wide sequence. A failed attempt must never
+            // suppress later cooldown-governed recovery requests.
             g_tabViewRecoveryModeActive.store(false);
         }
     };
@@ -1483,6 +1480,21 @@ DWORD sehCode = 0;
         const std::vector<std::uintptr_t> historicalHints = RecentTabViewHints();
         anchors.insert(anchors.end(), historicalHints.begin(), historicalHints.end());
 
+        std::vector<std::uintptr_t> preferredAllocationBases;
+        for (const std::uintptr_t hint : historicalHints)
+        {
+            MEMORY_BASIC_INFORMATION hintMbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(hint), &hintMbi, sizeof(hintMbi)) == sizeof(hintMbi) &&
+                hintMbi.State == MEM_COMMIT && IsReadableProtection(hintMbi.Protect))
+            {
+                preferredAllocationBases.push_back(
+                    reinterpret_cast<std::uintptr_t>(hintMbi.AllocationBase));
+            }
+        }
+        preferredAllocationBases.erase(
+            std::unique(preferredAllocationBases.begin(), preferredAllocationBases.end()),
+            preferredAllocationBases.end());
+
         std::sort(anchors.begin(), anchors.end());
         anchors.erase(std::unique(anchors.begin(), anchors.end()), anchors.end());
 
@@ -1524,6 +1536,16 @@ DWORD sehCode = 0;
         ranges.erase(std::unique(ranges.begin(), ranges.end(), [](const AllocationRange& a, const AllocationRange& b) {
             return a.begin == b.begin && a.end == b.end;
         }), ranges.end());
+        std::stable_sort(ranges.begin(), ranges.end(), [&preferredAllocationBases](const AllocationRange& a, const AllocationRange& b) {
+            const auto rank = [&preferredAllocationBases](std::uintptr_t allocationBase) {
+                const auto found = std::find(
+                    preferredAllocationBases.begin(), preferredAllocationBases.end(), allocationBase);
+                return found == preferredAllocationBases.end()
+                    ? preferredAllocationBases.size()
+                    : static_cast<std::size_t>(found - preferredAllocationBases.begin());
+            };
+            return rank(a.begin) < rank(b.begin);
+        });
 
         const ULONGLONG started = GetTickCount64();
         std::size_t inspectedBytes = 0;
@@ -1536,6 +1558,8 @@ DWORD sehCode = 0;
         bool timedOut = false;
         bool byteLimitHit = false;
         bool candidateLimitHit = false;
+        constexpr std::size_t kChunkBytes = 256u * 1024u;
+        std::vector<unsigned char> scanBuffer(kChunkBytes);
 
         for (const AllocationRange& range : ranges)
         {
@@ -1573,57 +1597,76 @@ DWORD sehCode = 0;
                             : scanBegin + remainingByteBudget;
                     const std::uintptr_t scanEnd =
                         (std::min)((std::min)(range.end, regionEnd), byteBudgetEnd);
-                    inspectedBytes += static_cast<std::size_t>(scanEnd - scanBegin);
-
-                    for (std::uintptr_t address = scanBegin;
-                         scanEnd >= sizeof(std::uintptr_t) &&
-                         address <= scanEnd - sizeof(std::uintptr_t);
-                         address += sizeof(std::uintptr_t))
+                    for (std::uintptr_t chunk = scanBegin; chunk < scanEnd; )
                     {
-                        if ((address & 0x3FFFu) == 0 && GetTickCount64() - started >= timeBudgetMs)
+                        if (GetTickCount64() - started >= timeBudgetMs)
                         {
                             timedOut = true;
                             break;
                         }
-                        std::uintptr_t value = 0;
-                        if (!SafeReadValue(reinterpret_cast<void*>(address), value) || value != targetVtable)
-                            continue;
-                        ++exactVtableHits;
-
-                        TabViewCandidate candidate;
-                        candidate.object = address;
-                        candidate.vtable = value;
-                        std::uintptr_t verifiedVtable = 0;
-                        if (!VtableStartsWithExecutableCode(candidate.object, verifiedVtable) ||
-                            verifiedVtable != targetVtable)
+                        const std::size_t bytes = static_cast<std::size_t>((std::min)(
+                            scanEnd - chunk, static_cast<std::uintptr_t>(kChunkBytes)));
+                        DWORD sehCode = 0;
+                        const bool copied = MCBridge_SafeCopyMemory(
+                            scanBuffer.data(), reinterpret_cast<void*>(chunk), bytes, &sehCode) != 0;
+                        inspectedBytes += bytes;
+                        if (copied)
                         {
-                            ++invalidVtableHits;
-                            continue;
-                        }
-
-                        candidate.trackerWindowReferences =
-                            CountWindowReferencesInObject(candidate.object, trackerValues);
-                        candidate.pageWindowReferences =
-                            CountWindowReferencesInObject(candidate.object, pageValues, 0x2000);
-                        candidate.flexGridReferences =
-                            CountWindowReferencesInObject(candidate.object, gridValues, 0x2000);
-                        ValidateAndScoreTabViewCandidate(snapshot, targetVtables, candidate);
-                        if (candidate.rejected)
-                        {
-                            ++structurallyRejected;
-                            if (candidate.score >= strongestRejectedScore)
+                            const std::size_t first = static_cast<std::size_t>(
+                                (sizeof(void*) - (chunk & (sizeof(void*) - 1))) & (sizeof(void*) - 1));
+                            for (std::size_t offset = first; offset + sizeof(std::uintptr_t) <= bytes;
+                                 offset += sizeof(std::uintptr_t))
                             {
-                                strongestRejectedScore = candidate.score;
-                                strongestRejectionReason = candidate.rejectedReason;
+                                std::uintptr_t value = 0;
+                                memcpy(&value, scanBuffer.data() + offset, sizeof(value));
+                                if (value != targetVtable)
+                                    continue;
+                                ++exactVtableHits;
+
+                                TabViewCandidate candidate;
+                                candidate.object = chunk + offset;
+                                candidate.vtable = value;
+                                candidate.allocationBase = range.begin;
+                                candidate.regionBase = regionBegin;
+                                candidate.regionSize = mbi.RegionSize;
+                                candidate.memoryType = mbi.Type;
+                                candidate.memoryProtect = mbi.Protect;
+                                std::uintptr_t verifiedVtable = 0;
+                                if (!VtableStartsWithExecutableCode(candidate.object, verifiedVtable) ||
+                                    verifiedVtable != targetVtable)
+                                {
+                                    ++invalidVtableHits;
+                                    continue;
+                                }
+
+                                candidate.trackerWindowReferences =
+                                    CountWindowReferencesInObject(candidate.object, trackerValues);
+                                candidate.pageWindowReferences =
+                                    CountWindowReferencesInObject(candidate.object, pageValues, 0x2000);
+                                candidate.flexGridReferences =
+                                    CountWindowReferencesInObject(candidate.object, gridValues, 0x2000);
+                                ValidateAndScoreTabViewCandidate(snapshot, targetVtables, candidate);
+                                if (candidate.rejected)
+                                {
+                                    ++structurallyRejected;
+                                    if (candidate.score >= strongestRejectedScore)
+                                    {
+                                        strongestRejectedScore = candidate.score;
+                                        strongestRejectionReason = candidate.rejectedReason;
+                                    }
+                                    continue;
+                                }
+                                candidates.push_back(candidate);
+                                if (candidates.size() >= kMaxCandidates)
+                                {
+                                    candidateLimitHit = true;
+                                    break;
+                                }
                             }
-                            continue;
                         }
-                        candidates.push_back(candidate);
-                        if (candidates.size() >= kMaxCandidates)
-                        {
-                            candidateLimitHit = true;
+                        if (candidateLimitHit)
                             break;
-                        }
+                        chunk += bytes;
                     }
                 }
                 if (inspectedBytes >= maxTotalInspectedBytes)
@@ -2153,12 +2196,115 @@ DWORD sehCode = 0;
         }
     }
 
+    bool HasStrongTabViewStructure(const TabViewCandidate& candidate)
+    {
+        return candidate.stableVtable && !candidate.rejected && candidate.score >= 140 &&
+            (candidate.secondaryTabViewVtableAt48 || candidate.trackerLayoutSignature ||
+             candidate.pageObjectPointers >= 5);
+    }
+
+    std::uintptr_t SelectStrongProfileTabViewCandidate(
+        const std::vector<TabViewCandidate>& candidates,
+        std::uintptr_t targetVtable,
+        int& bestScore,
+        int& secondScore)
+    {
+        bestScore = 0;
+        secondScore = 0;
+        std::vector<const TabViewCandidate*> matching;
+        for (const TabViewCandidate& candidate : candidates)
+        {
+            if (candidate.currentVtable == targetVtable && HasStrongTabViewStructure(candidate))
+                matching.push_back(&candidate);
+        }
+        std::sort(matching.begin(), matching.end(), [](const TabViewCandidate* left, const TabViewCandidate* right) {
+            if (left->score != right->score) return left->score > right->score;
+            return left->object < right->object;
+        });
+        if (matching.empty())
+            return 0;
+        bestScore = matching[0]->score;
+        if (matching.size() == 1)
+            return matching[0]->object;
+        secondScore = matching[1]->score;
+        return bestScore >= secondScore + 20 ? matching[0]->object : 0;
+    }
+
+    std::uintptr_t ValidateRecentProfileTabViewHints(
+        const Snapshot& snapshot,
+        std::uintptr_t targetVtable,
+        std::string& diagnostic)
+    {
+        const ULONGLONG started = GetTickCount64();
+        const std::vector<std::uintptr_t> hints = RecentTabViewHints();
+        const std::vector<std::uintptr_t> targets = { targetVtable };
+        std::vector<std::uintptr_t> trackerValues;
+        std::vector<std::uintptr_t> pageValues;
+        std::vector<std::uintptr_t> gridValues;
+        if (snapshot.trackerWindow)
+            trackerValues.push_back(reinterpret_cast<std::uintptr_t>(snapshot.trackerWindow));
+        for (const WindowRecord& record : snapshot.windows)
+        {
+            const std::uintptr_t hwndValue = reinterpret_cast<std::uintptr_t>(record.hwnd);
+            if (Lower(record.className) == L"#32770") pageValues.push_back(hwndValue);
+            if (IsFlexGridClass(record.className)) gridValues.push_back(hwndValue);
+        }
+
+        std::size_t exactVtableHits = 0;
+        int bestRejectedScore = 0;
+        for (const std::uintptr_t hint : hints)
+        {
+            std::uintptr_t currentVtable = 0;
+            if (!VtableStartsWithExecutableCode(hint, currentVtable) || currentVtable != targetVtable)
+                continue;
+            ++exactVtableHits;
+
+            TabViewCandidate candidate;
+            candidate.object = hint;
+            candidate.vtable = currentVtable;
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(hint), &mbi, sizeof(mbi)) == sizeof(mbi))
+            {
+                candidate.allocationBase = reinterpret_cast<std::uintptr_t>(mbi.AllocationBase);
+                candidate.regionBase = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+                candidate.regionSize = mbi.RegionSize;
+                candidate.memoryType = mbi.Type;
+                candidate.memoryProtect = mbi.Protect;
+            }
+            candidate.trackerWindowReferences = CountWindowReferencesInObject(hint, trackerValues);
+            candidate.pageWindowReferences = CountWindowReferencesInObject(hint, pageValues, 0x2000);
+            candidate.flexGridReferences = CountWindowReferencesInObject(hint, gridValues, 0x2000);
+            ValidateAndScoreTabViewCandidate(snapshot, targets, candidate);
+            if (HasStrongTabViewStructure(candidate))
+            {
+                std::ostringstream out;
+                out << "decision=accepted; object=" << HexValue(hint)
+                    << "; score=" << candidate.score
+                    << "; hints_checked=" << hints.size()
+                    << "; exact_vtable_hits=" << exactVtableHits
+                    << "; elapsed_ms=" << (GetTickCount64() - started);
+                diagnostic = out.str();
+                return hint;
+            }
+            bestRejectedScore = (std::max)(bestRejectedScore, candidate.score);
+        }
+
+        std::ostringstream out;
+        out << "decision=miss; hints_checked=" << hints.size()
+            << "; exact_vtable_hits=" << exactVtableHits
+            << "; best_rejected_score=" << bestRejectedScore
+            << "; elapsed_ms=" << (GetTickCount64() - started);
+        diagnostic = out.str();
+        return 0;
+    }
+
     std::vector<TabViewCandidate> FindRttiVtableObjectsProcessWide(
         const Snapshot& snapshot,
         const std::vector<RttiVtableRecord>& vtables,
-        std::string& diagnostic)
+        std::string& diagnostic,
+        ULONGLONG timeBudgetMs = 0,
+        std::size_t maxInspectedBytes = 512ull * 1024ull * 1024ull)
     {
-        constexpr std::size_t kMaxInspectedBytes = 512ull * 1024ull * 1024ull;
         constexpr std::size_t kChunkBytes = 256u * 1024u;
         constexpr std::size_t kMaxCandidates = 64;
         std::vector<TabViewCandidate> candidates;
@@ -2189,13 +2335,15 @@ DWORD sehCode = 0;
         const ULONGLONG started = GetTickCount64();
         std::size_t inspectedBytes = 0;
         std::size_t readablePrivateRegions = 0;
+        bool timedOut = false;
         bool byteLimitHit = false;
         bool candidateLimitHit = false;
         std::vector<unsigned char> buffer(kChunkBytes);
 
         while (cursor < maximum)
         {
-            if (inspectedBytes >= kMaxInspectedBytes) { byteLimitHit = true; break; }
+            if (timeBudgetMs != 0 && GetTickCount64() - started >= timeBudgetMs) { timedOut = true; break; }
+            if (inspectedBytes >= maxInspectedBytes) { byteLimitHit = true; break; }
             MEMORY_BASIC_INFORMATION mbi{};
             if (VirtualQuery(reinterpret_cast<void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
                 break;
@@ -2208,9 +2356,11 @@ DWORD sehCode = 0;
                 ++readablePrivateRegions;
                 for (std::uintptr_t chunk = regionBegin; chunk < regionEnd; )
                 {
-                            if (inspectedBytes >= kMaxInspectedBytes) { byteLimitHit = true; break; }
+                    if (timeBudgetMs != 0 && GetTickCount64() - started >= timeBudgetMs) { timedOut = true; break; }
+                    if (inspectedBytes >= maxInspectedBytes) { byteLimitHit = true; break; }
                     const std::size_t bytes = static_cast<std::size_t>((std::min)(
-                        regionEnd - chunk, static_cast<std::uintptr_t>(kChunkBytes)));
+                        (std::min)(regionEnd - chunk, static_cast<std::uintptr_t>(kChunkBytes)),
+                        static_cast<std::uintptr_t>(maxInspectedBytes - inspectedBytes)));
                     DWORD sehCode = 0;
                     if (MCBridge_SafeCopyMemory(buffer.data(), reinterpret_cast<void*>(chunk), bytes, &sehCode))
                     {
@@ -2246,7 +2396,7 @@ DWORD sehCode = 0;
                     chunk += bytes;
                 }
             }
-            if (byteLimitHit || candidateLimitHit) break;
+            if (timedOut || byteLimitHit || candidateLimitHit) break;
             cursor = regionEnd;
         }
 
@@ -2258,11 +2408,13 @@ DWORD sehCode = 0;
             return a.object == b.object;
         }), candidates.end());
         std::ostringstream out;
-        out << "time_limit=none process_scan_regions=" << readablePrivateRegions
+        out << "time_limit_ms=" << timeBudgetMs
+            << " process_scan_regions=" << readablePrivateRegions
             << " inspected_bytes=" << inspectedBytes
             << " elapsed_ms=" << (GetTickCount64() - started)
             << " candidates=" << candidates.size();
         if (byteLimitHit) out << " byte_limit=true";
+        if (timedOut) out << " timeout=true";
         if (candidateLimitHit) out << " candidate_limit=true";
         diagnostic = out.str();
         return candidates;
@@ -2511,23 +2663,59 @@ DWORD sehCode = 0;
         std::string& diagnostic,
         const TrackerCompatibilityProfile* trackerProfile = nullptr,
         bool forceFreshScan = false,
-        ULONGLONG recoveryTimeBudgetMs = 900,
-        std::size_t recoveryByteBudget = 16ull * 1024ull * 1024ull,
-        const char* recoveryTier = "fast")
+        ULONGLONG recoveryTimeBudgetMs = 100,
+        std::size_t recoveryByteBudget = 8ull * 1024ull * 1024ull,
+        const char* recoveryTier = "hint-targeted-full",
+        ULONGLONG processWideTimeBudgetMs = 3000,
+        std::size_t processWideByteBudget = 512ull * 1024ull * 1024ull)
     {
         if (forceFreshScan)
         {
-            InvalidateTabViewCaches();
-
             if (!trackerProfile || !trackerProfile->matched || trackerProfile->tabViewVtableRva == 0)
             {
                 diagnostic = "bounded fresh scan blocked because no verified Tracker profile is authorized";
                 return 0;
             }
 
-            // Recovery must fit inside the normal Bridge request deadline. Use
-            // the exact verified vtable and Tracker-window allocation anchors;
-            // do not run the unbounded process-wide research scan here.
+            const std::uintptr_t targetVtable =
+                snapshot.atonpTrackerBase + trackerProfile->tabViewVtableRva;
+            if (!snapshot.atonpTrackerBase ||
+                snapshot.atonpTrackerSize != trackerProfile->atonpTrackerImageSize ||
+                trackerProfile->tabViewVtableRva >= snapshot.atonpTrackerSize ||
+                targetVtable < snapshot.atonpTrackerBase ||
+                !MemoryRangeHasProtection(reinterpret_cast<void*>(targetVtable), sizeof(void*), false))
+            {
+                diagnostic = "fresh recovery blocked because the verified Tracker profile no longer matches the loaded module";
+                return 0;
+            }
+            const auto acceptAndCache = [&](std::uintptr_t object) {
+                AcquireSRWLockExclusive(&g_tabViewCacheLock);
+                g_cachedTabView = object;
+                g_cachedAtonpBase = snapshot.atonpTrackerBase;
+                g_cachedTrackerWindow = snapshot.trackerWindow;
+                ReleaseSRWLockExclusive(&g_tabViewCacheLock);
+                RememberTabViewHint(object);
+            };
+
+            // V179 fast path: validate the last accepted object directly before
+            // discarding Bridge-local caches. Every pointer and structure is
+            // revalidated; no stale address is trusted or invoked.
+            std::string hintDiagnostic;
+            const std::uintptr_t hintAccepted = ValidateRecentProfileTabViewHints(
+                snapshot, targetVtable, hintDiagnostic);
+            if (hintAccepted)
+            {
+                acceptAndCache(hintAccepted);
+                diagnostic = "stage=validated_hint; " + hintDiagnostic;
+                AppendExecutionTrace("tabview_recovery_validated_hint", diagnostic);
+                return hintAccepted;
+            }
+
+            InvalidateTabViewCaches();
+
+            // Scan the last known allocator neighborhood first. The locator
+            // copies readable memory in blocks and searches the local buffer,
+            // avoiding the old per-pointer protected-read overhead.
             std::string profileScanDiagnostic;
             std::vector<TabViewCandidate> profileCandidates = FindProfileTabViewVtableObjects(
                 snapshot,
@@ -2537,71 +2725,68 @@ DWORD sehCode = 0;
                 recoveryTimeBudgetMs,
                 recoveryByteBudget);
 
-            std::uintptr_t freshAccepted = 0;
-            if (profileCandidates.size() == 1)
+            int targetedBestScore = 0;
+            int targetedSecondScore = 0;
+            const std::uintptr_t targetedAccepted = SelectStrongProfileTabViewCandidate(
+                profileCandidates, targetVtable, targetedBestScore, targetedSecondScore);
+            if (targetedAccepted)
             {
-                const TabViewCandidate& only = profileCandidates.front();
-                if (only.score >= 140 &&
-                    (only.secondaryTabViewVtableAt48 || only.trackerLayoutSignature ||
-                     only.pageObjectPointers >= 5))
-                {
-                    freshAccepted = only.object;
-                }
-            }
-            else if (profileCandidates.size() > 1)
-            {
-                const TabViewCandidate& best = profileCandidates[0];
-                const TabViewCandidate& second = profileCandidates[1];
-                if (best.score >= 140 && best.score >= second.score + 20 &&
-                    (best.secondaryTabViewVtableAt48 || best.trackerLayoutSignature ||
-                     best.pageObjectPointers >= 5))
-                {
-                    freshAccepted = best.object;
-                }
-            }
-
-            const int bestScore = profileCandidates.empty() ? 0 : profileCandidates[0].score;
-            const int secondScore = profileCandidates.size() < 2 ? 0 : profileCandidates[1].score;
-            std::string decision;
-            if (!freshAccepted)
-            {
-                if (profileCandidates.empty())
-                    decision = "no_candidates";
-                else if (profileCandidates.size() == 1)
-                    decision = "insufficient_structure";
-                else
-                    decision = "ambiguous_candidates";
+                acceptAndCache(targetedAccepted);
                 std::ostringstream recoveryDiagnostic;
                 recoveryDiagnostic
-                    << "tier=" << (recoveryTier ? recoveryTier : "unknown")
-                    << "; decision=" << decision
+                    << "stage=targeted_allocation; decision=accepted"
+                    << "; policy=" << (recoveryTier ? recoveryTier : "unknown")
                     << "; candidates=" << profileCandidates.size()
-                    << "; best_score=" << bestScore
-                    << "; second_score=" << secondScore
+                    << "; best_score=" << targetedBestScore
+                    << "; second_score=" << targetedSecondScore
+                    << "; accepted=" << HexValue(targetedAccepted)
+                    << "; hint=" << hintDiagnostic
                     << "; " << profileScanDiagnostic;
                 diagnostic = recoveryDiagnostic.str();
-                AppendExecutionTrace("tabview_recovery_scan", diagnostic);
-                return 0;
+                AppendExecutionTrace("tabview_recovery_targeted", diagnostic);
+                return targetedAccepted;
             }
 
-            AcquireSRWLockExclusive(&g_tabViewCacheLock);
-            g_cachedTabView = freshAccepted;
-            g_cachedAtonpBase = snapshot.atonpTrackerBase;
-            g_cachedTrackerWindow = snapshot.trackerWindow;
-            ReleaseSRWLockExclusive(&g_tabViewCacheLock);
-            RememberTabViewHint(freshAccepted);
+            // V179 robust fallback: the field trace proved that the full RTTI
+            // process walk can find a valid object after targeted recovery loses
+            // its allocation route. It remains read-only, time/byte bounded, and
+            // uses the same strict profile and structural acceptance rules.
+            std::string rttiDiagnostic;
+            const std::vector<RttiVtableRecord> vtables = ResolveRttiVtables(
+                snapshot, ".?AVCATPTTabView@ATOnPTracker@@", rttiDiagnostic);
+            std::string processScanDiagnostic;
+            const std::vector<TabViewCandidate> processCandidates =
+                FindRttiVtableObjectsProcessWide(
+                    snapshot,
+                    vtables,
+                    processScanDiagnostic,
+                    processWideTimeBudgetMs,
+                    processWideByteBudget);
+            int processBestScore = 0;
+            int processSecondScore = 0;
+            const std::uintptr_t processAccepted = SelectStrongProfileTabViewCandidate(
+                processCandidates, targetVtable, processBestScore, processSecondScore);
+
             std::ostringstream recoveryDiagnostic;
             recoveryDiagnostic
-                << "tier=" << (recoveryTier ? recoveryTier : "unknown")
-                << "; decision=accepted"
-                << "; candidates=" << profileCandidates.size()
-                << "; best_score=" << bestScore
-                << "; second_score=" << secondScore
-                << "; accepted=" << HexValue(freshAccepted)
-                << "; " << profileScanDiagnostic;
+                << "stage=process_wide_fallback"
+                << "; decision=" << (processAccepted ? "accepted" : "not_found")
+                << "; policy=" << (recoveryTier ? recoveryTier : "unknown")
+                << "; candidates=" << processCandidates.size()
+                << "; best_score=" << processBestScore
+                << "; second_score=" << processSecondScore;
+            if (processAccepted)
+                recoveryDiagnostic << "; accepted=" << HexValue(processAccepted);
+            recoveryDiagnostic
+                << "; hint=" << hintDiagnostic
+                << "; targeted=" << profileScanDiagnostic
+                << "; rtti=" << rttiDiagnostic
+                << "; process_wide=" << processScanDiagnostic;
             diagnostic = recoveryDiagnostic.str();
-            AppendExecutionTrace("tabview_recovery_scan", diagnostic);
-            return freshAccepted;
+            AppendExecutionTrace("tabview_recovery_process_wide", diagnostic);
+            if (processAccepted)
+                acceptAndCache(processAccepted);
+            return processAccepted;
         }
 
         if (g_tabViewRecoveryModeActive.load() && trackerProfile && trackerProfile->matched)
@@ -12844,9 +13029,11 @@ DWORD sehCode = 0;
         bool& compatibilityMatched,
         std::size_t& pagesRead,
         std::size_t& sehFailures,
-        ULONGLONG recoveryTimeBudgetMs = 900,
-        std::size_t recoveryByteBudget = 16ull * 1024ull * 1024ull,
-        const char* recoveryTier = "fast",
+        ULONGLONG recoveryTimeBudgetMs = 100,
+        std::size_t recoveryByteBudget = 8ull * 1024ull * 1024ull,
+        const char* recoveryTier = "hint-targeted-full",
+        ULONGLONG processWideTimeBudgetMs = 3000,
+        std::size_t processWideByteBudget = 512ull * 1024ull * 1024ull,
         std::string* tabViewDiagnosticOutput = nullptr)
     {
         V153GridReadLockGuard lock;
@@ -12869,7 +13056,9 @@ DWORD sehCode = 0;
                 forceFreshScan,
                 recoveryTimeBudgetMs,
                 recoveryByteBudget,
-                recoveryTier)
+                recoveryTier,
+                processWideTimeBudgetMs,
+                processWideByteBudget)
             : 0;
         tabViewFound = tabView != 0;
 
@@ -12952,7 +13141,7 @@ DWORD sehCode = 0;
         return pagesOk > 0 && totalSeh == 0;
     }
 
-    void AppendV178RecoveryMetadata(
+    void AppendV179RecoveryMetadata(
         std::string& payload,
         bool attempted,
         bool tabViewFound,
@@ -12973,7 +13162,7 @@ DWORD sehCode = 0;
         payload.insert(markerEnd + 1, metadata.str());
     }
 
-    bool BuildV178StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
+    bool BuildV179StatusReportSnapshotWithRecovery(const Snapshot& initialSnapshot, std::string& payload)
     {
         bool tabViewFound = false;
         bool compatibilityMatched = false;
@@ -13004,50 +13193,42 @@ DWORD sehCode = 0;
                 g_tabViewPersistentFailureActive.store(false);
                 g_tabViewRecoveryFailureStreak.store(0);
             }
-            AppendV178RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
+            AppendV179RecoveryMetadata(payload, false, tabViewFound, pagesRead, sehFailures);
             return initialBuilt;
         }
 
         g_tabViewPersistentFailureActive.store(true);
 
-        // One production refresh can issue several Watchdog retries. Do not turn
-        // a persistent failure into repeated process scans; one recovery scan is
-        // allowed per 30-second window and ordinary snapshot reads continue.
-        if (!TryBeginTabViewRecovery())
+        // One production refresh can issue several Watchdog retries. V179 keeps
+        // early recovery responsive, then progressively backs off after a long
+        // failure streak so process-wide fallbacks cannot create steady load.
+        const unsigned int failureStreak = g_tabViewRecoveryFailureStreak.load();
+        const mcst::TrackerRecoveryPolicyDecision policy =
+            mcst::SelectTrackerRecoveryPolicy({ failureStreak });
+        if (!TryBeginTabViewRecovery(policy.retryCooldownMs))
         {
-            AppendV178RecoveryMetadata(
+            AppendV179RecoveryMetadata(
                 payload,
                 false,
                 tabViewFound,
                 pagesRead,
                 sehFailures,
-                "cooldown; failure_streak=" +
-                    std::to_string(g_tabViewRecoveryFailureStreak.load()));
+                "cooldown_ms=" + std::to_string(policy.retryCooldownMs) +
+                    "; failure_streak=" + std::to_string(failureStreak));
             return initialBuilt;
         }
 
         TabViewRecoveryModeScope recoveryModeScope;
 
-        const unsigned int failureStreak = g_tabViewRecoveryFailureStreak.load();
-        const ULONGLONG recoveryStarted = GetTickCount64();
-        const mcst::TrackerRecoveryPolicyDecision tier =
-            mcst::SelectTrackerRecoveryPolicy({
-                failureStreak,
-                recoveryStarted,
-                g_lastExpandedTabViewRecoveryTick.load(),
-                g_lastWideTabViewRecoveryTick.load()
-            });
-        if (tier.stampWideTick)
-            g_lastWideTabViewRecoveryTick.store(recoveryStarted);
-        if (tier.stampExpandedTick)
-            g_lastExpandedTabViewRecoveryTick.store(recoveryStarted);
-
         {
             std::ostringstream trace;
-            trace << "tier=" << tier.name
+            trace << "policy=" << policy.name
                   << " failure_streak=" << failureStreak
-                  << " time_budget_ms=" << tier.timeBudgetMs
-                  << " byte_budget=" << tier.byteBudget;
+                  << " cooldown_ms=" << policy.retryCooldownMs
+                  << " targeted_time_budget_ms=" << policy.targetedTimeBudgetMs
+                  << " targeted_byte_budget=" << policy.targetedByteBudget
+                  << " process_wide_time_budget_ms=" << policy.processWideTimeBudgetMs
+                  << " process_wide_byte_budget=" << policy.processWideByteBudget;
             AppendExecutionTrace("tabview_recovery_start", trace.str());
         }
 
@@ -13069,9 +13250,11 @@ DWORD sehCode = 0;
             freshCompatibilityMatched,
             freshPagesRead,
             freshSehFailures,
-            tier.timeBudgetMs,
-            tier.byteBudget,
-            tier.name,
+            policy.targetedTimeBudgetMs,
+            policy.targetedByteBudget,
+            policy.name,
+            policy.processWideTimeBudgetMs,
+            policy.processWideByteBudget,
             &recoveryDiagnostic);
 
         const bool completeRecovery = recovered && freshCompatibilityMatched &&
@@ -13088,12 +13271,12 @@ DWORD sehCode = 0;
         }
 
         std::ostringstream result;
-        result << "tier=" << tier.name
+        result << "policy=" << policy.name
                << "; " << (completeRecovery ? "complete" : "incomplete")
                << "; failure_streak=" << resultingFailureStreak;
         if (!recoveryDiagnostic.empty())
             result << "; " << recoveryDiagnostic;
-        AppendV178RecoveryMetadata(
+        AppendV179RecoveryMetadata(
             payload,
             true,
             freshTabViewFound,
@@ -13315,7 +13498,7 @@ DWORD sehCode = 0;
 
         case mcbridge::Command::GetStatusReportSnapshot:
         {
-            const bool built = BuildV178StatusReportSnapshotWithRecovery(snapshot, responsePayload);
+            const bool built = BuildV179StatusReportSnapshotWithRecovery(snapshot, responsePayload);
             return built ? mcbridge::Status::Ok : mcbridge::Status::ExtractorCallFailed;
         }
 

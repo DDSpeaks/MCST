@@ -1,7 +1,23 @@
-# MCST 1.20.1 GitHub Publication-Ready Package
+# MCST 1.20.2 Tracker Recovery Fix
 
-Tracker Bridge internal build: V178  
+Tracker Bridge internal build: V179  
 Bridge protocol: V2
+
+## Tracker recovery correction
+
+- Revalidates the last accepted CATPTTabView address before scanning memory.
+- Searches remembered allocator neighborhoods first and reads them in 256 KiB
+  blocks instead of issuing one protected read for every pointer-sized value.
+- Runs a bounded process-wide RTTI fallback immediately after a targeted miss.
+- Applies the verified Tracker profile and strict structural score requirements
+  before accepting a candidate from any recovery stage.
+- Removes the persistent-recovery lock-in that previously suppressed the only
+  search proven to find the still-live Tracker object.
+- Uses 30-second retries initially, 60-second retries after three failures, and
+  five-minute retries after ten failures to limit long-running recovery load.
+- Adds stage-specific execution diagnostics for validated-hint, targeted, and
+  process-wide recovery results.
+- Keeps recovery fully read-only and retains Bridge Protocol V2.
 
 ## GitHub Actions compatibility fix
 
@@ -11,8 +27,8 @@ Bridge protocol: V2
 - Corrected a stale regression assertion that expected the removed `[10 rows]`
   text after the current Saxo Open P/L total. The production report was already
   correct and remains unchanged.
-- Version `1.20.1` is based on `1.20.0` and the validated internal
-  `1.114-R46` build; monitoring logic and Tracker Bridge V178 are unchanged.
+- Version `1.20.2` is based on `1.20.1`; Watchdog monitoring and Dashboard
+  behavior are retained while Tracker recovery is updated in Bridge V179.
 - Public release tags use the standard `vX.Y.Z` form. The package build still
   rejects any tag that does not exactly match the source version.
 
@@ -91,7 +107,7 @@ Bridge protocol: V2
 - P/L arithmetic, currency validation, visible-account filtering, colors, and
   alignment remain unchanged.
 - Added regression checks requiring the summary comment column to remain empty.
-- Tracker Bridge V178 and Protocol V2 are unchanged.
+- Tracker Bridge Protocol V2 is unchanged.
 
 ## Retained MIT License
 
@@ -129,7 +145,7 @@ filter updated for public `vX.Y.Z` releases.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.20.1` creates a GitHub Release from
+- Pushing the exact tag `v1.20.2` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages
@@ -153,11 +169,10 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 - The Release test executable is now named `MCST-LogicTests.exe`; the Visual
   Studio solution displays the project as `MCST.LogicTests`.
 - Test failures are reported with a nonzero exit code and a readable diagnostic.
-- The production fast/expanded/wide Tracker recovery decision now lives in the
-  shared `TrackerRecoveryPolicy.h`. Both Bridge V178 and LogicTests call that
-  exact policy instead of maintaining duplicate decision logic.
-- LogicTests verifies thresholds, budgets, cooldowns, and expanded fallback
-  when the wide tier remains inside its cooldown.
+- Tracker retry/load limits live in shared `TrackerRecoveryPolicy.h`. Both
+  Bridge V179 and LogicTests use the same policy.
+- LogicTests verifies the targeted and process-wide budgets plus the 30-second,
+  60-second, and five-minute retry thresholds.
 
 ## Developer Mode help
 
@@ -268,7 +283,7 @@ remain before `UIAutomation.h` in `BrokerAuthDetector.cpp`.
 
 ## Installation note
 
-Install the prebuilt GitHub Release ZIP or rebuild and replace
-`MCST-Watchdog.exe`. Bridge V178 is unchanged from R34. If the DLL is replaced,
-restart MultiCharts so Bridge V178 is loaded; restarting Watchdog alone does not
-replace the DLL running inside MultiCharts. Protocol V2 is unchanged.
+Install the prebuilt GitHub Release ZIP or rebuild and replace both
+`MCST-Watchdog.exe` and `MCST-TrackerBridge.dll`. Restart MultiCharts so Bridge
+V179 is loaded; restarting Watchdog alone does not replace the DLL running
+inside MultiCharts. Protocol V2 is unchanged.

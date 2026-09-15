@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.1'
-$currentBridgeBuild = 178
+$currentVersion = '1.20.2'
+$currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -39,7 +39,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.1.txt',
+    'BUILD_VALIDATION_1.20.2.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
     'Examples\MCST-Watchdog.ini.example',
@@ -192,7 +192,7 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
-    throw 'The 1.20.1 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+    throw 'The 1.20.2 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
 $activityHistory = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
@@ -200,7 +200,7 @@ if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'left.time == right.time' -or
     $activityHistory -notmatch 'left.state == right.state' -or
     $activityHistory -notmatch 'left.text == right.text') {
-    throw 'The 1.20.1 activity-history deduplication contract is missing.'
+    throw 'The 1.20.2 activity-history deduplication contract is missing.'
 }
 $developerHelp = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
 foreach ($helpTopic in @('AT Start', 'AT Capture', 'AT Finish', 'Tracker Capture', 'Position CCY', 'Open Compat', 'Reload Compat')) {
@@ -389,11 +389,12 @@ if ($testsProject -notmatch '<TargetName>MCST-LogicTests</TargetName>' -or
     $testsSource -notmatch 'brokerDecision\.status\.value != L"Connected"' -or
     $testsSource -notmatch 'Broker authentication required' -or
     $testsSource -notmatch 'SelectTrackerRecoveryPolicy' -or
-    $testsSource -notmatch 'TrackerRecoveryTier::Expanded' -or
-    $testsSource -notmatch 'TrackerRecoveryTier::Wide' -or
+    $testsSource -notmatch 'targetedTimeBudgetMs != 100' -or
+    $testsSource -notmatch 'processWideTimeBudgetMs != 3000' -or
+    $testsSource -notmatch 'retryCooldownMs != 5ull \* 60ull \* 1000ull' -or
     $testsSource -notmatch 'logic and regression tests passed' -or
-    $recoveryPolicy -notmatch 'failureStreak >= 12' -or
-    $recoveryPolicy -notmatch 'failureStreak >= 4') {
+    $recoveryPolicy -notmatch 'failureStreak >= 10' -or
+    $recoveryPolicy -notmatch 'failureStreak >= 3') {
     throw 'One-line Open Positions placement, size, or color regression test is missing.'
 }
 if ($testsSource -match [regex]::Escape('L"[10 rows]"') -or
@@ -426,9 +427,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,1,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,1,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.1.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,2,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,2,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.2.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -439,14 +440,14 @@ if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).pa
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
-if ($bridgeRc -notmatch 'FILEVERSION 1,0,178,0' -or
-    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.178.0\0"')) {
-    throw 'Tracker Bridge Windows file version is not aligned with internal V178.'
+if ($bridgeRc -notmatch 'FILEVERSION 1,0,179,0' -or
+    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.179.0\0"')) {
+    throw 'Tracker Bridge Windows file version is not aligned with internal V179.'
 }
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
     'forceFreshScan',
-    'BuildV178StatusReportSnapshotWithRecovery',
+    'BuildV179StatusReportSnapshotWithRecovery',
     'TabViewRecoveryModeScope',
     '~TabViewRecoveryModeScope',
     'g_tabViewRecoveryModeActive.store(false)',
@@ -455,23 +456,25 @@ foreach ($recoveryToken in @(
     'kTabViewCandidateCacheTtlMs = 30000',
     'recovery_attempted',
     'recovery_result',
-    'kTabViewRecoveryCooldownMs = 30000',
     'g_tabViewRecoveryModeActive',
     'g_tabViewPersistentFailureActive',
     'g_tabViewRecoveryFailureStreak',
     'g_recentTabViewHints',
     'RememberTabViewHint',
     'tabview_recovery_start',
-    'tabview_recovery_scan',
+    'tabview_recovery_validated_hint',
+    'tabview_recovery_targeted',
+    'tabview_recovery_process_wide',
     'tabview_recovery_complete',
     'tabview_recovery_incomplete',
     'exact_vtable_hits',
     'structurally_rejected',
     'accepted_candidates',
-    'decision = "no_candidates"',
+    'ValidateRecentProfileTabViewHints',
+    'SelectStrongProfileTabViewCandidate',
+    'processWideTimeBudgetMs',
+    'processWideByteBudget',
     'SelectTrackerRecoveryPolicy',
-    'stampExpandedTick',
-    'stampWideTick',
     'process-wide discovery deferred during persistent recovery',
     'pagesRead < 3'
 )) {
@@ -711,7 +714,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.1-Windows-x64',
+    'MCST-Watchdog-1.20.2-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -727,7 +730,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.1',
+    '1.20.2',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',
