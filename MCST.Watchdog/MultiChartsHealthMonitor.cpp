@@ -1,6 +1,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <commctrl.h>
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <ole2.h>
@@ -356,29 +357,12 @@ namespace
         return TRUE;
     }
 
+    #include "QueueStatusReader.h"
+
     bool ReadQueueIndicator(HWND mainWindow, unsigned long& queueCount, unsigned long& queueAgeSeconds,
         std::wstring& diagnostic)
     {
-        ComApartmentScope apartment;
-        IUIAutomation* automation = nullptr;
-        if (apartment.usable)
-        {
-            CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER,
-                IID_PPV_ARGS(&automation));
-        }
-
-        QueueSearch search;
-        search.automation = automation;
-        if (ParseQueueText(WindowText(mainWindow), search.queueCount, search.queueAgeSeconds))
-            search.found = true;
-        else
-            EnumChildWindows(mainWindow, FindQueueTextProc, reinterpret_cast<LPARAM>(&search));
-
-        ReleaseCom(automation);
-        queueCount = search.queueCount;
-        queueAgeSeconds = search.queueAgeSeconds;
-        diagnostic = search.diagnostic.empty() ? L"No status-class child exposed text" : search.diagnostic;
-        return search.found;
+        return ReadStatusBarQueue(mainWindow, queueCount, queueAgeSeconds, diagnostic);
     }
 
     unsigned long long FileTimeValue(const FILETIME& value)

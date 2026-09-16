@@ -41,21 +41,21 @@ run must:
 
 Download and inspect that artifact before tagging the release.
 
-## 4. Publish version 1.20.2
+## 4. Publish version 1.20.4
 
 From a terminal opened in the repository root:
 
 ```powershell
-git tag -a v1.20.2 -m "MCST-Watchdog 1.20.2"
-git push origin v1.20.2
+git tag -a v1.20.4 -m "MCST-Watchdog 1.20.4"
+git push origin v1.20.4
 ```
 
 Do not create the Release manually in the GitHub web interface. The tag starts
 the validated workflow, which creates the Release and attaches:
 
 ```text
-MCST-Watchdog-1.20.2-Windows-x64.zip
-MCST-Watchdog-1.20.2-SHA256SUMS.txt
+MCST-Watchdog-1.20.4-Windows-x64.zip
+MCST-Watchdog-1.20.4-SHA256SUMS.txt
 ```
 
 ## 5. Confirm the MIT License

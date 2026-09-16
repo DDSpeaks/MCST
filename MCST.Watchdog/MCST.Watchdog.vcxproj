@@ -47,6 +47,7 @@
     <ClInclude Include="DeveloperHelpContent.h" />
     <ClInclude Include="MultiChartsVersionDetector.h" />
     <ClInclude Include="MultiChartsHealthMonitor.h" />
+    <ClInclude Include="QueueStatusReader.h" />
     <ClInclude Include="../MCST.Shared/ActivityHistory.h" />
   </ItemGroup>
   <ItemGroup><ResourceCompile Include="MCST.Watchdog.rc" /></ItemGroup>

@@ -1,0 +1,44 @@
+MCST-Watchdog 1.20.4 - direct statusbar diagnostic trial
+======================================================
+Tracker Bridge stays V179 / protocol V2.
+
+This is NOT a verified production release. Windows compilation and live
+reading cannot be tested in the authoring environment.
+Previous validation documents describe inherited features, not execution
+of this trial. Run the existing Windows validation/build/regression workflow.
+
+Changes:
+- Query only msctls_statusbar32 children of the selected MC main window.
+- Cache validated HWNDs; rediscover when they become invalid.
+- Remove UIA/MSAA chart traversal from the active queue-reading path.
+- Read each part with SB_GETTEXTLENGTHW and SB_GETTEXTW.
+- Log part index, length, SBT_OWNERDRAW flag, returned item data or text,
+  failures and elapsed milliseconds per process.
+- Owner-drawn item data is never dereferenced or treated as a text pointer.
+- Use 50 ms message timeouts and a 500 ms cooperative budget per process.
+  Enumeration and process-memory operations are not hard real-time bounded.
+- Unknown queue readings remain unread / n/a. They are not proof of health.
+- Existing >=1000 q or >=10 s CRITICAL rules are unchanged.
+
+Memory safety:
+Cross-process SB_GETTEXT uses a temporary 128 KiB target buffer to accommodate
+the maximum documented statusbar string length even if the text changes.
+The buffer is normally released immediately after a successful read.
+If the text message fails/times out, it could still write later: keep that
+buffer allocated and disable further buffer reads for that PID in this run.
+Windows reclaims it on target-process exit. Restarting Watchdog after repeated
+timeouts could leave another buffer; avoid repeated restarts during diagnosis.
+No executable code is injected and no trading commands or chart actions occur.
+If process access is denied, the report records failure; no bypass is attempted.
+
+Test:
+1. Build Release x64, then replace only Watchdog's EXE after closing Watchdog.
+2. Keep the existing bridge DLLs and INI. Keep MultiCharts running.
+3. While the red queue field is visible, press Refresh, then Save Report.
+4. Send the report including QUEUE READ DIAGNOSTICS and a current screenshot.
+5. ownerdraw=yes without readable text is a diagnostic result, not a fix:
+   a component-specific next method may still be necessary.
+
+Microsoft statusbar message references:
+https://learn.microsoft.com/en-us/windows/win32/controls/sb-gettext
+https://learn.microsoft.com/en-us/windows/win32/controls/sb-gettextlength

@@ -1,6 +1,6 @@
 ﻿# Changelog
 
-## 1.20.2
+## 1.20.4
 
 - Bumped the Tracker Bridge internal build from V178 to V179 while retaining
   Bridge Protocol V2.
