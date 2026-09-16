@@ -19,6 +19,139 @@ BOOL CALLBACK CollectStatusBars(HWND window, LPARAM parameter)
     return TRUE;
 }
 
+void DescribeQueueWindow(std::wostringstream& out, HWND window)
+{
+    RECT rect{};
+    DWORD pid = 0;
+    GetWindowRect(window, &rect);
+    GetWindowThreadProcessId(window, &pid);
+    out << L" hwnd=0x" << std::hex << reinterpret_cast<UINT_PTR>(window)
+        << std::dec << L" pid=" << pid << L" class=" << WindowClass(window)
+        << L" rect=" << rect.left << L"," << rect.top << L","
+        << rect.right << L"," << rect.bottom;
+}
+
+struct QueueAreaSearch
+{
+    RECT barRect{};
+    std::wostringstream* out = nullptr;
+    unsigned int matches = 0;
+    std::chrono::steady_clock::time_point deadline;
+};
+
+BOOL CALLBACK DescribeQueueAreaChild(HWND window, LPARAM parameter)
+{
+    auto& search = *reinterpret_cast<QueueAreaSearch*>(parameter);
+    if (search.matches >= 32 || std::chrono::steady_clock::now() >= search.deadline)
+        return FALSE;
+    RECT rect{}, overlap{};
+    if (IsWindowVisible(window) && GetWindowRect(window, &rect) &&
+        IntersectRect(&overlap, &rect, &search.barRect))
+    {
+        ++search.matches;
+        *search.out << L" [area-child";
+        DescribeQueueWindow(*search.out, window);
+        *search.out << L"]";
+    }
+    return TRUE;
+}
+
+// Diagnostic only: capture a small on-screen statusbar strip into a temporary
+// memory bitmap. Pixels never trigger trading-health changes. No image is saved.
+void DescribeRedQueueArea(HWND root, HWND bar, std::wostringstream& out)
+{
+    RECT rect{};
+    if (!GetWindowRect(bar, &rect))
+        return;
+    out << L" [statusbar-geometry";
+    DescribeQueueWindow(out, bar);
+    out << L"]";
+    QueueAreaSearch search;
+    search.barRect = rect;
+    search.out = &out;
+    search.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    EnumChildWindows(root, DescribeQueueAreaChild, reinterpret_cast<LPARAM>(&search));
+    if (!IsWindowVisible(bar) || IsIconic(root))
+    {
+        out << L" [red-probe=skipped-hidden-or-minimized]";
+        return;
+    }
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    if (width <= 0 || width > 4096 || height <= 0 || height > 128)
+    {
+        out << L" [red-probe=skipped-size]";
+        return;
+    }
+    HDC screen = GetDC(nullptr);
+    HDC memory = screen ? CreateCompatibleDC(screen) : nullptr;
+    HBITMAP bitmap = screen ? CreateCompatibleBitmap(screen, width, height) : nullptr;
+    HGDIOBJ previous = memory && bitmap ? SelectObject(memory, bitmap) : nullptr;
+    unsigned int red = 0, occluded = 0, probes = 0;
+    if (previous && previous != HGDI_ERROR &&
+        BitBlt(memory, 0, 0, width, height, screen, rect.left, rect.top, SRCCOPY))
+    {
+        for (int row = 1; row <= 2; ++row)
+        {
+            bool inRun = false;
+            for (int x = 0; x < width; x += 2)
+            {
+                const int y = height * row / 3;
+                const COLORREF color = GetPixel(memory, x, y);
+                const bool isRed = color != CLR_INVALID && GetRValue(color) >= 150 &&
+                    GetRValue(color) > GetGValue(color) + 65 &&
+                    GetRValue(color) > GetBValue(color) + 45;
+                if (!isRed)
+                {
+                    inRun = false;
+                    continue;
+                }
+                POINT point{ rect.left + x, rect.top + y };
+                const HWND hit = WindowFromPoint(point);
+                if (GetAncestor(hit, GA_ROOT) != root)
+                {
+                    ++occluded;
+                    inRun = false;
+                    continue;
+                }
+                ++red;
+                if (!inRun && probes < 8)
+                {
+                    ++probes;
+                    out << L" [red-hit xy=" << point.x << L"," << point.y
+                        << L" rgb=" << static_cast<unsigned int>(GetRValue(color)) << L","
+                        << static_cast<unsigned int>(GetGValue(color)) << L","
+                        << static_cast<unsigned int>(GetBValue(color));
+                    HWND ancestor = hit;
+                    for (int level = 0; ancestor && level < 4; ++level)
+                    {
+                        out << L" {level=" << level;
+                        DescribeQueueWindow(out, ancestor);
+                        out << L"}";
+                        if (ancestor == root)
+                            break;
+                        ancestor = GetParent(ancestor);
+                    }
+                    out << L"]";
+                }
+                inRun = true;
+            }
+        }
+        out << L" [red-probe samples=" << red << L" occluded-red=" << occluded
+            << L"; color is diagnostic only, not a queue reading]";
+    }
+    else
+        out << L" [red-probe=capture-failed]";
+    if (previous && previous != HGDI_ERROR)
+        SelectObject(memory, previous);
+    if (bitmap)
+        DeleteObject(bitmap);
+    if (memory)
+        DeleteDC(memory);
+    if (screen)
+        ReleaseDC(nullptr, screen);
+}
+
 bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
     std::wstring& diagnostic)
 {
@@ -150,6 +283,8 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
         VirtualFreeEx(process, remote, 0, MEM_RELEASE);
     if (process)
         CloseHandle(process);
+    for (HWND bar : bars)
+        DescribeRedQueueArea(root, bar, out);
     out << L" elapsed_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count();
     diagnostic = out.str();

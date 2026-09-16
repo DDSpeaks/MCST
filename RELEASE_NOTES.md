@@ -1,4 +1,4 @@
-# MCST 1.20.4 Tracker Recovery Fix
+# MCST 1.20.5 Tracker Recovery Fix
 
 Tracker Bridge internal build: V179  
 Bridge protocol: V2
@@ -27,7 +27,7 @@ Bridge protocol: V2
 - Corrected a stale regression assertion that expected the removed `[10 rows]`
   text after the current Saxo Open P/L total. The production report was already
   correct and remains unchanged.
-- Version `1.20.4` is based on `1.20.1`; Watchdog monitoring and Dashboard
+- Version `1.20.5` is based on `1.20.1`; Watchdog monitoring and Dashboard
   behavior are retained while Tracker recovery is updated in Bridge V179.
 - Public release tags use the standard `vX.Y.Z` form. The package build still
   rejects any tag that does not exactly match the source version.
@@ -145,7 +145,7 @@ filter updated for public `vX.Y.Z` releases.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.20.4` creates a GitHub Release from
+- Pushing the exact tag `v1.20.5` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages
@@ -287,7 +287,13 @@ Install the prebuilt GitHub Release ZIP or rebuild and replace both
 `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll`. Restart MultiCharts so Bridge
 V179 is loaded; restarting Watchdog alone does not replace the DLL running
 inside MultiCharts. Protocol V2 is unchanged.
-# 1.20.4 — diagnostic trial, not a verified production release
+# 1.20.5 — queue-area locator diagnostic trial
+
+Adds statusbar-area window geometry and temporary on-screen red-pixel probing
+to identify the component drawing the queue warning. No color-based alerts.
+See `QUEUE_AREA_LOCATOR_TRIAL.txt` for the current test procedure.
+
+## Inherited direct-reader trial notes
 
 Direct statusbar-part reading replaces broad accessibility traversal in the
 active queue monitor. Reports record field types, text and read duration.

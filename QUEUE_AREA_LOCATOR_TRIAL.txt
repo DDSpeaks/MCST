@@ -1,0 +1,47 @@
+MCST-Watchdog 1.20.5 - queue-area locator diagnostic trial
+=======================================================
+This is a source-only diagnostic trial, not a verified production release.
+Bridge V179 / protocol V2 is unchanged. Windows build/live test NOT RUN here.
+
+Purpose:
+1.20.4 found standard statusbars but their text queries returned only the
+clock, not the red queue text. This trial identifies windows at the red area.
+It does NOT promise queue-value extraction or a new alarm based on color.
+
+Changes:
+- Retain direct statusbar part queries and existing queue alarm thresholds.
+- Enumerate at most 32 visible children intersecting each statusbar rectangle,
+  using a cooperative 100 ms enumeration budget.
+- Capture only the visible statusbar strip into a temporary memory bitmap
+  (max 4096 x 128); sample two rows at two-pixel intervals.
+- For at most eight red sample runs, use WindowFromPoint without moving the
+  mouse and record the hit HWND, PID, class, rectangle and up to four ancestors.
+- Skip hidden/minimized statusbars. Ignore hits owned by other root windows.
+- Release bitmap/DC resources on all ordinary success/failure paths.
+- Append actual elapsed_ms including geometry/color diagnosis to each PID.
+
+Important limitations:
+Color diagnosis needs the MC statusbar to be visible on the active desktop.
+Keep the affected MC window in front. Do not cover its red strip with Watchdog.
+RDP desktop availability, DPI scaling and occlusion can affect captured pixels.
+Red sample hits are evidence for locating a component only, not proof of backlog.
+No OCR, saved screenshots, clicks, activation or chart/order changes occur.
+The per-process 500 ms text-query budget from 1.20.4 remains cooperative.
+The added capture/enumeration work is separately measured, not hard-time-bounded.
+See DIRECT_STATUSBAR_TRIAL.txt for the existing remote-buffer timeout handling.
+Green health state still does not certify an unread queue is clear.
+Tracker Snapshot availability is a separate issue; Bridge code is unchanged.
+
+Test now:
+1. Build Release x64 using Visual Studio or the existing GitHub workflow.
+2. Close only Watchdog; replace its EXE, retain current DLLs and INI.
+3. Keep MC running and bring the affected MC window's red statusbar into view.
+4. Start Watchdog without covering that strip. Press Refresh and wait for it
+   to finish, then Save Report.
+5. Send the report including QUEUE READ DIAGNOSTICS plus a current screenshot.
+6. Inspect red-hit records: if the hit is the statusbar itself and no separate
+   child is found, custom painting may be involved; this remains unconfirmed.
+
+Prior release/validation notes describe inherited behavior and do not prove
+successful queue detection in 1.20.5. This trial was checked for source
+contracts, resource cleanup paths and project XML, not executed on Windows.
