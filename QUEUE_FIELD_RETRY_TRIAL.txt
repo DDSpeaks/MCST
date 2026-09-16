@@ -1,4 +1,4 @@
-MCST-Watchdog 1.20.6 - queue-field geometry and retry diagnostic trial
+MCST-Watchdog 1.20.7 - queue-field geometry and retry diagnostic trial
 ===================================================================
 Source-only diagnostic trial. Windows build and live detection NOT RUN here.
 Bridge V179 / protocol V2 and trading strategies remain unchanged.

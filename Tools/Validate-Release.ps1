@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.6'
+$currentVersion = '1.20.7'
 $currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -33,6 +33,8 @@ $required = @(
     'MCST.Watchdog\MultiChartsHealthMonitor.h',
     'MCST.Watchdog\MultiChartsHealthMonitor.cpp',
     'MCST.Watchdog\QueueStatusReader.h',
+    'MCST.Watchdog\VisibleQueueWarning.h',
+    'MCST.Shared\VisibleWarningPolicy.h',
     'MCST.Shared\ActivityHistory.h',
     'MCST.Tests\MCST.Tests.vcxproj',
     'LICENSE',
@@ -40,7 +42,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.6.txt',
+    'BUILD_VALIDATION_1.20.7.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
     'Examples\MCST-Watchdog.ini.example',
@@ -193,7 +195,7 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
-    throw 'The 1.20.6 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+    throw 'The 1.20.7 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
 $activityHistory = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
@@ -201,7 +203,7 @@ if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'left.time == right.time' -or
     $activityHistory -notmatch 'left.state == right.state' -or
     $activityHistory -notmatch 'left.text == right.text') {
-    throw 'The 1.20.6 activity-history deduplication contract is missing.'
+    throw 'The 1.20.7 activity-history deduplication contract is missing.'
 }
 $developerHelp = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
 foreach ($helpTopic in @('AT Start', 'AT Capture', 'AT Finish', 'Tracker Capture', 'Position CCY', 'Open Compat', 'Reload Compat')) {
@@ -428,9 +430,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,6,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,6,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.6.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,7,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,7,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.7.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -715,7 +717,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.6-Windows-x64',
+    'MCST-Watchdog-1.20.7-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -731,7 +733,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.6',
+    '1.20.7',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

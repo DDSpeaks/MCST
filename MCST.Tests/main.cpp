@@ -10,6 +10,7 @@
 #include <vector>
 #include "../MCST.Shared/MCBridgeProtocol.h"
 #include "../MCST.Shared/ActivityHistory.h"
+#include "../MCST.Shared/VisibleWarningPolicy.h"
 #include "../MCST.Shared/TrackerRecoveryPolicy.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 #include "../MCST.Watchdog/BrokerMonitor.h"
@@ -664,6 +665,22 @@ int RunLogicTests()
     {
         throw std::runtime_error("The newest broker-state event outside the ten-row display window did not win");
     }
+
+    int redSamples = 0, clearSamples = 0;
+    bool confirmedWarning = false;
+    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, confirmedWarning);
+    if (confirmedWarning) throw std::runtime_error("One red sample must not confirm a warning");
+    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, confirmedWarning);
+    if (!confirmedWarning) throw std::runtime_error("Two red samples must confirm a warning");
+    mcst::UpdateVisibleWarning(false, false, redSamples, clearSamples, confirmedWarning);
+    if (!confirmedWarning) throw std::runtime_error("An unchecked warning must remain confirmed");
+    mcst::UpdateVisibleWarning(true, false, redSamples, clearSamples, confirmedWarning);
+    if (!confirmedWarning) throw std::runtime_error("One clear sample must not clear a warning");
+    mcst::UpdateVisibleWarning(true, false, redSamples, clearSamples, confirmedWarning);
+    if (confirmedWarning) throw std::runtime_error("Two clear samples must clear a warning");
+    if (!mcst::IsVisibleRedWarning(80, 80, 60) ||
+        mcst::IsVisibleRedWarning(80, 79, 60) || mcst::IsVisibleRedWarning(80, 80, 1))
+        throw std::runtime_error("Visible warning background/occlusion policy failed");
 
     std::wcout << L"MCST logic and regression tests passed.\n";
     return 0;

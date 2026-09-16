@@ -1,0 +1,55 @@
+MCST-Watchdog 1.20.7 - simple visible queue warning
+=================================================
+Source package. Windows compilation and live behavior must be verified.
+Bridge V179 / protocol V2 is unchanged.
+
+Current behavior (supersedes older diagnostic-trial notes):
+- The active queue path no longer extracts numeric queue values or scans all
+  statusbar fields/charts. Only MC16 statusbar field 4's background is checked.
+- Field geometry is queried once and cached until the statusbar HWND or size
+  changes. Discovery expects the current MC16 seven-field statusbar layout.
+- Sample two rows of a tiny temporary bitmap. No screenshot is saved.
+- Red means R>=150, G<=90, B<=90; require at least 12 red samples and 25% red
+  coverage, with every sampled location belonging to this exact statusbar.
+- Two consecutive checked red readings confirm an Attention/WARNING state.
+- The existing MultiCharts Health email path sends the warning when enabled.
+  New affected PIDs also trigger that path if health already has a warning.
+- Two consecutive checked non-red readings clear the confirmed warning.
+- Hidden, minimized, occluded or unreadable fields are NOT CHECKED. They do
+  not clear a previously confirmed warning. Interrupted observations reset
+  the consecutive-sample counters, not the already-confirmed warning.
+- Reports show each PID's current check result and confirmed-warning state.
+- An unchecked field does not independently raise an alarm; overall OK does
+  not certify that hidden instances are free of queue warnings.
+- Existing UI responsiveness, CPU/resource/process monitoring is retained.
+- No orders, strategy changes, window activation, clicks, OCR or heartbeat.
+
+Lightweight implementation:
+One cached field rectangle, one small bitmap and local pixel samples per
+visible process per existing refresh. No extra recurring timer is added.
+Initial geometry queries use at most two 125 ms message waits. Screen/GDI
+operations are measured but not hard real-time bounded.
+If a pointer-bearing geometry message fails, its temporary buffer is retained
+because MC might still use it; further pointer queries are disabled for that
+PID for this Watchdog run. Windows reclaims it when MC exits. Avoid repeated
+Watchdog restarts after such failures. Normal reads free their buffers.
+RDP desktop availability/DPI/occlusion may prevent a check. Sampling is not
+proof that every pixel is uncovered; it checks only the sampled locations.
+Changes to the MC statusbar layout require revalidation of field 4.
+
+Test:
+1. Build Release x64 via Visual Studio or the existing GitHub workflow.
+2. Close only Watchdog; replace EXE. Keep existing bridge DLLs and INI.
+3. Leave the affected MC statusbar visible, uncovered on the active desktop.
+4. Run Refresh twice, waiting for each to finish (or wait two timer cycles).
+5. Expect MultiCharts Health WARNING and the red-warning message. With email
+   enabled and an alert recipient configured, expect the existing health alert.
+6. Save Report and inspect VISIBLE QUEUE WARNINGS for the affected PID.
+7. Cover/minimize the window: check should say not checked, not not red.
+8. When the red background disappears, two checked non-red reads should clear
+   its warning. Other health problems may keep overall health non-OK.
+
+Validation: policy tests cover red confirmation, occlusion, interruption and
+two-read clearing. Pure policy smoke tests run under g++ in Linux. Project XML,
+source contracts and archive integrity checked. Full Windows regression/build,
+email delivery and live screen detection are NOT tested here.

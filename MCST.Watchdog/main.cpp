@@ -1508,7 +1508,7 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.6", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.7", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
@@ -1832,7 +1832,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.6", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.7", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2042,6 +2042,10 @@ namespace
                 const bool previouslyCriticalStaleTrackerData = g_app.status.trackerDataStaleCritical;
                 const mcst::HealthState previousTrackerState = g_app.status.trackerSnapshot.state;
                 const mcst::HealthState previousMultiChartsHealthState = g_app.status.multiChartsHealth.state;
+                std::vector<unsigned long> previousVisibleWarningPids;
+                for (const auto& process : g_app.status.multiChartsProcesses.processes)
+                    if (process.visibleQueueWarningConfirmed)
+                        previousVisibleWarningPids.push_back(process.processId);
                 const bool multiChartsHealthPreviouslyObserved = g_app.multiChartsHealthObserved;
                 const int active = result->status.autoTradingActive;
                 TrackerStatusSnapshot liveSnapshot = std::move(result->snapshot);
@@ -2168,8 +2172,14 @@ namespace
                 g_app.status.broker = brokerDecision.status;
                 RecalculateOverallStatus(g_app.status, g_app.config, true);
 
+                bool newVisibleQueueWarning = false;
+                for (const auto& process : g_app.status.multiChartsProcesses.processes)
+                    if (process.visibleQueueWarningConfirmed &&
+                        std::find(previousVisibleWarningPids.begin(), previousVisibleWarningPids.end(),
+                            process.processId) == previousVisibleWarningPids.end())
+                        newVisibleQueueWarning = true;
                 const bool multiChartsHealthChanged = !multiChartsHealthPreviouslyObserved ||
-                    g_app.status.multiChartsHealth.state != previousMultiChartsHealthState;
+                    g_app.status.multiChartsHealth.state != previousMultiChartsHealthState || newVisibleQueueWarning;
                 g_app.multiChartsHealthObserved = true;
                 if (multiChartsHealthChanged)
                 {
@@ -2395,7 +2405,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.6 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.7 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2466,7 +2476,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.6 - Queue Field Retry Trial",
+            0, kWindowClass, L"MCST-Watchdog 1.20.7 - Visible Queue Warning",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

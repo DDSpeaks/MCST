@@ -56,6 +56,9 @@ namespace mcst
         unsigned long gdiObjects = 0;
         unsigned long userObjects = 0;
         bool queueIndicatorFound = false;
+        bool visibleQueueWarningChecked = false;
+        bool visibleQueueWarningRed = false;
+        bool visibleQueueWarningConfirmed = false;
         std::wstring queueReadDiagnostic;
         unsigned long queueCount = 0;
         unsigned long queueAgeSeconds = 0;
@@ -71,6 +74,8 @@ namespace mcst
         std::size_t processCount = 0;
         std::size_t unresponsiveProcessCount = 0;
         std::size_t sustainedHighCpuProcessCount = 0;
+        std::size_t visibleQueueWarningCount = 0;
+        std::size_t visibleQueueUncheckedCount = 0;
         unsigned long maximumQueueCount = 0;
         unsigned long maximumQueueAgeSeconds = 0;
         unsigned long recentlyDisappearedProcessId = 0;

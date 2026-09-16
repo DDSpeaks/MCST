@@ -1,9 +1,9 @@
-SUPERSEDED: This note describes the previous MSAA trial. For 1.20.6 use
+SUPERSEDED: This note describes the previous MSAA trial. For 1.20.7 use
 DIRECT_STATUSBAR_TRIAL.txt. The active reader no longer traverses MSAA/UIA.
 
-MCST-Watchdog 1.20.6 - experimental queue reader
+MCST-Watchdog 1.20.7 - experimental queue reader
 
-Based on 1.20.6; Tracker Bridge remains V179 / protocol V2.
+Based on 1.20.7; Tracker Bridge remains V179 / protocol V2.
 This is a diagnostic trial, not a verified production release.
 
 Build Release x64 using Visual Studio or the existing GitHub workflow.

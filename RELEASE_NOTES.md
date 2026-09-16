@@ -1,4 +1,4 @@
-# MCST 1.20.6 Tracker Recovery Fix
+# MCST 1.20.7 Tracker Recovery Fix
 
 Tracker Bridge internal build: V179  
 Bridge protocol: V2
@@ -27,7 +27,7 @@ Bridge protocol: V2
 - Corrected a stale regression assertion that expected the removed `[10 rows]`
   text after the current Saxo Open P/L total. The production report was already
   correct and remains unchanged.
-- Version `1.20.6` is based on `1.20.1`; Watchdog monitoring and Dashboard
+- Version `1.20.7` is based on `1.20.1`; Watchdog monitoring and Dashboard
   behavior are retained while Tracker recovery is updated in Bridge V179.
 - Public release tags use the standard `vX.Y.Z` form. The package build still
   rejects any tag that does not exactly match the source version.
@@ -145,7 +145,7 @@ filter updated for public `vX.Y.Z` releases.
   `MCST-LogicTests.exe` on a GitHub Windows runner.
 - A manual Actions run uploads a 30-day package artifact for testing but does
   not create a public Release.
-- Pushing the exact tag `v1.20.6` creates a GitHub Release from
+- Pushing the exact tag `v1.20.7` creates a GitHub Release from
   `RELEASE_NOTES.md` and attaches the portable Windows x64 ZIP and its SHA-256
   checksum.
 - `Tools/Build-PortableRelease.ps1` verifies the version/tag match, packages
@@ -287,7 +287,14 @@ Install the prebuilt GitHub Release ZIP or rebuild and replace both
 `MCST-Watchdog.exe` and `MCST-TrackerBridge.dll`. Restart MultiCharts so Bridge
 V179 is loaded; restarting Watchdog alone does not replace the DLL running
 inside MultiCharts. Protocol V2 is unchanged.
-# 1.20.6 — queue-field retry diagnostic trial
+# 1.20.7 — simple visible queue warning
+
+Active queue monitoring checks only field 4's visible red background. Two
+consecutive red observations raise a warning through the existing health/email
+path. Unchecked fields never clear a confirmed warning. No numeric extraction.
+See `VISIBLE_QUEUE_WARNING.txt`. Windows/live behavior remains unverified here.
+
+## Historical field-retry notes (no longer the active queue path)
 
 Adds field geometry, red-field priority, continuation after length-query
 failure, failure codes and bounded priority retry. Current instructions:

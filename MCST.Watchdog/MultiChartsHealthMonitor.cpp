@@ -11,6 +11,7 @@
 #pragma comment(lib, "oleacc.lib")
 
 #include "MultiChartsHealthMonitor.h"
+#include "../MCST.Shared/VisibleWarningPolicy.h"
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +41,9 @@ namespace
         unsigned long queueCount = 0;
         unsigned long queueAgeSeconds = 0;
         bool queueSeen = false;
+        int redWarningSamples = 0;
+        int clearWarningSamples = 0;
+        bool redWarningConfirmed = false;
     };
 
     std::mutex g_historyMutex;
@@ -358,6 +362,7 @@ namespace
     }
 
     #include "QueueStatusReader.h"
+    #include "VisibleQueueWarning.h"
 
     bool ReadQueueIndicator(HWND mainWindow, unsigned long& queueCount, unsigned long& queueAgeSeconds,
         std::wstring& diagnostic)
@@ -489,10 +494,14 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
 
         if (processStatus.responsive && mainWindow)
         {
-            processStatus.queueIndicatorFound = ReadQueueIndicator(
-                mainWindow, processStatus.queueCount, processStatus.queueAgeSeconds,
-                processStatus.queueReadDiagnostic);
+            ReadVisibleQueueWarning(mainWindow, processStatus.visibleQueueWarningChecked,
+                processStatus.visibleQueueWarningRed, processStatus.queueReadDiagnostic);
         }
+
+        mcst::UpdateVisibleWarning(processStatus.visibleQueueWarningChecked,
+            processStatus.visibleQueueWarningRed, history.redWarningSamples,
+            history.clearWarningSamples, history.redWarningConfirmed);
+        processStatus.visibleQueueWarningConfirmed = history.redWarningConfirmed;
 
         if (processStatus.queueIndicatorFound)
         {
@@ -519,6 +528,8 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
         processStatus.queueGrowthSamples = history.queueGrowthSamples;
 
         processStatus.state = mcst::HealthState::Healthy;
+        if (processStatus.visibleQueueWarningConfirmed)
+            processStatus.state = mcst::HealthState::Attention;
         if (!processStatus.mainWindowFound && history.unresponsiveSamples >= 3)
             processStatus.state = mcst::HealthState::Attention;
         if (processStatus.mainWindowFound && !processStatus.responsive &&
@@ -545,6 +556,8 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
             processStatus.state = Worse(processStatus.state, mcst::HealthState::Attention);
 
         snapshot.totalCpuCorePercent += processStatus.cpuAvailable ? processStatus.cpuCorePercent : 0.0;
+        if (processStatus.visibleQueueWarningConfirmed) ++snapshot.visibleQueueWarningCount;
+        if (!processStatus.visibleQueueWarningChecked) ++snapshot.visibleQueueUncheckedCount;
         snapshot.totalPrivateMemoryBytes += processStatus.privateMemoryBytes;
         snapshot.maximumQueueCount = (std::max)(snapshot.maximumQueueCount, processStatus.queueCount);
         snapshot.maximumQueueAgeSeconds = (std::max)(snapshot.maximumQueueAgeSeconds, processStatus.queueAgeSeconds);
@@ -581,6 +594,13 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
     {
         snapshot.detail = L"No MultiCharts process found";
     }
+    else if (snapshot.visibleQueueWarningCount > 0)
+    {
+        snapshot.detail = L"Red MultiCharts queue warning detected - queue values unavailable";
+        if (snapshot.visibleQueueUncheckedCount > 0)
+            snapshot.detail += L"; " + std::to_wstring(snapshot.visibleQueueUncheckedCount) +
+                L" instance(s) not visually checked; last confirmed warnings retained";
+    }
     else if (snapshot.maximumQueueAgeSeconds >= 3)
     {
         snapshot.detail = std::to_wstring(snapshot.maximumQueueCount) + L" q / " +
@@ -607,9 +627,11 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
             snapshot.processes.begin(), snapshot.processes.end(),
             [](const mcst::MultiChartsProcessStatus& process) { return process.cpuAvailable; });
         snapshot.detail = cpuSampleAvailable
-            ? L"Responsive - no queue indicator read (not proof of clear queues) - MC CPU " +
+            ? L"Responsive - visible queue warning check only; " +
+                std::to_wstring(snapshot.visibleQueueUncheckedCount) + L" instance(s) not checked - MC CPU " +
                 FormatCorePercent(snapshot.totalCpuCorePercent) + L" of one logical core"
-            : L"Responsive - no queue indicator read (not proof of clear queues) - CPU sampling starts on next refresh";
+            : L"Responsive - visible queue warning check only; " +
+                std::to_wstring(snapshot.visibleQueueUncheckedCount) + L" instance(s) not checked - CPU sampling starts on next refresh";
     }
     return snapshot;
 }
