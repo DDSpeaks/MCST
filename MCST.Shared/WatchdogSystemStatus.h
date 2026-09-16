@@ -56,6 +56,7 @@ namespace mcst
         unsigned long gdiObjects = 0;
         unsigned long userObjects = 0;
         bool queueIndicatorFound = false;
+        std::wstring queueReadDiagnostic;
         unsigned long queueCount = 0;
         unsigned long queueAgeSeconds = 0;
         int queueGrowthSamples = 0;

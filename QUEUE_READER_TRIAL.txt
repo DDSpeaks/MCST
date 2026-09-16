@@ -1,0 +1,27 @@
+MCST-Watchdog 1.20.3 - experimental queue reader
+
+Based on 1.20.2; Tracker Bridge remains V179 / protocol V2.
+This is a diagnostic trial, not a verified production release.
+
+Build Release x64 using Visual Studio or the existing GitHub workflow.
+Close only the previous Watchdog and replace its executable with the new build.
+Keep existing configuration and bridge files. Do not restart MultiCharts:
+the currently visible red queue indicator is needed for the test.
+Press Refresh, then Save Report while the red indicator is still visible.
+Send MCST-Watchdog-StatusReport.txt, including QUEUE READ DIAGNOSTICS.
+
+The new reader adds MSAA names/values from status controls and small visible
+bottom-of-window controls to the existing window-text/UIA reader.
+If found, the existing 1000 q / 10 s CRITICAL thresholds apply.
+If no queue text is found, reports now say unread / n/a, not clear / 0 s.
+Missing text does not itself trigger an alert: an absent queue indicator can
+also mean normal operation. Diagnostic data is needed to distinguish them.
+
+No orders, strategy settings, clipboard or chart activation are changed.
+No external heartbeat, OCR or continuous memory scanning is introduced.
+Windows accessibility providers can be slow; live responsiveness and overhead
+must be verified on the target Windows system.
+
+Validation: source review and archive checks only. A Windows compiler/runtime
+is unavailable in the authoring environment; no Windows build or live read
+success is claimed. Older build-validation notes describe the base release.

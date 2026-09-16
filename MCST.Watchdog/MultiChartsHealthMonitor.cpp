@@ -6,6 +6,8 @@
 #include <ole2.h>
 #include <oleauto.h>
 #include <UIAutomation.h>
+#include <oleacc.h>
+#pragma comment(lib, "oleacc.lib")
 
 #include "MultiChartsHealthMonitor.h"
 
@@ -276,7 +278,38 @@ namespace
         unsigned long queueCount = 0;
         unsigned long queueAgeSeconds = 0;
         bool found = false;
+        std::wstring diagnostic;
     };
+
+    std::wstring ReadLegacyStatusText(HWND window)
+    {
+        IAccessible* accessible = nullptr;
+        std::wstring text;
+        if (FAILED(AccessibleObjectFromWindow(window, OBJID_CLIENT,
+                IID_IAccessible, reinterpret_cast<void**>(&accessible))) || !accessible)
+            return text;
+        long count = 0;
+        accessible->get_accChildCount(&count);
+        count = (std::min)((std::max)(count, 0L), 64L);
+        for (long index = 0; index <= count; ++index)
+        {
+            VARIANT child{};
+            child.vt = VT_I4;
+            child.lVal = index == 0 ? CHILDID_SELF : index;
+            BSTR value = nullptr;
+            if (SUCCEEDED(accessible->get_accName(child, &value)))
+                AppendBstr(text, value);
+            else
+                SysFreeString(value);
+            value = nullptr;
+            if (SUCCEEDED(accessible->get_accValue(child, &value)))
+                AppendBstr(text, value);
+            else
+                SysFreeString(value);
+        }
+        accessible->Release();
+        return text;
+    }
 
     BOOL CALLBACK FindQueueTextProc(HWND window, LPARAM parameter)
     {
@@ -292,10 +325,28 @@ namespace
         }
 
         const std::wstring lowerClass = LowerCopy(WindowClass(window));
+        RECT childRect{}, rootRect{};
+        const HWND root = GetAncestor(window, GA_ROOT);
+        const bool bottomField = IsWindowVisible(window) &&
+            GetWindowRect(window, &childRect) && GetWindowRect(root, &rootRect) &&
+            childRect.bottom >= rootRect.bottom - 90 &&
+            childRect.top >= rootRect.bottom - 150;
         if (lowerClass.find(L"statusbar") != std::wstring::npos ||
-            lowerClass.find(L"status") != std::wstring::npos)
+            lowerClass.find(L"status") != std::wstring::npos || bottomField)
         {
+            const std::wstring legacyText = ReadLegacyStatusText(window);
+            if (search->diagnostic.size() < 8192)
+                search->diagnostic += L" [" + WindowClass(window) + L"; window=" +
+                    directText + L"; MSAA=" + legacyText + L"]";
+            if (ParseQueueText(legacyText, search->queueCount, search->queueAgeSeconds))
+            {
+                search->found = true;
+                search->diagnostic += L" [queue read via MSAA]";
+                return FALSE;
+            }
             const std::wstring automationText = ReadAutomationText(search->automation, window);
+            if (search->diagnostic.size() < 8192)
+                search->diagnostic += L" [UIA=" + automationText + L"]";
             if (ParseQueueText(automationText, search->queueCount, search->queueAgeSeconds))
             {
                 search->found = true;
@@ -305,7 +356,8 @@ namespace
         return TRUE;
     }
 
-    bool ReadQueueIndicator(HWND mainWindow, unsigned long& queueCount, unsigned long& queueAgeSeconds)
+    bool ReadQueueIndicator(HWND mainWindow, unsigned long& queueCount, unsigned long& queueAgeSeconds,
+        std::wstring& diagnostic)
     {
         ComApartmentScope apartment;
         IUIAutomation* automation = nullptr;
@@ -325,6 +377,7 @@ namespace
         ReleaseCom(automation);
         queueCount = search.queueCount;
         queueAgeSeconds = search.queueAgeSeconds;
+        diagnostic = search.diagnostic.empty() ? L"No status-class child exposed text" : search.diagnostic;
         return search.found;
     }
 
@@ -453,7 +506,8 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
         if (processStatus.responsive && mainWindow)
         {
             processStatus.queueIndicatorFound = ReadQueueIndicator(
-                mainWindow, processStatus.queueCount, processStatus.queueAgeSeconds);
+                mainWindow, processStatus.queueCount, processStatus.queueAgeSeconds,
+                processStatus.queueReadDiagnostic);
         }
 
         if (processStatus.queueIndicatorFound)
@@ -569,9 +623,9 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
             snapshot.processes.begin(), snapshot.processes.end(),
             [](const mcst::MultiChartsProcessStatus& process) { return process.cpuAvailable; });
         snapshot.detail = cpuSampleAvailable
-            ? L"Responsive - queues clear - MC CPU " +
+            ? L"Responsive - no queue indicator read (not proof of clear queues) - MC CPU " +
                 FormatCorePercent(snapshot.totalCpuCorePercent) + L" of one logical core"
-            : L"Responsive - queues clear - CPU sampling starts on next refresh";
+            : L"Responsive - no queue indicator read (not proof of clear queues) - CPU sampling starts on next refresh";
     }
     return snapshot;
 }

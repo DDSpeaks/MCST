@@ -211,10 +211,10 @@ namespace
             }
             const std::wstring queue = process.queueIndicatorFound
                 ? std::to_wstring(process.queueCount) + L" q"
-                : L"clear";
+                : L"unread";
             const std::wstring delay = process.queueIndicatorFound
                 ? std::to_wstring(process.queueAgeSeconds) + L" s"
-                : L"0 s";
+                : L"n/a";
 
             out << std::left << std::setw(10) << process.processId
                 << std::setw(14) << mcst::HealthStateText(process.state)
@@ -230,6 +230,11 @@ namespace
         if (status.multiChartsProcesses.recentlyDisappearedProcessId != 0)
             out << L"Recently terminated PID: " << status.multiChartsProcesses.recentlyDisappearedProcessId << L'\n';
         out << L"CPU/core uses 100% to mean one fully occupied logical processor.\n";
+        out << L"\nQUEUE READ DIAGNOSTICS (experimental MSAA reader)\n";
+        for (const auto& process : status.multiChartsProcesses.processes)
+            out << L"PID " << process.processId << L": found="
+                << (process.queueIndicatorFound ? L"yes" : L"no") << L" "
+                << process.queueReadDiagnostic << L'\n';
     }
 
     std::wstring SingleLineCell(std::wstring value)
@@ -794,7 +799,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.20.2" },
+        { L"Watchdog version", L"1.20.3" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },
