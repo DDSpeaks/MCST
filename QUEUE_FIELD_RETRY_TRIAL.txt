@@ -1,0 +1,47 @@
+MCST-Watchdog 1.20.6 - queue-field geometry and retry diagnostic trial
+===================================================================
+Source-only diagnostic trial. Windows build and live detection NOT RUN here.
+Bridge V179 / protocol V2 and trading strategies remain unchanged.
+
+Current changes (supersede older trial notes):
+- Query field rectangles with SB_GETRECT and report client coordinates.
+- Locate the first visible deep-red sample and match it to a field rectangle.
+- Read that field first; log red-priority-part (-1 means no match).
+- Continue other field-length queries when one fails, instead of stopping.
+- Retry a failed priority-field length query once if the shared budget permits.
+- Increase message timeout from 50 to 125 ms, capped by remaining shared time.
+- Use a cooperative 1000 ms budget per MC process, not an unbounded wait.
+- Limit the geometry pass to a cooperative 400 ms, reserving time for text.
+- Log Win32 failure codes. error=0 on a failed message means Windows did not
+  provide a more specific code; it does not establish a timeout by itself.
+- Tighten red sampling to avoid the orange/brown text sampled in 1.20.5.
+- Retain unread / n/a for missing queue values; colors do not trigger alarms.
+
+Safety / limitations:
+SB_GETRECT and SB_GETTEXT use a temporary target-process buffer. On failure
+after sending a pointer-bearing message, the buffer is retained because the
+target could still use it. Further pointer reads for that PID are disabled
+for this Watchdog run; non-pointer length queries can still continue.
+Normal successful reads free the buffer. Windows reclaims retained buffers
+when MC exits. Avoid repeatedly restarting Watchdog after pointer timeouts.
+See DIRECT_STATUSBAR_TRIAL.txt for the inherited buffer-size explanation.
+No code injection, orders, strategy changes, clicks or mouse movement occurs.
+No OCR or screenshots are saved. The visible-strip bitmap is temporary.
+Screen probing requires an active desktop and an uncovered MC statusbar.
+Geometry/capture/process-memory work is not hard real-time bounded; elapsed_ms
+includes the actual work. Six processes can consume several seconds if slow.
+Missing queue data still does not certify health, even if overall state is OK.
+Tracker Snapshot failures are separate; this trial does not change its reader.
+
+Test procedure:
+1. Build Release x64 via Visual Studio or the existing GitHub workflow.
+2. Close only Watchdog and replace its EXE. Retain INI and bridge DLLs.
+3. Keep MC running. Expose the affected instance's red statusbar fully.
+4. Start Watchdog without covering the strip. Refresh, wait for completion,
+   then Save Report.
+5. Send the report including QUEUE READ DIAGNOSTICS and a current screenshot.
+6. If the mapped field reads empty with ownerdraw=no while the red text is
+   visible, direct field text is not enough; another data source is needed.
+
+Validation performed here: project XML and source contracts, unchanged Bridge,
+archive integrity. Not a Windows compile, regression run or live-read test.

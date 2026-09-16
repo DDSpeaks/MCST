@@ -58,7 +58,8 @@ BOOL CALLBACK DescribeQueueAreaChild(HWND window, LPARAM parameter)
 
 // Diagnostic only: capture a small on-screen statusbar strip into a temporary
 // memory bitmap. Pixels never trigger trading-health changes. No image is saved.
-void DescribeRedQueueArea(HWND root, HWND bar, std::wostringstream& out)
+void DescribeRedQueueArea(HWND root, HWND bar, std::wostringstream& out,
+    POINT* firstRed = nullptr, bool* hasRed = nullptr)
 {
     RECT rect{};
     if (!GetWindowRect(bar, &rect))
@@ -99,8 +100,7 @@ void DescribeRedQueueArea(HWND root, HWND bar, std::wostringstream& out)
                 const int y = height * row / 3;
                 const COLORREF color = GetPixel(memory, x, y);
                 const bool isRed = color != CLR_INVALID && GetRValue(color) >= 150 &&
-                    GetRValue(color) > GetGValue(color) + 65 &&
-                    GetRValue(color) > GetBValue(color) + 45;
+                    GetGValue(color) <= 90 && GetBValue(color) <= 90;
                 if (!isRed)
                 {
                     inRun = false;
@@ -115,6 +115,11 @@ void DescribeRedQueueArea(HWND root, HWND bar, std::wostringstream& out)
                     continue;
                 }
                 ++red;
+                if (firstRed && hasRed && !*hasRed)
+                {
+                    *firstRed = point;
+                    *hasRed = true;
+                }
                 if (!inRun && probes < 8)
                 {
                     ++probes;
@@ -156,7 +161,7 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
     std::wstring& diagnostic)
 {
     const auto start = std::chrono::steady_clock::now();
-    const auto deadline = start + std::chrono::milliseconds(500);
+    const auto deadline = start + std::chrono::milliseconds(1000);
     DWORD pid = 0;
     GetWindowThreadProcessId(root, &pid);
     static std::map<HWND, std::vector<HWND>> cache;
@@ -188,33 +193,130 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
     bool timedOutWrite = false;
     bool found = false;
     constexpr SIZE_T bufferBytes = 65536 * sizeof(wchar_t);
+    DWORD messageError = 0;
+    bool messageSent = false;
     auto send = [&](HWND bar, UINT message, WPARAM part, LPARAM buffer, DWORD_PTR& result) {
-        if (std::chrono::steady_clock::now() >= deadline)
+        messageError = 0;
+        messageSent = false;
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0)
+        {
+            messageError = ERROR_TIMEOUT;
             return false;
+        }
         SetLastError(0);
-        return SendMessageTimeoutW(bar, message, part, buffer,
-            SMTO_ABORTIFHUNG | SMTO_BLOCK, 50, &result) != 0;
+        messageSent = true;
+        const bool ok = SendMessageTimeoutW(bar, message, part, buffer,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK,
+            static_cast<UINT>((std::min)(remaining, static_cast<decltype(remaining)>(125))), &result) != 0;
+        if (!ok)
+            messageError = GetLastError();
+        return ok;
+    };
+    auto ensureBuffer = [&]() {
+        if (quarantined.count(pid))
+            return false;
+        if (!process)
+            process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ |
+                PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (process && !remote)
+            remote = VirtualAllocEx(process, nullptr, bufferBytes,
+                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        return remote != nullptr;
     };
     for (HWND bar : bars)
     {
         if (found || timedOutWrite || std::chrono::steady_clock::now() >= deadline)
             break;
+        POINT redPoint{};
+        bool hasRed = false;
+        DescribeRedQueueArea(root, bar, out, &redPoint, &hasRed);
+        if (hasRed && !ScreenToClient(bar, &redPoint))
+            hasRed = false;
         DWORD_PTR partsResult = 0;
         if (!send(bar, SB_GETPARTS, 0, 0, partsResult))
         {
-            out << L" [SB_GETPARTS failed error=" << GetLastError() << L"]";
+            out << L" [SB_GETPARTS failed error=" << messageError << L"]";
             continue;
         }
         const unsigned int parts = (std::min)(static_cast<unsigned int>(partsResult), 64U);
         out << L" [HWND=0x" << std::hex << reinterpret_cast<UINT_PTR>(bar)
             << std::dec << L" parts=" << parts << L"]";
+        std::vector<unsigned int> order;
+        int priorityPart = -1;
+        const auto geometryDeadline = (std::min)(deadline,
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(400));
         for (unsigned int part = 0; part < parts; ++part)
         {
+            if (std::chrono::steady_clock::now() >= geometryDeadline)
+            {
+                out << L" [geometry-pass=budget-exhausted]";
+                break;
+            }
+            if (quarantined.count(pid))
+            {
+                out << L" [part=" << part << L" rect-query=disabled-after-pointer-message-failure]";
+                continue;
+            }
+            if (!ensureBuffer())
+            {
+                out << L" [part=" << part << L" rect-query unavailable error="
+                    << GetLastError() << L"]";
+                continue;
+            }
+            DWORD_PTR rectResult = 0;
+            if (!send(bar, SB_GETRECT, part, reinterpret_cast<LPARAM>(remote), rectResult))
+            {
+                out << L" [part=" << part << L" rect-query failed error=" << messageError << L"]";
+                if (messageSent)
+                {
+                    timedOutWrite = true;
+                    quarantined.insert(pid);
+                }
+                continue;
+            }
+            RECT field{};
+            SIZE_T bytes = 0;
+            if (!rectResult || !ReadProcessMemory(process, remote, &field, sizeof(field), &bytes) ||
+                bytes != sizeof(field))
+            {
+                out << L" [part=" << part << L" rect-read failed error=" << GetLastError() << L"]";
+                continue;
+            }
+            out << L" [part=" << part << L" client-rect=" << field.left << L"," << field.top
+                << L"," << field.right << L"," << field.bottom << L"]";
+            if (hasRed && PtInRect(&field, redPoint))
+                priorityPart = static_cast<int>(part);
+        }
+        // Always retain every part, even if the geometry pass hit its budget.
+        if (priorityPart >= 0)
+            order.push_back(static_cast<unsigned int>(priorityPart));
+        for (unsigned int part = 0; part < parts; ++part)
+            if (static_cast<int>(part) != priorityPart)
+                order.push_back(part);
+        out << L" [red-priority-part=" << priorityPart << L"]";
+        for (unsigned int part : order)
+        {
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                out << L" [text-pass=budget-exhausted]";
+                break;
+            }
             DWORD_PTR lengthResult = 0;
             if (!send(bar, SB_GETTEXTLENGTHW, part, 0, lengthResult))
             {
-                out << L" [part=" << part << L" length-query failed]";
-                break;
+                out << L" [part=" << part << L" length-query failed error=" << messageError << L"]";
+                // A length query has no target buffer: one priority-field
+                // retry is safe and remains within the shared time budget.
+                if (static_cast<int>(part) != priorityPart ||
+                    !send(bar, SB_GETTEXTLENGTHW, part, 0, lengthResult))
+                {
+                    if (static_cast<int>(part) == priorityPart)
+                        out << L" [part=" << part << L" priority-retry failed error=" << messageError << L"]";
+                    continue;
+                }
+                out << L" [part=" << part << L" priority-retry succeeded]";
             }
             const bool ownerDraw = (HIWORD(lengthResult) & SBT_OWNERDRAW) != 0;
             out << L" [part=" << part << L" len=" << LOWORD(lengthResult)
@@ -229,16 +331,10 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
                 out << L" read=disabled-after-timeout]";
                 continue;
             }
-            if (!process)
-                process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ |
-                    PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-            if (process && !remote)
-                remote = VirtualAllocEx(process, nullptr, bufferBytes,
-                    MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-            if (!remote)
+            if (!ensureBuffer())
             {
                 out << L" buffer-access failed error=" << GetLastError() << L"]";
-                break;
+                continue;
             }
             if (std::chrono::steady_clock::now() >= deadline)
             {
@@ -249,10 +345,14 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
             if (!send(bar, SB_GETTEXTW, part, reinterpret_cast<LPARAM>(remote), textResult))
             {
                 // Failure cannot prove the receiver has finished using lParam.
-                timedOutWrite = true;
-                quarantined.insert(pid);
-                out << L" read=failed-buffer-quarantined]";
-                break;
+                if (messageSent)
+                {
+                    timedOutWrite = true;
+                    quarantined.insert(pid);
+                }
+                out << L" read=failed error=" << messageError
+                    << L" buffer-quarantined=" << (timedOutWrite ? L"yes" : L"no") << L"]";
+                continue;
             }
             if (ownerDraw)
             {
@@ -265,7 +365,7 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
             const SIZE_T required = (static_cast<SIZE_T>(LOWORD(textResult)) + 1) * sizeof(wchar_t);
             if (!ReadProcessMemory(process, remote, text.data(), required, &bytesRead) || bytesRead != required)
             {
-                out << L" memory-read failed]";
+                out << L" memory-read failed error=" << GetLastError() << L"]";
                 continue;
             }
             text.back() = L'\0';
@@ -283,8 +383,6 @@ bool ReadStatusBarQueue(HWND root, unsigned long& count, unsigned long& age,
         VirtualFreeEx(process, remote, 0, MEM_RELEASE);
     if (process)
         CloseHandle(process);
-    for (HWND bar : bars)
-        DescribeRedQueueArea(root, bar, out);
     out << L" elapsed_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count();
     diagnostic = out.str();
