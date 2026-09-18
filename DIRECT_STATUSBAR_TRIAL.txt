@@ -1,4 +1,4 @@
-MCST-Watchdog 1.20.7 - direct statusbar diagnostic trial
+MCST-Watchdog 1.20.8 - direct statusbar diagnostic trial
 ======================================================
 Tracker Bridge stays V179 / protocol V2.
 

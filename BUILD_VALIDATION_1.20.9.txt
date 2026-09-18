@@ -1,0 +1,21 @@
+MCST-Watchdog 1.20.9 - validation, 18 September 2026
+=================================================
+SOURCE-ONLY DIAGNOSTIC TRIAL. No Windows binaries supplied.
+
+Verified in this preparation environment:
+- Portable C++17 policy tests: completed two-image positive required;
+  incomplete/non-red output rejected; unknown checks preserve confirmed
+  warnings; two visible clear checks remove a warning.
+- Email filtering retains the meaningful warning and account data while
+  removing the per-PID queue diagnostic sections.
+- Project XML parses, required files exist, current version identities agree.
+- Tracker Bridge and BridgeHost are unchanged from 1.20.8 (V179/protocol V2).
+
+NOT run here:
+- Windows PowerShell Validate-Release.ps1.
+- Visual Studio/MSBuild Release x64 build and MCST-LogicTests.exe.
+- Actual MultiCharts PrintWindow rendering, timeout and job-process cleanup.
+- Production trading/live email verification.
+
+See COVERED_QUEUE_PROBE_TRIAL.txt for the required Windows live checks.
+Earlier BUILD_VALIDATION files describe earlier packages, not this build.

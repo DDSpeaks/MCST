@@ -1,0 +1,61 @@
+MCST-Watchdog 1.20.9 - bounded covered-window experiment
+======================================================
+
+Purpose
+-------
+Try to detect the red MC16 queue-warning field even when another window
+covers it. No OCR and no numeric queue/delay extraction. No window activation,
+cursor movement, chart recalculation or order placement/modification/cancellation.
+
+Limits and interpretation
+-------------------------
+- Visible field-4 checks keep the existing screen-pixel method.
+- If field 4 is covered, a disposable copy of Watchdog asks Windows to render
+  the statusbar client area (PrintWindow). Only field-4 pixels are evaluated.
+- At most two helper attempts per refresh, rotating across process IDs.
+  At least 60 seconds between attempts on the same statusbar.
+- Each helper gets 300 ms of waiting time after launch. Launch/setup overhead
+  is additional: this is not an absolute 600 ms deadline for the entire refresh.
+- A job object kills the helper if Watchdog closes it. Only the helper process
+  may be terminated, never MultiCharts. A timed-out render request might still
+  leave brief paint work in MultiCharts; the experiment is not zero-overhead.
+- Two completed red renderings produce an experimental confirmed WARNING.
+  Render support and freshness depend on MC's custom drawing implementation;
+  Windows may return blank, incomplete or stale output. This is not a guaranteed
+  check of every covered window or of the numeric queue state.
+- Blank/non-red/failure/timeout stays unknown, never 'queues clear'.
+- Hidden/minimized windows and unavailable geometry are not tested this way.
+- A confirmed warning remains until two successful VISIBLE non-red checks,
+  or the process exits. A covered non-red rendering never clears it.
+- Email keeps the meaningful health summary, without verbose per-PID fields.
+  Save Report retains covered-probe= diagnostics for this trial.
+
+Build and install
+-----------------
+1. Run Tools\Validate-Release.ps1 on Windows.
+2. Build MCST.sln, Release x64, and run MCST-LogicTests.exe.
+3. Close ONLY Watchdog and replace its EXE with the new build. Preserve your
+   INI and existing V179 Bridge files. MultiCharts need not be restarted.
+4. Windows must permit launching the same EXE as an auxiliary process. If job
+   assignment or security policy blocks it, the result is unknown.
+
+Live experiment
+---------------
+1. First verify a currently visible red field still raises WARNING.
+2. Cover that MC statusbar with another ordinary window, without minimizing MC.
+3. Use Refresh several times to allow process-budget rotation. If an attempt
+   is on cooldown, wait at least 60 seconds before retrying that window.
+4. Save Report. A positive is 'covered-probe=RED (two rendered images;
+   experimental)' and 'check=RED-rendered-experimental'. Deferred, cooldown,
+   inconclusive and timeout entries are diagnostic, not successful checks.
+5. For an independent covered-detection test, restart ONLY Watchdog with the
+   red MC field already covered. A retained earlier warning alone does not
+   prove that covered rendering succeeded.
+6. After MC's red warning genuinely disappears, expose the field and verify
+   two visible clear checks remove the confirmed warning. Cover/minimize must
+   not falsely clear it. Confirm helper processes do not remain after timeout.
+
+API reference
+-------------
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-printwindow
+Microsoft documents PrintWindow as synchronous and rendered by the target app.

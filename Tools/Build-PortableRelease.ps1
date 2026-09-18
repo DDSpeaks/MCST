@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$version = '1.20.7'
+$version = '1.20.9'
 $releaseTag = "v$version"
 $packageName = "MCST-Watchdog-$version-Windows-x64"
 
@@ -41,6 +41,7 @@ $files = [ordered]@{
     'Examples\MCST-Compatibility.ini.example' = 'Examples\MCST-Compatibility.ini.example'
     'Docs\PORTABLE_INSTALL.md' = 'INSTALL.md'
     'RELEASE_NOTES.md' = 'RELEASE_NOTES.md'
+    'COVERED_QUEUE_PROBE_TRIAL.txt' = 'COVERED_QUEUE_PROBE_TRIAL.txt'
     'LICENSE' = 'LICENSE'
 }
 

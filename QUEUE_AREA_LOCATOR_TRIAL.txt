@@ -1,4 +1,4 @@
-MCST-Watchdog 1.20.7 - queue-area locator diagnostic trial
+MCST-Watchdog 1.20.8 - queue-area locator diagnostic trial
 =======================================================
 This is a source-only diagnostic trial, not a verified production release.
 Bridge V179 / protocol V2 is unchanged. Windows build/live test NOT RUN here.
@@ -43,5 +43,5 @@ Test now:
    child is found, custom painting may be involved; this remains unconfirmed.
 
 Prior release/validation notes describe inherited behavior and do not prove
-successful queue detection in 1.20.7. This trial was checked for source
+successful queue detection in 1.20.8. This trial was checked for source
 contracts, resource cleanup paths and project XML, not executed on Windows.

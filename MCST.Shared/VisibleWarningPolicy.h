@@ -3,6 +3,11 @@
 
 namespace mcst
 {
+    inline bool IsConfirmedRenderedWarning(bool completed, unsigned int redPasses)
+    {
+        return completed && redPasses == 2;
+    }
+
     inline bool IsVisibleRedWarning(unsigned int samples, unsigned int visible, unsigned int red)
     {
         return samples >= 12 && visible == samples && red >= 12 && red * 100 >= visible * 25;

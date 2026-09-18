@@ -2,6 +2,7 @@
 #include <windows.h>
 
 #include "StatusReport.h"
+#include "../MCST.Shared/ReportReadPolicy.h"
 #include "TrackerDateParser.h"
 
 #include <chrono>
@@ -59,7 +60,9 @@ namespace
     void AppendMonitorLines(std::wostringstream& out, const mcst::WatchdogSystemStatus& status)
     {
         const std::vector<std::pair<std::wstring, mcst::MonitorStatus>> rows = {
-            { L"OVERALL STATUS", { status.overall, L"", L"" } },
+            { L"OVERALL STATUS", { status.overall, L"",
+                status.multiChartsProcesses.visibleQueueUncheckedCount > 0
+                    ? L"Queue visual check incomplete" : L"" } },
             { L"MultiCharts Health", status.multiChartsHealth },
             { L"Bridge", status.bridge },
             { L"Tracker Snapshot", status.trackerSnapshot },
@@ -230,14 +233,15 @@ namespace
         if (status.multiChartsProcesses.recentlyDisappearedProcessId != 0)
             out << L"Recently terminated PID: " << status.multiChartsProcesses.recentlyDisappearedProcessId << L'\n';
         out << L"CPU/core uses 100% to mean one fully occupied logical processor.\n";
-        out << L"\nVISIBLE QUEUE WARNINGS (visible field 4 only; numeric queue values are not read)\n";
+        out << L"\nVISIBLE QUEUE WARNINGS (field 4; bounded covered-window trial; no numeric values)\n";
         for (const auto& process : status.multiChartsProcesses.processes)
             out << L"PID " << process.processId << L": check="
                 << (!process.visibleQueueWarningChecked ? L"not checked" :
+                    process.visibleQueueWarningRendered ? L"RED-rendered-experimental" :
                     process.visibleQueueWarningRed ? L"RED" : L"not red")
                 << L"; confirmed-warning=" << (process.visibleQueueWarningConfirmed ? L"yes" : L"no")
                 << L"; " << process.queueReadDiagnostic << L'\n';
-        out << L"\nQUEUE READ DIAGNOSTICS (visible-only warning; no numeric extraction)\n";
+        out << L"\nQUEUE READ DIAGNOSTICS (visible pixels + bounded covered-window rendering)\n";
         for (const auto& process : status.multiChartsProcesses.processes)
             out << L"PID " << process.processId << L": found="
                 << (process.queueIndicatorFound ? L"yes" : L"no") << L" "
@@ -806,7 +810,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.20.7" },
+        { L"Watchdog version", L"1.20.9" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },
@@ -1044,7 +1048,7 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
 
     std::vector<std::wstring> lines;
     {
-        std::wistringstream input(plainText);
+        std::wistringstream input(mcst::WithoutQueueDiagnostics(plainText));
         std::wstring line;
         while (std::getline(input, line))
             lines.push_back(trimRight(line));

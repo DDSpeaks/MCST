@@ -2,11 +2,12 @@
 
 // Lightweight visible-only check of the MC16 queue-warning field (part 4).
 // No text extraction, OCR, chart activation or full-statusbar pixel scan.
-void ReadVisibleQueueWarning(HWND root, bool& checked, bool& redVisible,
+void ReadVisibleQueueWarning(HWND root, bool& checked, bool& redVisible, bool& rendered,
     std::wstring& diagnostic)
 {
     checked = false;
     redVisible = false;
+    rendered = false;
     const auto start = std::chrono::steady_clock::now();
     std::wostringstream out;
     struct FieldCache { HWND bar = nullptr; int width = 0; int height = 0; RECT field{}; };
@@ -146,5 +147,14 @@ void ReadVisibleQueueWarning(HWND root, bool& checked, bool& redVisible,
     if (screen) ReleaseDC(nullptr, screen);
     out << L"field=4 visible-warning=" << (!checked ? L"not-checked" : redVisible ? L"red" : L"not-red")
         << L" samples=" << samples << L" visible=" << visible << L" red=" << red;
+    if (!checked && samples > visible)
+    {
+        std::wstring probeDiagnostic;
+        if (mcstprobe::TryCovered(entry.bar, entry.field, probeDiagnostic))
+        {
+            checked = redVisible = rendered = true;
+        }
+        out << L" " << probeDiagnostic;
+    }
     finish();
 }

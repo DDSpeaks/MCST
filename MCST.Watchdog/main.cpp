@@ -22,6 +22,8 @@
 #include "DeveloperHelpContent.h"
 #include "MultiChartsVersionDetector.h"
 #include "MultiChartsHealthMonitor.h"
+#include "CoveredQueueProbe.h"
+#include "../MCST.Shared/ReportReadPolicy.h"
 #include "../MCST.Shared/ActivityHistory.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
@@ -132,6 +134,10 @@ namespace
         bool heartbeatEmailInFlight = false;
         bool multiChartsHealthObserved = false;
         bool multiChartsHealthEmailInFlight = false;
+        TrackerBridgeSection lastGoodLogs;
+        unsigned long lastLogsProcessId = 0;
+        bool hasGoodLogs = false;
+        std::wstring lastLogsRead = L"Never";
     };
 
     AppState g_app;
@@ -865,9 +871,9 @@ namespace
             result.status.lastSuccessfulUpdate = now;
 
             if (result.snapshot.recentLogs.ok && !result.snapshot.recentLogs.rows.empty())
-                result.status.recentLogs = { mcst::HealthState::Healthy, std::to_wstring(result.snapshot.recentLogs.rows.size()) + L" rows", L"Updating" };
+                result.status.recentLogs = { mcst::HealthState::Healthy, std::to_wstring(result.snapshot.recentLogs.rows.size()) + L" rows", L"Read OK" };
             else if (result.snapshot.recentLogs.ok)
-                result.status.recentLogs = { mcst::HealthState::Attention, L"0 rows", L"Unusual but readable" };
+                result.status.recentLogs = { mcst::HealthState::Healthy, L"0 rows", L"Read OK - no events" };
             else
                 result.status.recentLogs = {
                     mcst::HealthState::Critical,
@@ -1508,12 +1514,15 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.7", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.9", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         const wchar_t* overallText = L"INITIALIZING";
         switch (status.overall)
         {
-        case mcst::HealthState::Healthy: overallText = L"SYSTEM HEALTHY"; break;
+        case mcst::HealthState::Healthy:
+            overallText = status.multiChartsProcesses.visibleQueueUncheckedCount > 0
+                ? L"CHECKED ITEMS OK" : L"SYSTEM HEALTHY";
+            break;
         case mcst::HealthState::Attention: overallText = L"ATTENTION REQUIRED"; break;
         case mcst::HealthState::Critical: overallText = L"CRITICAL CONDITION"; break;
         default: break;
@@ -1832,7 +1841,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.7", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.9", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2167,6 +2176,40 @@ namespace
                 g_app.status.lastReport = g_app.lastReport;
                 g_app.status.lastAlert = g_app.lastAlert;
 
+                if (liveSnapshot.recentLogs.present && liveSnapshot.recentLogs.ok)
+                {
+                    const bool baseline = !g_app.hasGoodLogs ||
+                        g_app.lastLogsProcessId != liveSnapshot.processId;
+                    const std::size_t added = baseline ? 0 : mcst::CountAddedLogRows(
+                        g_app.lastGoodLogs.rows, liveSnapshot.recentLogs.rows);
+                    g_app.lastGoodLogs = liveSnapshot.recentLogs;
+                    g_app.lastLogsProcessId = liveSnapshot.processId;
+                    g_app.hasGoodLogs = true;
+                    g_app.lastLogsRead = FormatLocalTime(monitorNow);
+                    g_app.status.recentLogs = { mcst::HealthState::Healthy,
+                        std::to_wstring(liveSnapshot.recentLogs.rows.size()) + L" rows",
+                        baseline ? L"Read OK - baseline captured" : added > 0
+                            ? L"Read OK - " + std::to_wstring(added) + L" newly observed row(s)"
+                            : L"Read OK - no new events" };
+                    g_app.status.recentLogs.detail += L" - Last read " + g_app.lastLogsRead;
+                    if (!liveSnapshot.recentLogs.rows.empty() && !liveSnapshot.recentLogs.rows.front().empty())
+                        g_app.status.recentLogs.detail += L" - First displayed event " +
+                            liveSnapshot.recentLogs.rows.front().front();
+                }
+                else
+                {
+                    // Never label cached rows as live or feed them to alert engines.
+                    g_app.status.recentLogs.value = L"Read unavailable";
+                    if (g_app.hasGoodLogs && g_app.lastLogsProcessId == liveSnapshot.processId)
+                    {
+                        g_app.snapshot.recentLogs = g_app.lastGoodLogs;
+                        g_app.status.recentLogRows = g_app.lastGoodLogs.rows.size();
+                        g_app.status.recentLogs.detail += L" - Cached rows; last successful Logs read " + g_app.lastLogsRead;
+                    }
+                    else
+                        g_app.status.recentLogs.detail += L" - No successful Logs read for this source";
+                }
+
                 const BrokerMonitorDecision brokerDecision = g_app.brokerMonitor.Evaluate(
                     MonitoringLogs(liveSnapshot), result->brokerAuthentication, g_app.config, monitorNow);
                 g_app.status.broker = brokerDecision.status;
@@ -2237,7 +2280,7 @@ namespace
                 if (logAlertDecision.eventCount > 0)
                 {
                     g_app.status.recentLogs.state = Worst(g_app.status.recentLogs.state, logAlertDecision.state);
-                    g_app.status.recentLogs.detail = std::to_wstring(logAlertDecision.eventCount) + L" new alert match(es)";
+                    g_app.status.recentLogs.detail += L" - " + std::to_wstring(logAlertDecision.eventCount) + L" new alert match(es)";
                     RecalculateOverallStatus(g_app.status, g_app.config, true);
                     g_app.lastAlert = FormatLocalTime(monitorNow) + L" - " + logAlertDecision.eventText;
                     g_app.status.lastAlert = g_app.lastAlert;
@@ -2395,6 +2438,8 @@ namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
+    int probeResult = 0;
+    if (mcstprobe::TryWorkerMode(probeResult)) return probeResult;
     // This is deliberately the first executable application code. If the process reaches
     // wWinMain, a marker should be visible either beside the EXE or in C:\Temp.
     SetUnhandledExceptionFilter(StartupUnhandledExceptionFilter);
@@ -2405,7 +2450,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.7 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.9 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2476,7 +2521,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.7 - Visible Queue Warning",
+            0, kWindowClass, L"MCST-Watchdog 1.20.9 - Covered Queue Warning Trial",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

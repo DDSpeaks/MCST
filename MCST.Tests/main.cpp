@@ -11,6 +11,7 @@
 #include "../MCST.Shared/MCBridgeProtocol.h"
 #include "../MCST.Shared/ActivityHistory.h"
 #include "../MCST.Shared/VisibleWarningPolicy.h"
+#include "../MCST.Shared/ReportReadPolicy.h"
 #include "../MCST.Shared/TrackerRecoveryPolicy.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
 #include "../MCST.Watchdog/BrokerMonitor.h"
@@ -681,7 +682,22 @@ int RunLogicTests()
     if (!mcst::IsVisibleRedWarning(80, 80, 60) ||
         mcst::IsVisibleRedWarning(80, 79, 60) || mcst::IsVisibleRedWarning(80, 80, 1))
         throw std::runtime_error("Visible warning background/occlusion policy failed");
+    if (!mcst::IsConfirmedRenderedWarning(true, 2) ||
+        mcst::IsConfirmedRenderedWarning(false, 2) || mcst::IsConfirmedRenderedWarning(true, 1) ||
+        mcst::IsConfirmedRenderedWarning(true, 0))
+        throw std::runtime_error("Covered rendering must complete two positive passes");
 
+    const std::vector<std::vector<std::wstring>> oldLogs = {{L"one"}, {L"two"}};
+    if (mcst::CountAddedLogRows(oldLogs, oldLogs) != 0 ||
+        mcst::CountAddedLogRows(oldLogs, {{L"two"}, {L"three"}}) != 1 ||
+        mcst::CountAddedLogRows({{L"one"}}, {{L"one"}, {L"one"}}) != 1)
+        throw std::runtime_error("Log row change policy failed");
+    const auto cleanReport = mcst::WithoutQueueDiagnostics(
+        L"SYSTEM STATUS\nRed queue warning detected\nVISIBLE QUEUE WARNINGS (test)\nPID 1: red\n\nQUEUE READ DIAGNOSTICS (test)\nPID 1: technical\n\nACCOUNTS\naccount data\n");
+    if (cleanReport.find(L"PID 1") != std::wstring::npos ||
+        cleanReport.find(L"Red queue warning detected") == std::wstring::npos ||
+        cleanReport.find(L"account data") == std::wstring::npos)
+        throw std::runtime_error("Email queue diagnostic filter failed");
     std::wcout << L"MCST logic and regression tests passed.\n";
     return 0;
 }

@@ -58,6 +58,7 @@ namespace mcst
         bool queueIndicatorFound = false;
         bool visibleQueueWarningChecked = false;
         bool visibleQueueWarningRed = false;
+        bool visibleQueueWarningRendered = false; // Experimental covered-window positive only.
         bool visibleQueueWarningConfirmed = false;
         std::wstring queueReadDiagnostic;
         unsigned long queueCount = 0;

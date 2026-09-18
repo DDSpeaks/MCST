@@ -1,8 +1,16 @@
 ﻿# MCST
 
-## Package: 1.20.7 Tracker Recovery Fix
+## Package: 1.20.9 — Covered Queue Warning Trial
 
-MCST-Watchdog 1.20.7 adds Tracker Bridge V179. When a Tracker object can no
+Source-only diagnostic trial: adds a rate-limited helper-process experiment
+for red queue warnings on covered MC16 statusbars. No window activation or
+trading actions. Negative/blank renderings stay unknown. See
+`COVERED_QUEUE_PROBE_TRIAL.txt` for limits, build and live-test instructions.
+This package has not been built or run on Windows during preparation.
+
+### Retained features
+
+MCST-Watchdog 1.20.9 adds Tracker Bridge V179. When a Tracker object can no
 longer be read through its cached route, V179 first revalidates the most recent
 object address, then scans its allocator neighborhood, and finally performs a
 bounded process-wide RTTI fallback. Long failure streaks use progressively
@@ -35,7 +43,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.7**
+- MCST-Watchdog: **1.20.9**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V179**
 - Bridge protocol: **V2**
@@ -53,7 +61,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.7` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.9` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

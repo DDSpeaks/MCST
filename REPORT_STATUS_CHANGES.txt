@@ -1,0 +1,44 @@
+MCST-Watchdog 1.20.8 - Logs read status and clean email reports
+============================================================
+Source package, based on 1.20.7. Bridge V179 / protocol V2 unchanged.
+
+Recent Logs:
+- Successful empty reads are OK, not anomalous.
+- First successful read (or changed source PID) captures a baseline.
+- Subsequent successful reads compare complete displayed rows, including
+  duplicate multiplicity: unchanged rows show Read OK - no new events.
+- Added rows are newly observed rows, not proof of continuous event capture.
+  Events outside the displayed ten-row window may be missed; a reset can
+  also cause previously unseen rows to appear. No gap-free guarantee is made.
+- Track last successful Logs read independently of a complete Tracker snapshot.
+- Show the first displayed row's timestamp, without assuming its sort order
+  or claiming an unparsed date is the newest event across all log sources.
+- Preserve successful Logs sections for cached display after a failed read;
+  clearly label them cached, and do not feed cached rows to alert engines.
+- Existing stale-data/error severity and broker/log alert logic are retained.
+- Alert matches append to, not overwrite, Logs read status details.
+
+Queue coverage and reports:
+- Confirmed visible red warnings still raise the same warning/email behavior.
+- No numeric extraction or deep internal investigation is introduced.
+- If visual checks are incomplete, healthy GUI headline reads CHECKED ITEMS OK,
+  not SYSTEM HEALTHY; reports add Queue visual check incomplete to the summary.
+- HTML emails omit VISIBLE QUEUE WARNINGS and QUEUE READ DIAGNOSTICS sections.
+  This applies to manual, scheduled, alert and heartbeat HTML renderers.
+- Meaningful warnings and coverage limitations remain in System Status.
+- Save Report's plain-text file retains technical diagnostics for debugging.
+- Peeking into covered windows is deliberately not added: no verified bounded
+  window-render method is available here. Hidden/covered checks remain unknown.
+
+Build/test:
+1. Build Release x64 in Visual Studio or the existing GitHub workflow.
+2. Replace Watchdog EXE only after closing Watchdog; retain INI/bridge files.
+3. Perform two successful refreshes with unchanged Logs: expect no new events.
+4. Verify empty readable Logs are OK and failures never say Updating.
+5. Send a manual email: diagnostics should be absent, warnings still visible.
+6. Expose a red queue field and perform two refreshes: expect existing warning.
+
+Validation: pure-policy smoke tests and source/project XML/archive checks
+performed here. Windows compilation, full regression suite, cached-failure
+behavior, HTML mail delivery and live capture must still be tested on Windows.
+Older trial documents are historical; this note describes current changes.

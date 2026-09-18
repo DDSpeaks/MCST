@@ -1,4 +1,7 @@
-MCST-Watchdog 1.20.7 - simple visible queue warning
+Historical visible-only behavior (1.20.8).
+For 1.20.9, COVERED_QUEUE_PROBE_TRIAL.txt supersedes the covered-window limits.
+
+MCST-Watchdog 1.20.8 - simple visible queue warning
 =================================================
 Source package. Windows compilation and live behavior must be verified.
 Bridge V179 / protocol V2 is unchanged.

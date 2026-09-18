@@ -1,6 +1,16 @@
 ﻿# Changelog
 
-## 1.20.7
+## 1.20.9
+
+- Adds a bounded covered-statusbar rendering trial in a disposable helper
+  process (300 ms wait, at most two attempts/refresh, rotating PID budget,
+  60-second per-statusbar cooldown).
+- Requires two completed red renderings for an experimental positive.
+  Failed/non-red renderings remain unknown and cannot clear a warning.
+- Preserves visible screen checks and clean email summaries. Windows live
+  rendering remains unverified; see COVERED_QUEUE_PROBE_TRIAL.txt.
+
+### Retained Tracker recovery implementation (not new in 1.20.9)
 
 - Bumped the Tracker Bridge internal build from V178 to V179 while retaining
   Bridge Protocol V2.

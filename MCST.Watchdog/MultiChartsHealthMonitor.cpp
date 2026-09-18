@@ -11,6 +11,7 @@
 #pragma comment(lib, "oleacc.lib")
 
 #include "MultiChartsHealthMonitor.h"
+#include "CoveredQueueProbe.h"
 #include "../MCST.Shared/VisibleWarningPolicy.h"
 
 #include <algorithm>
@@ -418,6 +419,7 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
     const auto now = Clock::now();
     const std::set<DWORD> processIds = CollectProcessIds();
     std::lock_guard<std::mutex> lock(g_historyMutex);
+    mcstprobe::ResetBudget(processIds);
 
     std::set<DWORD> disappeared;
     for (const auto& item : g_history)
@@ -495,12 +497,20 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
         if (processStatus.responsive && mainWindow)
         {
             ReadVisibleQueueWarning(mainWindow, processStatus.visibleQueueWarningChecked,
-                processStatus.visibleQueueWarningRed, processStatus.queueReadDiagnostic);
+                processStatus.visibleQueueWarningRed, processStatus.visibleQueueWarningRendered,
+                processStatus.queueReadDiagnostic);
         }
 
         mcst::UpdateVisibleWarning(processStatus.visibleQueueWarningChecked,
             processStatus.visibleQueueWarningRed, history.redWarningSamples,
             history.clearWarningSamples, history.redWarningConfirmed);
+        // One completed covered probe already contains two positive renderings.
+        if (processStatus.visibleQueueWarningRendered)
+        {
+            history.redWarningConfirmed = true;
+            history.redWarningSamples = 2;
+            history.clearWarningSamples = 0;
+        }
         processStatus.visibleQueueWarningConfirmed = history.redWarningConfirmed;
 
         if (processStatus.queueIndicatorFound)
@@ -627,10 +637,10 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
             snapshot.processes.begin(), snapshot.processes.end(),
             [](const mcst::MultiChartsProcessStatus& process) { return process.cpuAvailable; });
         snapshot.detail = cpuSampleAvailable
-            ? L"Responsive - visible queue warning check only; " +
+            ? L"Responsive - queue warning check (covered rendering experimental); " +
                 std::to_wstring(snapshot.visibleQueueUncheckedCount) + L" instance(s) not checked - MC CPU " +
                 FormatCorePercent(snapshot.totalCpuCorePercent) + L" of one logical core"
-            : L"Responsive - visible queue warning check only; " +
+            : L"Responsive - queue warning check (covered rendering experimental); " +
                 std::to_wstring(snapshot.visibleQueueUncheckedCount) + L" instance(s) not checked - CPU sampling starts on next refresh";
     }
     return snapshot;

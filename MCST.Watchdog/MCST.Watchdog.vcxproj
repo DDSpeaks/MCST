@@ -49,7 +49,9 @@
     <ClInclude Include="MultiChartsHealthMonitor.h" />
     <ClInclude Include="QueueStatusReader.h" />
     <ClInclude Include="VisibleQueueWarning.h" />
+    <ClInclude Include="CoveredQueueProbe.h" />
     <ClInclude Include="../MCST.Shared/VisibleWarningPolicy.h" />
+    <ClInclude Include="../MCST.Shared/ReportReadPolicy.h" />
     <ClInclude Include="../MCST.Shared/ActivityHistory.h" />
   </ItemGroup>
   <ItemGroup><ResourceCompile Include="MCST.Watchdog.rc" /></ItemGroup>
