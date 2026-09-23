@@ -21,8 +21,10 @@ Recent Logs:
 Queue coverage and reports:
 - Confirmed visible red warnings still raise the same warning/email behavior.
 - No numeric extraction or deep internal investigation is introduced.
-- If visual checks are incomplete, healthy GUI headline reads CHECKED ITEMS OK,
-  not SYSTEM HEALTHY; reports add Queue visual check incomplete to the summary.
+- A Healthy overall state always uses the clear GUI headline SYSTEM HEALTHY.
+- Before the first completed update the headline is INITIALIZING; a later
+  genuinely Unknown overall state uses CHECK INCOMPLETE.
+- Reports may still add Queue visual check incomplete as diagnostic detail.
 - HTML emails omit VISIBLE QUEUE WARNINGS and QUEUE READ DIAGNOSTICS sections.
   This applies to manual, scheduled, alert and heartbeat HTML renderers.
 - Meaningful warnings and coverage limitations remain in System Status.

@@ -24,6 +24,7 @@
 #include "MultiChartsHealthMonitor.h"
 #include "CoveredQueueProbe.h"
 #include "../MCST.Shared/ReportReadPolicy.h"
+#include "../MCST.Shared/OverallHeadlinePolicy.h"
 #include "../MCST.Shared/ActivityHistory.h"
 #include "../MCST.Shared/WatchdogSystemStatus.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
@@ -1514,19 +1515,10 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.9", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.10", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        const wchar_t* overallText = L"INITIALIZING";
-        switch (status.overall)
-        {
-        case mcst::HealthState::Healthy:
-            overallText = status.multiChartsProcesses.visibleQueueUncheckedCount > 0
-                ? L"CHECKED ITEMS OK" : L"SYSTEM HEALTHY";
-            break;
-        case mcst::HealthState::Attention: overallText = L"ATTENTION REQUIRED"; break;
-        case mcst::HealthState::Critical: overallText = L"CRITICAL CONDITION"; break;
-        default: break;
-        }
+        const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
+        const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
 
         const int overallDotLeft = client.right - 350;
         const int overallDotTop = 16;
@@ -1841,7 +1833,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.9", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.10", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2450,7 +2442,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.9 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.10 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2521,7 +2513,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.9 - Covered Queue Warning Trial",
+            0, kWindowClass, L"MCST-Watchdog 1.20.10 - Healthy Headline Correction",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

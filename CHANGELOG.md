@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## 1.20.10
+
+- Restored `SYSTEM HEALTHY` as the Dashboard headline for every Healthy
+  overall state.
+- Added distinct `INITIALIZING` and post-startup `CHECK INCOMPLETE` headlines
+  for genuinely unfinished or Unknown monitoring states.
+- Retained covered queue-warning monitoring and Bridge V179 unchanged.
+
 ## 1.20.9
 
 - Adds a bounded covered-statusbar rendering trial in a disposable helper

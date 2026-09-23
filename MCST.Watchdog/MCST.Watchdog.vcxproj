@@ -51,6 +51,7 @@
     <ClInclude Include="VisibleQueueWarning.h" />
     <ClInclude Include="CoveredQueueProbe.h" />
     <ClInclude Include="../MCST.Shared/VisibleWarningPolicy.h" />
+    <ClInclude Include="../MCST.Shared/OverallHeadlinePolicy.h" />
     <ClInclude Include="../MCST.Shared/ReportReadPolicy.h" />
     <ClInclude Include="../MCST.Shared/ActivityHistory.h" />
   </ItemGroup>

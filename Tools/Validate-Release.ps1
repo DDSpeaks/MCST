@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.9'
+$currentVersion = '1.20.10'
 $currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -38,13 +38,14 @@ $required = @(
     'MCST.Shared\VisibleWarningPolicy.h',
     'MCST.Shared\ReportReadPolicy.h',
     'MCST.Shared\ActivityHistory.h',
+    'MCST.Shared\OverallHeadlinePolicy.h',
     'MCST.Tests\MCST.Tests.vcxproj',
     'LICENSE',
     'README.md',
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.9.txt',
+    'BUILD_VALIDATION_1.20.10.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -198,7 +199,7 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
-    throw 'The 1.20.9 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+    throw 'The 1.20.10 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
 $activityHistory = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
@@ -206,7 +207,17 @@ if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'left.time == right.time' -or
     $activityHistory -notmatch 'left.state == right.state' -or
     $activityHistory -notmatch 'left.text == right.text') {
-    throw 'The 1.20.9 activity-history deduplication contract is missing.'
+    throw 'The 1.20.10 activity-history deduplication contract is missing.'
+}
+$headlinePolicy = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\OverallHeadlinePolicy.h') -Raw
+foreach ($headline in @('SYSTEM HEALTHY', 'ATTENTION REQUIRED', 'CRITICAL CONDITION', 'CHECK INCOMPLETE', 'INITIALIZING')) {
+    if ($headlinePolicy -notmatch [regex]::Escape($headline)) {
+        throw "Overall Dashboard headline is missing: $headline"
+    }
+}
+if ($watchdogMain -match 'CHECKED ITEMS OK' -or
+    $watchdogMain -notmatch 'OverallHeadline\(status\.overall, firstUpdateCompleted\)') {
+    throw 'Dashboard must use the shared overall-headline policy and must not restore CHECKED ITEMS OK.'
 }
 $developerHelp = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
 foreach ($helpTopic in @('AT Start', 'AT Capture', 'AT Finish', 'Tracker Capture', 'Position CCY', 'Open Compat', 'Reload Compat')) {
@@ -433,9 +444,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,9,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,9,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.9.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,10,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,10,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.10.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -720,7 +731,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.9-Windows-x64',
+    'MCST-Watchdog-1.20.10-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -736,7 +747,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.9',
+    '1.20.10',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

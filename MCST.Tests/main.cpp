@@ -11,6 +11,7 @@
 #include "../MCST.Shared/MCBridgeProtocol.h"
 #include "../MCST.Shared/ActivityHistory.h"
 #include "../MCST.Shared/VisibleWarningPolicy.h"
+#include "../MCST.Shared/OverallHeadlinePolicy.h"
 #include "../MCST.Shared/ReportReadPolicy.h"
 #include "../MCST.Shared/TrackerRecoveryPolicy.h"
 #include "../MCST.TrackerBridge/TrackerBridgeReader.h"
@@ -682,6 +683,12 @@ int RunLogicTests()
     if (!mcst::IsVisibleRedWarning(80, 80, 60) ||
         mcst::IsVisibleRedWarning(80, 79, 60) || mcst::IsVisibleRedWarning(80, 80, 1))
         throw std::runtime_error("Visible warning background/occlusion policy failed");
+    if (std::wstring(mcst::OverallHeadline(mcst::HealthState::Healthy, true)) != L"SYSTEM HEALTHY" ||
+        std::wstring(mcst::OverallHeadline(mcst::HealthState::Unknown, false)) != L"INITIALIZING" ||
+        std::wstring(mcst::OverallHeadline(mcst::HealthState::Unknown, true)) != L"CHECK INCOMPLETE" ||
+        std::wstring(mcst::OverallHeadline(mcst::HealthState::Attention, true)) != L"ATTENTION REQUIRED" ||
+        std::wstring(mcst::OverallHeadline(mcst::HealthState::Critical, true)) != L"CRITICAL CONDITION")
+        throw std::runtime_error("Overall Dashboard headline policy failed");
     if (!mcst::IsConfirmedRenderedWarning(true, 2) ||
         mcst::IsConfirmedRenderedWarning(false, 2) || mcst::IsConfirmedRenderedWarning(true, 1) ||
         mcst::IsConfirmedRenderedWarning(true, 0))

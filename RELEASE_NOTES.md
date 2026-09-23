@@ -1,4 +1,29 @@
-# MCST 1.20.9 — Covered Queue Warning Trial
+# MCST 1.20.10 GitHub Publication-Ready Package
+
+Tracker Bridge internal build: V179  
+Bridge protocol: Protocol V2
+
+## Healthy Dashboard headline correction
+
+- A Healthy overall state now always displays `SYSTEM HEALTHY`, including when
+  some optional queue fields could not be visually inspected.
+- `INITIALIZING` is retained before the first completed monitoring update.
+- A genuinely Unknown overall state after monitoring starts displays
+  `CHECK INCOMPLETE`.
+- Warning and critical states remain `ATTENTION REQUIRED` and
+  `CRITICAL CONDITION`.
+- The saved report may still state `Queue visual check incomplete`; this
+  diagnostic detail does not rename a Healthy overall state.
+- This release changes only Watchdog. Tracker Bridge V179 and Protocol V2 are
+  unchanged, so users upgrading from 1.20.9 may replace only the EXE.
+
+This source package retains the GitHub Release workflow, SHA-256 checksum,
+MIT License, `.gitignore`, inert `.ini.example` files, no active INI files,
+Overall status reporting, Position History limited to accounts visible in
+Accounts, UI Automation with `ole2.h`, the verified `0x1D78C8` anchor,
+`date_order` handling, and the 15-pixel monospaced report layout.
+
+## Retained 1.20.9 covered queue-warning trial
 
 Adds a bounded, experimental statusbar-rendering fallback for covered MC16
 queue-warning fields. Two rendered red images can confirm WARNING; non-red,

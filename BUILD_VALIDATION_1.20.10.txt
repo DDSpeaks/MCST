@@ -1,0 +1,19 @@
+MCST-Watchdog 1.20.10 - validation, 22 September 2026
+====================================================
+SOURCE-ONLY RELEASE CANDIDATE. No Windows binaries supplied.
+
+Verified in this preparation environment:
+- Healthy maps to SYSTEM HEALTHY regardless of optional queue-field visibility.
+- Unknown maps to INITIALIZING before the first completed update and to
+  CHECK INCOMPLETE afterwards.
+- Attention and Critical retain their existing headlines.
+- Project XML parses, required files exist, and current version identities agree.
+- Tracker Bridge and BridgeHost are byte-for-byte unchanged from 1.20.9
+  (internal V179, protocol V2).
+
+NOT run here:
+- Windows PowerShell Validate-Release.ps1.
+- Visual Studio/MSBuild Release x64 build and MCST-LogicTests.exe.
+- Live MultiCharts operation and production email verification.
+
+Run the Windows validation, Release x64 build and logic tests before publishing.
