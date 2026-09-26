@@ -1,0 +1,20 @@
+MCST-Watchdog 1.20.11 - validation, 25 September 2026
+====================================================
+SOURCE-ONLY RELEASE CANDIDATE. No Windows binaries supplied.
+
+Verified in this preparation environment:
+- HTML status state and value cells contain explicit non-breaking separators.
+- The regression fixture requires `OK`, `Ready` and the following email address
+  to be separated in rendered text while retaining fixed-width spans.
+- Project XML parses, required files exist, and current version identities agree.
+- Tracker Bridge and BridgeHost are byte-for-byte unchanged from 1.20.10
+  (internal V179, protocol V2).
+
+NOT run here:
+- Windows PowerShell Validate-Release.ps1.
+- Visual Studio/MSBuild Release x64 build and MCST-LogicTests.exe.
+- Rendering and data detection in Apple Mail on iPadOS/iOS.
+- Live MultiCharts operation and production email verification.
+
+Run the Windows validation, Release x64 build and logic tests before publishing,
+then confirm the generated status email on the affected Apple Mail device.

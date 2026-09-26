@@ -1,11 +1,12 @@
 ﻿# MCST
 
-## Package: 1.20.10 — Healthy Headline Correction
+## Package: 1.20.11 — iOS Mail Status Separator Fix
 
-Version 1.20.10 restores `SYSTEM HEALTHY` whenever the overall state is Healthy.
-It uses `INITIALIZING` before the first completed update and `CHECK INCOMPLETE`
-only for a genuinely Unknown overall state after monitoring has started.
-The covered queue-warning experiment and Bridge V179 are retained unchanged.
+Version 1.20.11 adds real non-breaking separators between the status, value and
+detail fields in HTML email reports. This prevents iOS Mail from interpreting
+`OK`, `Ready` and the following email address as one false address while keeping
+the existing fixed-width column alignment. The 1.20.10 headline correction,
+covered queue-warning experiment and Bridge V179 are retained unchanged.
 This source package has not been built or run on Windows during preparation.
 
 ### Retained features
@@ -43,7 +44,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.10**
+- MCST-Watchdog: **1.20.11**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V179**
 - Bridge protocol: **V2**
@@ -61,7 +62,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.10` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.11` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

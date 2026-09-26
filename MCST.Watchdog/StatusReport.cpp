@@ -810,7 +810,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.20.10" },
+        { L"Watchdog version", L"1.20.11" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },
@@ -972,10 +972,14 @@ std::wstring BuildStatusReportHtml(const std::wstring& plainText)
                 result += overall
                     ? L"<span style=\"font-weight:700;\">"
                     : L"<span style=\"font-weight:600;\">";
-                result += std::wstring(style.label) + L"</span></span>";
+                // Keep a real separator inside the fixed-width cell. CSS width
+                // alone does not create text whitespace, so iOS Mail otherwise
+                // concatenates e.g. "OK", "Ready" and the following address
+                // and detects the whole string as one email address.
+                result += std::wstring(style.label) + L"&#160;</span></span>";
                 result += L"<span class=\"mcst-status-value-cell\" style=\"display:inline-block;width:" +
                     std::to_wstring(kMonitorValueWidth) + L"ch;\">" +
-                    escapeHtml(TrimCell(valueCell)) + L"</span>";
+                    escapeHtml(TrimCell(valueCell)) + L"&#160;</span>";
                 result += escapeHtml(detailCell);
                 return result;
             }

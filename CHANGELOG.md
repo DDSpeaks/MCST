@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## 1.20.11
+
+- Added real non-breaking separators between HTML status, value and detail
+  cells to stop iOS Mail from creating false combined email addresses.
+- Preserved fixed-width status alignment and the legitimate address link.
+- Retained the 1.20.10 headline correction and Bridge V179 unchanged.
+
 ## 1.20.10
 
 - Restored `SYSTEM HEALTHY` as the Dashboard headline for every Healthy

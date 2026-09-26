@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.10'
+$currentVersion = '1.20.11'
 $currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -45,7 +45,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.10.txt',
+    'BUILD_VALIDATION_1.20.11.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -199,7 +199,7 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
-    throw 'The 1.20.10 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+    throw 'The 1.20.11 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
 $activityHistory = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
@@ -207,7 +207,7 @@ if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'left.time == right.time' -or
     $activityHistory -notmatch 'left.state == right.state' -or
     $activityHistory -notmatch 'left.text == right.text') {
-    throw 'The 1.20.10 activity-history deduplication contract is missing.'
+    throw 'The 1.20.11 activity-history deduplication contract is missing.'
 }
 $headlinePolicy = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\OverallHeadlinePolicy.h') -Raw
 foreach ($headline in @('SYSTEM HEALTHY', 'ATTENTION REQUIRED', 'CRITICAL CONDITION', 'CHECK INCOMPLETE', 'INITIALIZING')) {
@@ -330,6 +330,10 @@ if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'AppendAlignedSectionRows\(out, snapshot\.recentLogs, true, false\)') {
     throw 'Known-currency Tracker totals or aligned Open Positions field mapping is missing.'
 }
+if ($statusReportSource -notmatch [regex]::Escape('&#160;</span></span>') -or
+    $statusReportSource -notmatch [regex]::Escape('&#160;</span>')) {
+    throw 'HTML status cells do not contain real text separators for iOS Mail data detection.'
+}
 if ($statusReportSource -match 'totalPositionValue') {
     throw 'Native Position Value must not be aggregated while Average Price currency is unknown.'
 }
@@ -444,9 +448,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,10,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,10,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.10.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,11,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,11,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.11.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -731,7 +735,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.10-Windows-x64',
+    'MCST-Watchdog-1.20.11-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -747,7 +751,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.10',
+    '1.20.11',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

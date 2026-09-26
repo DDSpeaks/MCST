@@ -1,4 +1,26 @@
-# MCST 1.20.10 GitHub Publication-Ready Package
+# MCST 1.20.11 GitHub Publication-Ready Package
+
+Tracker Bridge internal build: V179  
+Bridge protocol: Protocol V2
+
+## iOS Mail status-cell separator correction
+
+- Adds a non-breaking text separator inside the fixed-width status and value
+  cells of HTML email reports.
+- Prevents iOS Mail from concatenating `OK`, `Ready` and a following address
+  into a false address such as `OKReadymcstockalerts.mika@gmail.com`.
+- Preserves the existing status-column widths and alignment.
+- The legitimate email address remains detectable and clickable.
+- Changes only Watchdog; Bridge V179 and Protocol V2 are unchanged. Users
+  upgrading from 1.20.10 may replace only `MCST-Watchdog.exe`.
+
+This source package retains the GitHub Release workflow, SHA-256 checksum,
+MIT License, `.gitignore`, inert `.ini.example` files, no active INI files,
+Overall status reporting, Position History limited to accounts visible in
+Accounts, UI Automation with `ole2.h`, the verified `0x1D78C8` anchor,
+`date_order` handling, and the 15-pixel monospaced report layout.
+
+## Retained 1.20.10 healthy-headline correction
 
 Tracker Bridge internal build: V179  
 Bridge protocol: Protocol V2

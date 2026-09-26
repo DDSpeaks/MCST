@@ -182,6 +182,7 @@ int RunLogicTests()
     status.overall = mcst::HealthState::Healthy;
     status.bridge = { mcst::HealthState::Healthy, L"Connected", L"Bridge detail" };
     status.trackerSnapshot = { mcst::HealthState::Healthy, L"Snapshot OK", L"Snapshot detail" };
+    status.email = { mcst::HealthState::Healthy, L"Ready", L"mcstockalerts.mika@gmail.com" };
     status.heartbeat = { mcst::HealthState::Unknown, L"Disabled", L"Heartbeat detail" };
     status.lastTrackerAttempt = L"2026-08-22 12:00";
     status.lastCompleteTrackerSnapshot = L"2026-08-22 11:59";
@@ -323,6 +324,14 @@ int RunLogicTests()
         reportHtml,
         L"display:inline-block;width:26ch;",
         "System Status values do not use a fixed HTML column");
+    RequireContains(
+        reportHtml,
+        L"OK&#160;</span></span><span class=\"mcst-status-value-cell\"",
+        "Status state and value cells lack a real HTML text separator");
+    RequireContains(
+        reportHtml,
+        L"Ready&#160;</span>mcstockalerts.mika@gmail.com",
+        "Status value and detail cells can still concatenate into a false email address");
     RequireContains(
         reportHtml,
         L"font-size:2em;line-height:0.5",
