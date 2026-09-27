@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.13'
+$currentVersion = '1.20.14'
 $currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -40,6 +40,8 @@ $required = @(
     'MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Host.txt',
     'MCST.Watchdog\MCST.Watchdog.vcxproj',
     'MCST.Watchdog\MCST.Watchdog.rc',
+    'MCST.Watchdog\resource.h',
+    'MCST.Watchdog\Assets\WatchdogHeaderLogo.png',
     'MCST.Watchdog\main.cpp',
     'MCST.Watchdog\DeveloperHelpContent.h',
     'MCST.Watchdog\DeveloperHelpContent.cpp',
@@ -63,7 +65,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.13.txt',
+    'BUILD_VALIDATION_1.20.14.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -523,9 +525,13 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,13,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,13,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.13.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,14,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,14,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.14.'
+}
+if ($watchdogRc -notmatch 'IDR_WATCHDOG_HEADER_LOGO' -or
+    $watchdogRc -notmatch 'Assets\\\\WatchdogHeaderLogo\.png') {
+    throw 'Watchdog header logo is not embedded in the Windows resource.'
 }
 
 $bridgeSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -810,7 +816,7 @@ $publisher = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Publish-G
 foreach ($publisherToken in @(
     'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe',
     'Tools\Validate-Release.ps1',
-    'v1.20.13',
+    'v1.20.14',
     'git.exe',
     'push',
     'tag'
@@ -826,7 +832,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.13-Windows-x64',
+    'MCST-Watchdog-1.20.14-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -842,7 +848,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.13',
+    '1.20.14',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

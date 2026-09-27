@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.20.14
+
+- Added the doctor-and-patient artwork as an embedded transparent header logo
+  immediately before the MCST-Watchdog name.
+- Kept the compact native Windows title bar and its descriptive version text:
+  `MCST-Watchdog 1.20.14 - MC16 + MC17 AutoTrading`.
+- Preserved the existing dashboard section positions, health headline and
+  production controls; the logo does not require a separate installed file.
+- Preserved the verified MC16 and MC17 AutoTrading profiles, Tracker Bridge
+  V179, Protocol V2 and all monitoring behavior from 1.20.13.
+
 ## 1.20.13
 
 - Added `Publish-GitHub-Release.ps1`, a single-command Windows PowerShell 5.1
@@ -9,6 +20,8 @@
   before validation, using strict UTF-8 with a Windows ANSI fallback and a
   code-point-built copyright holder name. This avoids dependence on the local
   Windows code page without rewriting other project files.
+- Disabled the Git pager for staged-diff checks so the GitHub Desktop bundled
+  `git.exe` does not depend on a separately discoverable `less.exe`.
 - Corrected the release-notes heading to the exact publication contract and
   made that heading failure report separately from the retained-content checks.
 - Added an exact-fingerprint MC17 AutoTrading production profile for

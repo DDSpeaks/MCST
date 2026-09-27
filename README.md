@@ -1,9 +1,11 @@
 ﻿# MCST
 
-## Package: 1.20.13 — MultiCharts 16 + 17 AutoTrading
+## Package: 1.20.14 — MultiCharts 16 + 17 AutoTrading
 
-Version 1.20.13 adds the production AutoTrading profile verified for the exact
-MC17 `Charting.dll` fingerprint `0x6AB57EE6 / 18624512`. Its dynamically
+Version 1.20.14 embeds the selected doctor-and-patient logo before the program
+name while retaining the compact descriptive Windows title bar. It also retains
+the production AutoTrading profile verified for the exact MC17 `Charting.dll`
+fingerprint `0x6AB57EE6 / 18624512`. Its dynamically
 discovered `RVA 0xB74CF0 / offset 0x18` followed all four controlled changes,
 including two changes in each direction. The existing MC16 profile remains
 installed and unchanged. MultiCharts process discovery now uses exact executable
@@ -11,6 +13,7 @@ identity instead of accepting another program merely because its window title
 contains “MultiCharts”. Unknown fingerprints continue to fail safely.
 The research workflow, iOS Mail separator correction, queue-warning experiment,
 and Bridge V179 are retained.
+The logo is compiled into the executable and requires no separate installed file.
 This source package has not been built or run on Windows during preparation.
 
 ### Retained features
@@ -48,7 +51,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.13**
+- MCST-Watchdog: **1.20.14**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V179**
 - Bridge protocol: **V2**
@@ -66,7 +69,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.13` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.14` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

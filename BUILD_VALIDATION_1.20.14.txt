@@ -1,8 +1,14 @@
-MCST-Watchdog 1.20.13 - source validation, 27 September 2026
+MCST-Watchdog 1.20.14 - source validation, 27 September 2026
 ================================================================
 
 Scope
 -----
+- Added the selected doctor-and-patient artwork as an embedded transparent PNG
+  resource and draws it before the MCST-Watchdog name in the dashboard header.
+- Preserved the compact native title bar with the descriptive version text
+  "MCST-Watchdog 1.20.14 - MC16 + MC17 AutoTrading".
+- The logo is packaged inside MCST-Watchdog.exe and requires no separate
+  installed asset.
 - Added an exact-fingerprint MC17 production AutoTrading profile for
   Charting.dll timestamp 0x6AB57EE6 and image size 18624512.
 - Uses the dynamically verified MC17 strategy vtable RVA 0xB74CF0 and
@@ -38,6 +44,8 @@ Research evidence
 Safety
 ------
 - Both production profiles require an exact PE timestamp and image-size match.
+- Header artwork loading is nonfatal; Watchdog remains operational without the
+  image if Windows cannot decode the embedded resource.
 - Unknown Charting.dll builds remain rejected and AutoTrading stays UNKNOWN.
 - Monitoring remains passive and read-only; it does not click MultiCharts,
   send input, place orders, change AutoTrading, or write to MultiCharts memory.

@@ -1,12 +1,12 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $GitExe = 'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe'
-$ReleaseTag = 'v1.20.13'
-$CommitMessage = 'Release v1.20.13: MultiCharts 16 and 17 AutoTrading support'
+$ReleaseTag = 'v1.20.14'
+$CommitMessage = 'Release v1.20.14: MultiCharts 16 and 17 AutoTrading support'
 
 function Assert-ExitCode {
     param(
@@ -18,6 +18,63 @@ function Assert-ExitCode {
 
     if ($Allowed -notcontains $LASTEXITCODE) {
         throw "$Action failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Read-TextWithEncodingFallback {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $Bytes = [System.IO.File]::ReadAllBytes($Path)
+    $StrictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    try {
+        $Text = $StrictUtf8.GetString($Bytes)
+    }
+    catch {
+        $Text = [System.Text.Encoding]::Default.GetString($Bytes)
+    }
+    return $Text.TrimStart([char]0xFEFF)
+}
+
+function Normalize-LicenseEncoding {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    $LicensePath = Join-Path $RepositoryRoot 'LICENSE'
+    if (-not (Test-Path -LiteralPath $LicensePath -PathType Leaf)) {
+        throw "MIT License file was not found: $LicensePath"
+    }
+
+    $LicenseText = Read-TextWithEncodingFallback -Path $LicensePath
+    $HolderName = 'Mika T' + [char]0x00E4 + 'tt' + [char]0x00E4 + 'l' + [char]0x00E4 + 'inen'
+    $CopyrightLine = "Copyright (c) 2026 $HolderName"
+
+    if ($LicenseText -notmatch '(?m)^MIT License\r?$' -or
+        $LicenseText -notmatch 'Permission is hereby granted, free of charge' -or
+        $LicenseText -notmatch 'THE SOFTWARE IS PROVIDED "AS IS"') {
+        throw 'LICENSE does not contain the expected MIT License text.'
+    }
+
+    if ($LicenseText -notmatch '(?m)^Copyright \(c\) 2026 .+\r?$') {
+        throw 'LICENSE does not contain the expected 2026 copyright line.'
+    }
+
+    $LicenseText = [regex]::Replace(
+        $LicenseText,
+        '(?m)^Copyright \(c\) 2026 .+\r?$',
+        $CopyrightLine
+    )
+
+    $Utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($LicensePath, $LicenseText, $Utf8WithBom)
+
+    $VerificationText = [System.IO.File]::ReadAllText($LicensePath, [System.Text.Encoding]::UTF8)
+    if (-not $VerificationText.Contains($CopyrightLine)) {
+        throw 'LICENSE UTF-8 normalization verification failed.'
     }
 }
 
@@ -37,6 +94,9 @@ Set-Location -LiteralPath $RepoRoot
 try {
     Write-Host "Repository: $RepoRoot"
     Write-Host "Release tag: $ReleaseTag"
+
+    Write-Host 'Normalizing the MIT License as UTF-8...'
+    Normalize-LicenseEncoding -RepositoryRoot $RepoRoot
 
     $ValidatePath = Join-Path $RepoRoot 'Tools\Validate-Release.ps1'
     if (-not (Test-Path -LiteralPath $ValidatePath -PathType Leaf)) {

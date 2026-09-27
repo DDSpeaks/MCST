@@ -50,11 +50,13 @@
     <ClInclude Include="QueueStatusReader.h" />
     <ClInclude Include="VisibleQueueWarning.h" />
     <ClInclude Include="CoveredQueueProbe.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="../MCST.Shared/VisibleWarningPolicy.h" />
     <ClInclude Include="../MCST.Shared/OverallHeadlinePolicy.h" />
     <ClInclude Include="../MCST.Shared/ReportReadPolicy.h" />
     <ClInclude Include="../MCST.Shared/ActivityHistory.h" />
   </ItemGroup>
+  <ItemGroup><None Include="Assets\WatchdogHeaderLogo.png" /></ItemGroup>
   <ItemGroup><ResourceCompile Include="MCST.Watchdog.rc" /></ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MCST.Shared/MCST.Shared.vcxproj"><Project>{B9BB1A65-8F66-4D4A-8D39-EF5F2D75D1A1}</Project></ProjectReference>

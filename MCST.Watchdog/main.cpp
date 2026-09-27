@@ -23,6 +23,7 @@
 #include "MultiChartsVersionDetector.h"
 #include "MultiChartsHealthMonitor.h"
 #include "CoveredQueueProbe.h"
+#include "resource.h"
 #include "../MCST.Shared/ReportReadPolicy.h"
 #include "../MCST.Shared/OverallHeadlinePolicy.h"
 #include "../MCST.Shared/ActivityHistory.h"
@@ -170,6 +171,64 @@ namespace
     HWND g_emailMenuButton = nullptr;
     HWND g_heartbeatMenuButton = nullptr;
     ULONG_PTR g_gdiplusToken = 0;
+    std::unique_ptr<Gdiplus::Image> g_headerLogo;
+
+    std::unique_ptr<Gdiplus::Image> LoadPngResource(HINSTANCE instance, int resourceId)
+    {
+        HRSRC resource = FindResourceW(instance, MAKEINTRESOURCEW(resourceId), RT_RCDATA);
+        if (!resource)
+            return nullptr;
+
+        HGLOBAL loadedResource = LoadResource(instance, resource);
+        const DWORD resourceSize = SizeofResource(instance, resource);
+        const void* resourceBytes = loadedResource ? LockResource(loadedResource) : nullptr;
+        if (!resourceBytes || resourceSize == 0)
+            return nullptr;
+
+        HGLOBAL copy = GlobalAlloc(GMEM_MOVEABLE, resourceSize);
+        if (!copy)
+            return nullptr;
+        void* destination = GlobalLock(copy);
+        if (!destination)
+        {
+            GlobalFree(copy);
+            return nullptr;
+        }
+        CopyMemory(destination, resourceBytes, resourceSize);
+        GlobalUnlock(copy);
+
+        IStream* stream = nullptr;
+        if (CreateStreamOnHGlobal(copy, TRUE, &stream) != S_OK)
+        {
+            GlobalFree(copy);
+            return nullptr;
+        }
+
+        std::unique_ptr<Gdiplus::Image> source(Gdiplus::Image::FromStream(stream, FALSE));
+        if (!source || source->GetLastStatus() != Gdiplus::Ok ||
+            source->GetWidth() == 0 || source->GetHeight() == 0)
+        {
+            stream->Release();
+            return nullptr;
+        }
+
+        auto bitmap = std::make_unique<Gdiplus::Bitmap>(
+            source->GetWidth(), source->GetHeight(), PixelFormat32bppARGB);
+        if (bitmap->GetLastStatus() != Gdiplus::Ok)
+        {
+            stream->Release();
+            return nullptr;
+        }
+        {
+            Gdiplus::Graphics graphics(bitmap.get());
+            graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+            graphics.DrawImage(source.get(), 0, 0,
+                static_cast<INT>(source->GetWidth()), static_cast<INT>(source->GetHeight()));
+        }
+        source.reset();
+        stream->Release();
+        return bitmap;
+    }
 
 
     std::wstring StartupLogPathSafe() noexcept
@@ -1515,7 +1574,14 @@ namespace
             status = g_app.status;
         }
 
-        DrawTextSimple(dc, { 28, 8, client.right - 28, 52 }, L"MCST-Watchdog 1.20.13", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        if (g_headerLogo && g_headerLogo->GetLastStatus() == Gdiplus::Ok)
+        {
+            Gdiplus::Graphics graphics(dc);
+            graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+            graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+            graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
+        }
+        DrawTextSimple(dc, { 98, 8, client.right - 370, 52 }, L"MCST-Watchdog 1.20.14", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
         const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
@@ -1833,7 +1899,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.13", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.14", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2442,7 +2508,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.13 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.14 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2464,6 +2530,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
             throw std::runtime_error("GDI+ initialization failed");
         gdiplusStarted = true;
         AppendStartupLogSafe(L"Startup 2: GDI+ OK");
+        g_headerLogo = LoadPngResource(instance, IDR_WATCHDOG_HEADER_LOGO);
+        AppendStartupLogSafe(g_headerLogo ? L"Startup 2a: header logo OK" : L"Startup 2a: header logo unavailable; continuing without it");
 
         AppendStartupLogSafe(L"Startup 3: loading and normalizing configuration");
         g_app.config = LoadAppConfig();
@@ -2513,7 +2581,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.13 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.20.14 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);
@@ -2540,6 +2608,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         DeleteObject(g_statusFont);
         DeleteObject(g_monoFont);
         DeleteObject(g_developerButtonFont);
+        g_headerLogo.reset();
         if (gdiplusStarted)
             Gdiplus::GdiplusShutdown(g_gdiplusToken);
         if (singleInstanceMutex)
@@ -2564,6 +2633,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         ShowStartupFailureSafe(L"Unhandled non-standard exception during startup.");
     }
 
+    g_headerLogo.reset();
     if (gdiplusStarted)
         Gdiplus::GdiplusShutdown(g_gdiplusToken);
     if (singleInstanceMutex)

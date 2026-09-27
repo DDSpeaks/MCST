@@ -1,9 +1,18 @@
-# MCST 1.20.13 GitHub Publication-Ready Package
+# MCST 1.20.14 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V179  
 Bridge protocol: Protocol V2
+
+## Embedded Watchdog header logo
+
+- Adds the selected doctor-and-patient artwork before the program name in the
+  main dashboard header.
+- Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
+  or retain a separate logo file.
+- Keeps the compact Windows title bar with the descriptive text
+  `MCST-Watchdog 1.20.14 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 
