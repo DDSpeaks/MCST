@@ -16,7 +16,8 @@
 namespace
 {
     constexpr wchar_t kDatabaseFileName[] = L"MCST-Compatibility.ini";
-    constexpr wchar_t kKnownSection[] = L"Profile.MC16-Charting-6A5684BF";
+    constexpr wchar_t kKnownMc16Section[] = L"Profile.MC16-Charting-6A5684BF";
+    constexpr wchar_t kKnownMc17Section[] = L"Profile.MC17-Charting-6AB57EE6";
 
     std::wstring Trim(std::wstring value)
     {
@@ -68,23 +69,54 @@ namespace
         return sections;
     }
 
-    bool WriteKnownProfile(const std::wstring& path)
+    bool WriteKnownMc16Profile(const std::wstring& path)
     {
         bool ok = true;
         ok = ok && WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"2", path.c_str()) != FALSE;
         ok = ok && WritePrivateProfileStringW(L"Compatibility", L"unknown_build_policy", L"reject", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"name", L"MC16 verified Charting.dll 0x6A5684BF", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"enabled", L"true", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"charting_pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"charting_image_size", L"18493440", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"name", L"MC16 verified Charting.dll 0x6A5684BF", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"enabled", L"true", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"charting_pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"charting_image_size", L"18493440", path.c_str()) != FALSE;
         // Legacy aliases remain readable by older MCST builds.
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"image_size", L"18493440", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"strategy_vtable_rva", L"0xA457B8", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"autotrading_offset", L"0x142", path.c_str()) != FALSE;
-        ok = ok && WritePrivateProfileStringW(kKnownSection, L"verification", L"Controlled research session: 8/8 exact toggle responses", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"pe_timestamp", L"0x6A5684BF", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"image_size", L"18493440", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"strategy_vtable_rva", L"0xA457B8", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"autotrading_offset", L"0x142", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc16Section, L"verification", L"Controlled research session: 8/8 exact toggle responses", path.c_str()) != FALSE;
         WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
         return ok;
+    }
+
+    bool WriteKnownMc17Profile(const std::wstring& path)
+    {
+        bool ok = true;
+        ok = ok && WritePrivateProfileStringW(L"Compatibility", L"schema_version", L"2", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(L"Compatibility", L"unknown_build_policy", L"reject", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"name", L"MC17 verified Charting.dll 0x6AB57EE6", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"enabled", L"true", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"charting_pe_timestamp", L"0x6AB57EE6", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"charting_image_size", L"18624512", path.c_str()) != FALSE;
+        // Legacy aliases keep this database readable by older MCST builds.
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"pe_timestamp", L"0x6AB57EE6", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"image_size", L"18624512", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"strategy_vtable_rva", L"0xB74CF0", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"autotrading_offset", L"0x18", path.c_str()) != FALSE;
+        ok = ok && WritePrivateProfileStringW(kKnownMc17Section, L"verification", L"Controlled dynamic research: 4/4 exact responses with both toggle directions", path.c_str()) != FALSE;
+        WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+        return ok;
+    }
+
+    bool HasSection(const std::vector<std::wstring>& sections, const wchar_t* expected)
+    {
+        return std::any_of(sections.begin(), sections.end(), [expected](const std::wstring& section) {
+            return _wcsicmp(section.c_str(), expected) == 0;
+        });
+    }
+
+    bool WriteBundledProfiles(const std::wstring& path)
+    {
+        return WriteKnownMc16Profile(path) && WriteKnownMc17Profile(path);
     }
 }
 
@@ -106,12 +138,14 @@ bool EnsureCompatibilityDatabase(std::wstring& diagnostic)
         // records an unknown ATOnPTracker candidate. Ensure that this does not prevent
         // the bundled, already-verified AutoTrading profile from being installed later.
         const auto sections = ReadSections(path);
-        const bool knownProfileExists = std::any_of(sections.begin(), sections.end(), [](const std::wstring& section) {
-            return _wcsicmp(section.c_str(), kKnownSection) == 0;
-        });
-        if (!knownProfileExists && !WriteKnownProfile(path))
+        if (!HasSection(sections, kKnownMc16Section) && !WriteKnownMc16Profile(path))
         {
-            diagnostic = L"Compatibility database exists but the bundled verified AutoTrading profile could not be added: " + path;
+            diagnostic = L"Compatibility database exists but the bundled verified MC16 AutoTrading profile could not be added: " + path;
+            return false;
+        }
+        if (!HasSection(sections, kKnownMc17Section) && !WriteKnownMc17Profile(path))
+        {
+            diagnostic = L"Compatibility database exists but the bundled verified MC17 AutoTrading profile could not be added: " + path;
             return false;
         }
 
@@ -119,13 +153,13 @@ bool EnsureCompatibilityDatabase(std::wstring& diagnostic)
         return true;
     }
 
-    if (!WriteKnownProfile(path))
+    if (!WriteBundledProfiles(path))
     {
         diagnostic = L"Failed to create compatibility database: " + path;
         return false;
     }
 
-    diagnostic = L"Created compatibility database with the verified MC16 profile: " + path;
+    diagnostic = L"Created compatibility database with the verified MC16 and MC17 profiles: " + path;
     return true;
 }
 

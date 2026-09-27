@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.12'
+$currentVersion = '1.20.13'
 $currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -46,7 +46,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.12.txt',
+    'BUILD_VALIDATION_1.20.13.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -170,7 +170,7 @@ foreach ($token in @(
     'Existing verified MC16 production compatibility remains unchanged'
 )) {
     if ($autoTradingReader -notmatch [regex]::Escape($token)) {
-        throw "The 1.20.12 dynamic AutoTrading research contract is missing: $token"
+        throw "The retained dynamic AutoTrading research contract is missing: $token"
     }
 }
 foreach ($mc16Token in @(
@@ -183,6 +183,31 @@ foreach ($mc16Token in @(
     if ($compatibilityManager -notmatch [regex]::Escape($mc16Token)) {
         throw "The verified MC16 compatibility profile was changed or removed: $mc16Token"
     }
+}
+foreach ($mc17Token in @(
+    'Profile.MC17-Charting-6AB57EE6',
+    'charting_pe_timestamp", L"0x6AB57EE6',
+    'charting_image_size", L"18624512',
+    'strategy_vtable_rva", L"0xB74CF0',
+    'autotrading_offset", L"0x18',
+    '4/4 exact responses with both toggle directions'
+)) {
+    if ($compatibilityManager -notmatch [regex]::Escape($mc17Token)) {
+        throw "The verified MC17 compatibility profile is missing or changed: $mc17Token"
+    }
+}
+foreach ($processIdentityToken in @(
+    'entry.th32ProcessID != currentProcessId',
+    'IsMultiChartsExecutable(entry.szExeFile)',
+    'lower == L"multicharts64.exe"',
+    'lower == L"multicharts.exe"'
+)) {
+    if ($autoTradingReader -notmatch [regex]::Escape($processIdentityToken)) {
+        throw "Strict MultiCharts process identification is missing: $processIdentityToken"
+    }
+}
+if ($autoTradingReader -match 'title\.find\(L"multicharts"\).*processIds') {
+    throw 'AutoTrading process discovery must not accept a process from its window title alone.'
 }
 if ($watchdogMain -notmatch [regex]::Escape($currentVersion)) {
     throw "Watchdog main window does not identify $currentVersion."
@@ -475,9 +500,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,12,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,12,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.12.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,13,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,13,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.13.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -762,7 +787,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.12-Windows-x64',
+    'MCST-Watchdog-1.20.13-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -778,7 +803,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.12',
+    '1.20.13',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

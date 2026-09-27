@@ -1,0 +1,36 @@
+MCST-Watchdog 1.20.13 - source validation, 27 September 2026
+================================================================
+
+Scope
+-----
+- Added an exact-fingerprint MC17 production AutoTrading profile for
+  Charting.dll timestamp 0x6AB57EE6 and image size 18624512.
+- Uses the dynamically verified MC17 strategy vtable RVA 0xB74CF0 and
+  AutoTrading field offset 0x18.
+- Preserved the verified MC16 production profile 0x6A5684BF / 18493440,
+  RVA 0xA457B8 and offset 0x142 unchanged.
+- Changed MultiCharts process discovery to accept only MultiCharts64.exe or
+  MultiCharts.exe and to exclude the current Watchdog process explicitly.
+- Retained Tracker Bridge V179 and Protocol V2 unchanged.
+
+Research evidence
+-----------------
+- Five snapshots and four controlled transitions were captured on MC17.
+- The selected MC17 field responded exactly in all 4/4 transitions.
+- Both directions were verified: two 1->0 and two 0->1 changes.
+- The selected field had zero unchanged or ambiguous transitions.
+- No other candidate achieved a 4/4 full reverse-verified match.
+
+Safety
+------
+- Both production profiles require an exact PE timestamp and image-size match.
+- Unknown Charting.dll builds remain rejected and AutoTrading stays UNKNOWN.
+- Monitoring remains passive and read-only; it does not click MultiCharts,
+  send input, place orders, change AutoTrading, or write to MultiCharts memory.
+
+Validation status
+-----------------
+- Static source, version, compatibility-profile, process-identity and package
+  validation performed in the preparation environment.
+- Windows Release x64 compilation and live MC17 production-count confirmation
+  remain required before a public tagged release.

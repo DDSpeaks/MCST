@@ -76,7 +76,7 @@ strategy_vtable_rva=0x...
 autotrading_offset=0x...
 ```
 
-The currently bundled verified AutoTrading profile is:
+The currently bundled verified AutoTrading profiles are:
 
 ```ini
 [Profile.MC16-Charting-6A5684BF]
@@ -87,15 +87,24 @@ charting_image_size=18493440
 strategy_vtable_rva=0xA457B8
 autotrading_offset=0x142
 verification=Controlled research session: 8/8 exact toggle responses
+
+[Profile.MC17-Charting-6AB57EE6]
+name=MC17 verified Charting.dll 0x6AB57EE6
+enabled=true
+charting_pe_timestamp=0x6AB57EE6
+charting_image_size=18624512
+strategy_vtable_rva=0xB74CF0
+autotrading_offset=0x18
+verification=Controlled dynamic research: 4/4 exact responses with both toggle directions
 ```
 
-Version 1.20.12 retains this MC16 profile unchanged. For an unknown build such
-as MC17, `AT Start` performs a dynamic passive candidate scan and records the
-exact `Charting.dll` PE timestamp and image size. `AT Capture` must be run after
-each single controlled chart AutoTrading change in both directions. `AT Finish`
-ranks the RVA/offset pairs, but it does not create or enable a production
-profile automatically. A separately reviewed MC17 profile can be added beside
-the MC16 profile, allowing both major versions to remain supported.
+Version 1.20.13 retains the MC16 profile unchanged and adds the independently
+fingerprinted MC17 profile beside it. The MC17 field was the only candidate to
+match every one of four controlled transitions, with two `1 -> 0` and two
+`0 -> 1` responses and no unchanged or ambiguous transition. For any later
+unknown build, `AT Start` performs the retained passive candidate scan and
+records the exact fingerprint. Research output never enables an unknown build
+automatically.
 
 Legacy `pe_timestamp` and `image_size` aliases remain readable for compatibility with older databases, but new profile data should use the canonical `charting_*` names.
 

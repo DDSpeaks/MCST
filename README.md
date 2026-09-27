@@ -1,15 +1,16 @@
 ﻿# MCST
 
-## Package: 1.20.12 — MultiCharts 17 AutoTrading Research
+## Package: 1.20.13 — MultiCharts 16 + 17 AutoTrading
 
-Version 1.20.12 replaces the fixed MC16-only AutoTrading research candidate
-list with a passive dynamic `Charting.dll` discovery session. `AT Start`,
-`AT Capture`, and `AT Finish` now compare the current build's candidate objects
-and rank boolean fields that follow each controlled chart AutoTrading change.
-The verified MC16 production profile remains installed and unchanged; an MC17
-production profile is added only after the new research result is verified.
-The 1.20.11 iOS Mail separator correction, covered queue-warning experiment,
-and Bridge V179 are retained unchanged.
+Version 1.20.13 adds the production AutoTrading profile verified for the exact
+MC17 `Charting.dll` fingerprint `0x6AB57EE6 / 18624512`. Its dynamically
+discovered `RVA 0xB74CF0 / offset 0x18` followed all four controlled changes,
+including two changes in each direction. The existing MC16 profile remains
+installed and unchanged. MultiCharts process discovery now uses exact executable
+identity instead of accepting another program merely because its window title
+contains “MultiCharts”. Unknown fingerprints continue to fail safely.
+The research workflow, iOS Mail separator correction, queue-warning experiment,
+and Bridge V179 are retained.
 This source package has not been built or run on Windows during preparation.
 
 ### Retained features
@@ -47,7 +48,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.12**
+- MCST-Watchdog: **1.20.13**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V179**
 - Bridge protocol: **V2**
@@ -65,7 +66,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.12` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.13` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

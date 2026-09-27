@@ -22,7 +22,7 @@ struct CompatibilityProfile
 std::wstring GetCompatibilityDatabasePath();
 
 /**
- * @brief Creates the compatibility database with the verified built-in profile when missing.
+ * @brief Creates the compatibility database with the verified built-in MC16 and MC17 profiles when missing.
  */
 bool EnsureCompatibilityDatabase(std::wstring& diagnostic);
 

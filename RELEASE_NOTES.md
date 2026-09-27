@@ -1,9 +1,30 @@
-# MCST 1.20.12 MultiCharts 17 AutoTrading Research Package
+# MCST 1.20.13 MultiCharts 16 + 17 AutoTrading Package
 
 Tracker Bridge internal build: V179  
 Bridge protocol: Protocol V2
 
-## Dynamic AutoTrading compatibility research
+## MultiCharts 17 production AutoTrading support
+
+- Added a production profile for exact MC17 `Charting.dll` fingerprint
+  `0x6AB57EE6 / 18624512`.
+- Uses `strategy_vtable_rva=0xB74CF0` and `autotrading_offset=0x18`, selected
+  from five controlled snapshots and four exact transitions.
+- The selected field matched all `4/4` transitions, including two `1 -> 0`
+  and two `0 -> 1` changes, with no unchanged or ambiguous transition.
+- Preserved the existing MC16 fingerprint, RVA and offset unchanged, so MC16
+  and this exact MC17 build are supported side by side.
+- Unknown fingerprints remain rejected; Watchdog never reuses these values for
+  another `Charting.dll` build.
+
+## Correct MultiCharts process identity
+
+- Replaced window-title substring process discovery with an exact executable
+  check for `MultiCharts64.exe` or `MultiCharts.exe`.
+- Explicitly excludes the current Watchdog process.
+- Prevents the Watchdog research window from being counted as a MultiCharts
+  instance merely because its title mentions MultiCharts.
+
+## Retained dynamic compatibility research
 
 - `AT Start` now discovers repeated pointers into the active `Charting.dll`
   instead of testing only hard-coded MC16 RVA/offset pairs.
@@ -14,17 +35,14 @@ Bridge protocol: Protocol V2
 - Every snapshot records the `Charting.dll` PE timestamp and image size.
 - Sessions without a real response report `NO CANDIDATE FOUND` rather than
   recommending the first legacy entry.
-- The verified MC16 profile remains unchanged and continues to support users
-  who stay on MultiCharts 16.
-- No unverified MC17 address is used by production monitoring. A separate
-  verified MC17 profile will be added after the research result is reviewed.
+- Developer Mode retains passive dynamic discovery for future unknown builds.
 
 ## Retained iOS Mail status-cell separator correction
 
 - Adds a non-breaking text separator inside the fixed-width status and value
   cells of HTML email reports.
 - Prevents iOS Mail from concatenating `OK`, `Ready` and a following address
-  into a false address such as `OKReadymcstockalerts.mika@gmail.com`.
+  into a false address such as `OKReadyalerts@example.com`.
 - Preserves the existing status-column widths and alignment.
 - The legitimate email address remains detectable and clickable.
 - Changes only Watchdog; Bridge V179 and Protocol V2 are unchanged. Users

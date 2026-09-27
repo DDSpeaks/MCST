@@ -65,58 +65,22 @@ namespace
         return buffer.data();
     }
 
-    bool IsMultiChartsMainWindow(HWND window)
+    bool IsMultiChartsExecutable(const std::wstring& executable)
     {
-        if (!IsWindowVisible(window))
-            return false;
-
-        const std::wstring title = LowerCopy(WindowText(window));
-        wchar_t className[512]{};
-        GetClassNameW(window, className, static_cast<int>(std::size(className)));
-        const std::wstring windowClass = LowerCopy(className);
-
-        if (title.find(L"quote manager") != std::wstring::npos ||
-            title.find(L"portfolio trader") != std::wstring::npos ||
-            title.find(L"order and position tracker") != std::wstring::npos)
-        {
-            return false;
-        }
-
-        return title.find(L"multicharts") != std::wstring::npos ||
-               windowClass.find(L"atl_mcmdimainframe") != std::wstring::npos;
+        const std::wstring lower = LowerCopy(executable);
+        return lower == L"multicharts64.exe" || lower == L"multicharts.exe";
     }
 
     std::set<DWORD> CollectMultiChartsProcessIds()
     {
         std::set<DWORD> processIds;
 
-        // Primary route: identify MultiCharts main-frame windows. Do not require
-        // visibility here; a minimized or temporarily hidden MC instance must
-        // still remain part of AutoTrading monitoring.
-        EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
-            const std::wstring title = LowerCopy(WindowText(window));
-            wchar_t className[512]{};
-            GetClassNameW(window, className, static_cast<int>(std::size(className)));
-            const std::wstring windowClass = LowerCopy(className);
-
-            if (title.find(L"quote manager") != std::wstring::npos ||
-                title.find(L"portfolio trader") != std::wstring::npos ||
-                title.find(L"order and position tracker") != std::wstring::npos)
-                return TRUE;
-
-            if (title.find(L"multicharts") == std::wstring::npos &&
-                windowClass.find(L"atl_mcmdimainframe") == std::wstring::npos)
-                return TRUE;
-
-            DWORD processId = 0;
-            GetWindowThreadProcessId(window, &processId);
-            if (processId != 0)
-                reinterpret_cast<std::set<DWORD>*>(parameter)->insert(processId);
-            return TRUE;
-        }, reinterpret_cast<LPARAM>(&processIds));
-
-        // Recovery route: enumerate MultiCharts executables as well. This covers
-        // an instance whose main window title/class is temporarily unavailable.
+        // Process identity is deliberately based on the executable name, not a
+        // window-title substring. The Watchdog research window itself contains
+        // the word "MultiCharts" and must never be counted as an MC instance.
+        // Process enumeration also retains minimized or temporarily hidden MC
+        // instances whose main-window title is unavailable.
+        const DWORD currentProcessId = GetCurrentProcessId();
         HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snapshot != INVALID_HANDLE_VALUE)
         {
@@ -126,9 +90,11 @@ namespace
             {
                 do
                 {
-                    const std::wstring executable = LowerCopy(entry.szExeFile);
-                    if (executable.find(L"multicharts") != std::wstring::npos)
+                    if (entry.th32ProcessID != currentProcessId &&
+                        IsMultiChartsExecutable(entry.szExeFile))
+                    {
                         processIds.insert(entry.th32ProcessID);
+                    }
                 } while (Process32NextW(snapshot, &entry));
             }
             CloseHandle(snapshot);

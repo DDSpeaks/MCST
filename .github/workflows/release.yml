@@ -42,7 +42,7 @@ jobs:
       - name: Upload testable package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MCST-Watchdog-1.20.11-Windows-x64
+          name: MCST-Watchdog-1.20.13-Windows-x64
           path: dist/*
           if-no-files-found: error
           retention-days: 30

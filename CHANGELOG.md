@@ -1,5 +1,19 @@
 ﻿# Changelog
 
+## 1.20.13
+
+- Added an exact-fingerprint MC17 AutoTrading production profile for
+  `Charting.dll` timestamp `0x6AB57EE6`, image size `18624512`, strategy vtable
+  RVA `0xB74CF0`, and AutoTrading offset `0x18`.
+- Based the profile on the unique full `4/4` controlled match with two
+  transitions in each direction and no unchanged or ambiguous transitions.
+- Preserved the verified MC16 profile (`0x6A5684BF / 18493440`, RVA
+  `0xA457B8`, offset `0x142`) unchanged.
+- Replaced title-substring process discovery with exact executable identity
+  for `MultiCharts64.exe` and `MultiCharts.exe`, explicitly excluding Watchdog.
+- Retained unknown-build rejection, passive research, Tracker Bridge V179,
+  Protocol V2, and all 1.20.12 behavior.
+
 ## 1.20.12
 
 - Replaced the fixed MC16 AutoTrading research candidate list with a dynamic,
