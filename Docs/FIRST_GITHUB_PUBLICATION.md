@@ -46,9 +46,13 @@ Download and inspect that artifact before tagging the release.
 From a terminal opened in the repository root:
 
 ```powershell
-git tag -a v1.20.13 -m "MCST-Watchdog 1.20.13"
-git push origin v1.20.13
+.\Publish-GitHub-Release.ps1
 ```
+
+The helper runs the release validator, commits and pushes any pending release
+source changes, verifies that `v1.20.13` does not already exist, and then
+creates and pushes the annotated tag. It stops without overwriting an existing
+local or remote tag.
 
 Do not create the Release manually in the GitHub web interface. The tag starts
 the validated workflow, which creates the Release and attaches:

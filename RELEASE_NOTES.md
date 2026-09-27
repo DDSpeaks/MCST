@@ -1,4 +1,6 @@
-# MCST 1.20.13 MultiCharts 16 + 17 AutoTrading Package
+# MCST 1.20.13 GitHub Publication-Ready Package
+
+MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V179  
 Bridge protocol: Protocol V2

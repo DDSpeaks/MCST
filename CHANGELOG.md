@@ -2,6 +2,15 @@
 
 ## 1.20.13
 
+- Added `Publish-GitHub-Release.ps1`, a single-command Windows PowerShell 5.1
+  release helper that validates, commits, pushes, tags, and starts the GitHub
+  Release workflow using the configured GitHub Desktop `git.exe` path.
+- Made the helper normalize only the MIT `LICENSE` file to UTF-8 with BOM
+  before validation, using strict UTF-8 with a Windows ANSI fallback and a
+  code-point-built copyright holder name. This avoids dependence on the local
+  Windows code page without rewriting other project files.
+- Corrected the release-notes heading to the exact publication contract and
+  made that heading failure report separately from the retained-content checks.
 - Added an exact-fingerprint MC17 AutoTrading production profile for
   `Charting.dll` timestamp `0x6AB57EE6`, image size `18624512`, strategy vtable
   RVA `0xB74CF0`, and AutoTrading offset `0x18`.
@@ -11,6 +20,12 @@
   `0xA457B8`, offset `0x142`) unchanged.
 - Replaced title-substring process discovery with exact executable identity
   for `MultiCharts64.exe` and `MultiCharts.exe`, explicitly excluding Watchdog.
+- Made release validation read publication files explicitly as UTF-8, avoiding
+  false failures for the copyright holder's non-ASCII name in Windows
+  PowerShell 5.1.
+- Limited the active-INI publication check to source/package content; ignored
+  `bin`, `obj`, `dist`, and `.git` working directories no longer cause false
+  failures while active source-tree INI files are still rejected.
 - Retained unknown-build rejection, passive research, Tracker Bridge V179,
   Protocol V2, and all 1.20.12 behavior.
 

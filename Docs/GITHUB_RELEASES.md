@@ -18,7 +18,19 @@ run does not create a public GitHub Release.
 
 ## Publish a release
 
-Commit the release source and push a tag that exactly matches the version:
+From the repository root, run the included Windows PowerShell 5.1 helper:
+
+```powershell
+.\Publish-GitHub-Release.ps1
+```
+
+It runs the complete release validator, stages and commits the validated
+source when needed, pushes the current branch, creates the annotated
+`v1.20.13` tag, and pushes that tag. It uses the Git executable shipped with
+GitHub Desktop at the configured Administrator profile path. A failed step
+stops the script before later publication steps are attempted.
+
+The equivalent manual tag commands are:
 
 ```powershell
 git tag v1.20.13

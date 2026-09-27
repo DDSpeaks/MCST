@@ -11,6 +11,18 @@ Scope
   RVA 0xA457B8 and offset 0x142 unchanged.
 - Changed MultiCharts process discovery to accept only MultiCharts64.exe or
   MultiCharts.exe and to exclude the current Watchdog process explicitly.
+- Release validation reads all inspected text files explicitly as UTF-8 so
+  Windows PowerShell 5.1 preserves non-ASCII license and documentation text.
+- Active INI validation excludes ignored build/output roots (`bin`, `obj`,
+  `dist`, `.git`) while continuing to reject active INI files elsewhere.
+- Added an ASCII-only Windows PowerShell 5.1 publication helper that uses the
+  configured GitHub Desktop git.exe, runs validation before Git changes, and
+  stops on every failed commit, push, tag, or remote-tag check.
+- The helper normalizes only LICENSE to UTF-8 with BOM before validation. The
+  copyright holder is assembled from Unicode code points, so the PS1 itself
+  remains ASCII and cannot be misread by Windows PowerShell 5.1.
+- Corrected the release-notes publication heading and gave that contract its
+  own precise validation error.
 - Retained Tracker Bridge V179 and Protocol V2 unchanged.
 
 Research evidence

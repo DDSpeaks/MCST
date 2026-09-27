@@ -7,6 +7,23 @@ $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
 
+function Read-ReleaseText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    try {
+        $text = $strictUtf8.GetString($bytes)
+    }
+    catch {
+        $text = [System.Text.Encoding]::Default.GetString($bytes)
+    }
+    return $text.TrimStart([char]0xFEFF)
+}
+
 $required = @(
     'MCST.sln',
     '.gitignore',
@@ -63,7 +80,8 @@ $required = @(
     'Docs\PORTABLE_INSTALL.md',
     'MCST.TrackerBridgeHost\README.md',
     'Tools\UniversalApplicationMapper\README.md',
-    'Tools\Build-PortableRelease.ps1'
+    'Tools\Build-PortableRelease.ps1',
+    'Publish-GitHub-Release.ps1'
 )
 
 foreach ($item in $required) {
@@ -73,7 +91,7 @@ foreach ($item in $required) {
     }
 }
 
-$licenseText = Get-Content -LiteralPath (Join-Path $root 'LICENSE') -Raw
+$licenseText = Read-ReleaseText -Path (Join-Path $root 'LICENSE')
 foreach ($licenseToken in @(
     'MIT License',
     'Copyright (c) 2026 Mika Tättäläinen',
@@ -90,14 +108,19 @@ if ($historicalChangelogs.Count -ne 0) {
     throw 'Historical per-version CHANGELOG_*.txt files must not be included in the public production package.'
 }
 
-$activeIniFiles = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.ini')
+$activeIniFiles = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*.ini' | Where-Object {
+    $_.FullName -notlike (Join-Path $root 'bin\*') -and
+    $_.FullName -notlike (Join-Path $root 'obj\*') -and
+    $_.FullName -notlike (Join-Path $root 'dist\*') -and
+    $_.FullName -notlike (Join-Path $root '.git\*')
+})
 if ($activeIniFiles.Count -ne 0) {
     throw "Active INI files must not be committed to the publication source package: $($activeIniFiles.FullName -join ', ')"
 }
 
 $publicationTextExtensions = @('.cpp', '.c', '.h', '.md', '.txt', '.ps1', '.yml', '.sln', '.vcxproj', '.rc', '.def', '.example')
 foreach ($publicationFile in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in $publicationTextExtensions }) {
-    $publicationText = Get-Content -LiteralPath $publicationFile.FullName -Raw
+    $publicationText = Get-Content -Encoding UTF8 -LiteralPath $publicationFile.FullName -Raw
     foreach ($privateFixture in @(
         ('910792' + 'INET'),
         ('977015' + 'INET'),
@@ -111,15 +134,15 @@ foreach ($publicationFile in Get-ChildItem -LiteralPath $root -Recurse -File | W
     }
 }
 
-$gitIgnore = Get-Content -LiteralPath (Join-Path $root '.gitignore') -Raw
+$gitIgnore = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root '.gitignore') -Raw
 foreach ($ignoreToken in @('bin/', 'obj/', 'dist/', '*.ini', '*.pfx', '*.key', 'MCST-Watchdog-StatusReport.*', 'MCST_Position_Currency_*')) {
     if ($gitIgnore -notmatch [regex]::Escape($ignoreToken)) {
         throw "Repository protection is missing from .gitignore: $ignoreToken"
     }
 }
 
-$watchdogExample = Get-Content -LiteralPath (Join-Path $root 'Examples\MCST-Watchdog.ini.example') -Raw
-$compatibilityExample = Get-Content -LiteralPath (Join-Path $root 'Examples\MCST-Compatibility.ini.example') -Raw
+$watchdogExample = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Examples\MCST-Watchdog.ini.example') -Raw
+$compatibilityExample = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Examples\MCST-Compatibility.ini.example') -Raw
 if ($watchdogExample -notmatch 'REFERENCE TEMPLATE ONLY' -or
     $watchdogExample -notmatch 'enabled=false' -or
     $watchdogExample -notmatch '(?m)^smtp_password=\r?$' -or
@@ -129,14 +152,14 @@ if ($watchdogExample -notmatch 'REFERENCE TEMPLATE ONLY' -or
     throw 'Safe inert INI example contract is missing.'
 }
 
-$solutionText = Get-Content -LiteralPath (Join-Path $root 'MCST.sln') -Raw
+$solutionText = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.sln') -Raw
 if ($solutionText -match 'Debug\|') {
     throw 'Debug configuration found in the production solution.'
 }
 
 Get-ChildItem -Path $root -Recurse -Filter *.vcxproj | ForEach-Object {
-    [xml]$xml = Get-Content -LiteralPath $_.FullName
-    $text = Get-Content -LiteralPath $_.FullName -Raw
+    [xml]$xml = Get-Content -Encoding UTF8 -LiteralPath $_.FullName
+    $text = Get-Content -Encoding UTF8 -LiteralPath $_.FullName -Raw
 
     if ($text -match 'Debug\|') {
         throw "Debug configuration found in $($_.FullName)"
@@ -157,9 +180,9 @@ Get-ChildItem -Path $root -Recurse -Filter *.vcxproj | ForEach-Object {
     }
 }
 
-$watchdogMain = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
-$autoTradingReader = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AutoTradingReader.cpp') -Raw
-$compatibilityManager = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\CompatibilityManager.cpp') -Raw
+$watchdogMain = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
+$autoTradingReader = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\AutoTradingReader.cpp') -Raw
+$compatibilityManager = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\CompatibilityManager.cpp') -Raw
 foreach ($token in @(
     'AutoTrading Dynamic Research Session 0.578',
     'CompareDynamicResearchSnapshots',
@@ -253,7 +276,7 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -match 'Objects found') {
     throw 'The retained activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
-$activityHistory = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
+$activityHistory = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'std::stable_sort' -or
     $activityHistory -notmatch 'left.time == right.time' -or
@@ -261,7 +284,7 @@ if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'left.text == right.text') {
     throw 'The retained activity-history deduplication contract is missing.'
 }
-$headlinePolicy = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\OverallHeadlinePolicy.h') -Raw
+$headlinePolicy = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Shared\OverallHeadlinePolicy.h') -Raw
 foreach ($headline in @('SYSTEM HEALTHY', 'ATTENTION REQUIRED', 'CRITICAL CONDITION', 'CHECK INCOMPLETE', 'INITIALIZING')) {
     if ($headlinePolicy -notmatch [regex]::Escape($headline)) {
         throw "Overall Dashboard headline is missing: $headline"
@@ -271,7 +294,7 @@ if ($watchdogMain -match 'CHECKED ITEMS OK' -or
     $watchdogMain -notmatch 'OverallHeadline\(status\.overall, firstUpdateCompleted\)') {
     throw 'Dashboard must use the shared overall-headline policy and must not restore CHECKED ITEMS OK.'
 }
-$developerHelp = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
+$developerHelp = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\DeveloperHelpContent.cpp') -Raw
 foreach ($helpTopic in @('AT Start', 'AT Capture', 'AT Finish', 'Tracker Capture', 'Position CCY', 'Open Compat', 'Reload Compat')) {
     if ($developerHelp -notmatch [regex]::Escape($helpTopic)) {
         throw "Developer Help topic is missing: $helpTopic"
@@ -318,7 +341,7 @@ foreach ($recoveryToken in @(
     }
 }
 
-$appConfigSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AppConfig.cpp') -Raw
+$appConfigSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\AppConfig.cpp') -Raw
 if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
     $appConfigSource -notmatch 'RefreshIniProfileCache' -or
     $appConfigSource -notmatch 'TrackerMonitor' -or
@@ -330,7 +353,7 @@ if ($appConfigSource -notmatch [regex]::Escape($currentVersion) -or
     throw 'INI profile cache refresh support is missing from AppConfig.'
 }
 
-$statusReportSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\StatusReport.cpp') -Raw
+$statusReportSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\StatusReport.cpp') -Raw
 if ($statusReportSource -notmatch [regex]::Escape($currentVersion) -or
     $statusReportSource -notmatch 'AppendAlignedSectionRows' -or
     $statusReportSource -notmatch 'AppendOpenPositionsTable' -or
@@ -411,9 +434,9 @@ if ($statusReportSource -match [regex]::Escape('<table role=\"presentation\"')) 
     throw 'Overall/System Status still uses an independently shrinkable semantic HTML table.'
 }
 
-$testsSource = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
-$testsProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Tests\MCST.Tests.vcxproj') -Raw
-$recoveryPolicy = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\TrackerRecoveryPolicy.h') -Raw
+$testsSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Tests\main.cpp') -Raw
+$testsProject = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Tests\MCST.Tests.vcxproj') -Raw
+$recoveryPolicy = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Shared\TrackerRecoveryPolicy.h') -Raw
 if ($testsProject -notmatch '<TargetName>MCST-LogicTests</TargetName>' -or
     $testsProject -notmatch 'StatusReport\.cpp' -or
     $testsProject -notmatch 'TrackerDateParser\.cpp' -or
@@ -475,7 +498,7 @@ if ($testsSource -match [regex]::Escape('L"[10 rows]"') -or
     throw 'The current Saxo Open P/L regression test still expects the removed row-count comment.'
 }
 
-$watchdogProject = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
+$watchdogProject = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.vcxproj') -Raw
 if ($watchdogProject -notmatch '<WholeProgramOptimization>false</WholeProgramOptimization>' -or
     $watchdogProject -notmatch '<FunctionLevelLinking>false</FunctionLevelLinking>' -or
     $watchdogProject -notmatch '<IntrinsicFunctions>false</IntrinsicFunctions>' -or
@@ -487,7 +510,7 @@ if ($watchdogProject -notmatch '<WholeProgramOptimization>false</WholeProgramOpt
     throw 'Required MCST-Watchdog production Release settings have changed.'
 }
 
-$hostText = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Host.txt') -Raw
+$hostText = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Host.txt') -Raw
 if ($hostText -notmatch [regex]::Escape('C:\MCExtras\MCST-TrackerBridge.dll')) {
     throw 'PowerLanguage host does not reference the production Tracker Bridge DLL path.'
 }
@@ -495,7 +518,7 @@ if ($hostText -notmatch "Internal bridge build: V$currentBridgeBuild") {
     throw "PowerLanguage host does not identify Tracker Bridge internal build V$currentBridgeBuild."
 }
 
-$watchdogRc = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.rc') -Raw
+$watchdogRc = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\MCST.Watchdog.rc') -Raw
 $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
@@ -505,8 +528,8 @@ if ($watchdogRc -notmatch 'FILEVERSION 1,20,13,0' -or
     throw 'Watchdog numeric Windows version resource is not aligned with 1.20.13.'
 }
 
-$bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
-$bridgeRc = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc') -Raw
+$bridgeSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
+$bridgeRc = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc') -Raw
 if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).parent_path()')) {
     throw 'Invalid vector-to-filesystem::path construction found in Tracker Bridge Host compatibility path.'
 }
@@ -567,14 +590,14 @@ foreach ($targetedRecoveryToken in @(
     }
 }
 
-$trackerReaderHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
-$trackerReaderSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
+$trackerReaderHeader = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
+$trackerReaderSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
 if ($trackerReaderHeader -notmatch 'tabViewDiagnostic' -or
     $trackerReaderSource -notmatch 'key == "tabview_diagnostic"') {
     throw 'CATPTTabView recovery diagnostic is not exposed through TrackerBridgeReader.'
 }
 
-$brokerAuthDetector = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\BrokerAuthDetector.cpp') -Raw
+$brokerAuthDetector = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\BrokerAuthDetector.cpp') -Raw
 if ($brokerAuthDetector -notmatch 'UIAutomation\.h' -or
     $brokerAuthDetector -notmatch 'ole2\.h' -or
     $brokerAuthDetector -notmatch 'GetCurrentPatternAs' -or
@@ -662,13 +685,13 @@ foreach ($requiredTrackerToken in @(
     }
 }
 
-$bridgeRc = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc') -Raw
+$bridgeRc = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCST.TrackerBridgeHost.rc') -Raw
 if ($bridgeRc -notmatch "internal bridge build V$currentBridgeBuild" -or
     $bridgeRc -notmatch "1\.0\.$currentBridgeBuild\.0") {
     throw "Tracker Bridge version resource is not aligned with internal build V$currentBridgeBuild."
 }
 
-$readerHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
+$readerHeader = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.h') -Raw
 if ($readerHeader -notmatch "kTrackerBridgeInternalBuildVersion = $minimumProductionBridgeBuild") {
     throw "TrackerBridgeReader production minimum is not V$minimumProductionBridgeBuild."
 }
@@ -676,7 +699,7 @@ if ($readerHeader -notmatch "kPositionCurrencyResearchBridgeVersion = $positionC
     throw "Position Currency research Bridge requirement is not V$positionCurrencyResearchBridgeBuild."
 }
 
-$readerSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
+$readerSource = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.TrackerBridge\TrackerBridgeReader.cpp') -Raw
 if ($readerSource -notmatch 'snapshot\.bridgeVersion < kTrackerBridgeInternalBuildVersion') {
     throw 'Watchdog-side Tracker reader does not enforce the required Bridge internal build.'
 }
@@ -697,7 +720,7 @@ if ($readerSource -notmatch 'name == "position_history"' -or
     throw 'Optional position_history parsing or validation is missing.'
 }
 
-$protocolHeader = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
+$protocolHeader = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Shared\MCBridgeProtocol.h') -Raw
 if ($protocolHeader -notmatch "kProtocolVersion = $currentProtocolVersion") {
     throw "Bridge protocol is not V$currentProtocolVersion."
 }
@@ -705,7 +728,7 @@ if ($protocolHeader -notmatch 'CapturePositionCurrencyDirectResearch = 50') {
     throw 'Bridge Protocol V2 additive Position Currency research command 50 is missing.'
 }
 
-$versionDetector = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsVersionDetector.cpp') -Raw
+$versionDetector = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsVersionDetector.cpp') -Raw
 foreach ($requiredDetectedKey in @(
     'atonptracker_pe_timestamp',
     'atonptracker_image_size',
@@ -717,7 +740,7 @@ foreach ($requiredDetectedKey in @(
     }
 }
 
-$multiChartsHealthMonitor = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsHealthMonitor.cpp') -Raw
+$multiChartsHealthMonitor = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\MultiChartsHealthMonitor.cpp') -Raw
 foreach ($healthToken in @(
     'SendMessageTimeoutW',
     'GetProcessMemoryInfo',
@@ -750,7 +773,7 @@ $publicCurrentDocs = @(
     'MCST.TrackerBridgeHost\README.md'
 )
 foreach ($doc in $publicCurrentDocs) {
-    $text = Get-Content -LiteralPath (Join-Path $root $doc) -Raw
+    $text = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root $doc) -Raw
     if ($text -match 'MCST-StartupProbe' -or
         $text -match 'user-verified working 1\.108' -or
         $text -match 'C:\\MCBridge\\MCTrackerBridge\.dll') {
@@ -758,10 +781,12 @@ foreach ($doc in $publicCurrentDocs) {
     }
 }
 
-$releaseNotes = Get-Content -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
+$releaseNotes = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'RELEASE_NOTES.md') -Raw
 $escapedCurrentVersion = [regex]::Escape($currentVersion)
-if ($releaseNotes -notmatch "MCST $escapedCurrentVersion GitHub Publication-Ready Package" -or
-    $releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
+if ($releaseNotes -notmatch "MCST $escapedCurrentVersion GitHub Publication-Ready Package") {
+    throw "Release notes heading must contain: MCST $currentVersion GitHub Publication-Ready Package"
+}
+if ($releaseNotes -notmatch "internal build:\s+V$currentBridgeBuild" -or
     $releaseNotes -notmatch 'GitHub Release' -or
     $releaseNotes -notmatch 'SHA-256' -or
     $releaseNotes -notmatch 'MIT License' -or
@@ -781,7 +806,21 @@ if ($releaseNotes -notmatch "MCST $escapedCurrentVersion GitHub Publication-Read
     throw "Release notes do not identify MCST $currentVersion, Tracker Bridge V$currentBridgeBuild, account totals, browser authentication detection, and self-recovery."
 }
 
-$workflow = Get-Content -LiteralPath (Join-Path $root '.github\workflows\release.yml') -Raw
+$publisher = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Publish-GitHub-Release.ps1') -Raw
+foreach ($publisherToken in @(
+    'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe',
+    'Tools\Validate-Release.ps1',
+    'v1.20.13',
+    'git.exe',
+    'push',
+    'tag'
+)) {
+    if ($publisher -notmatch [regex]::Escape($publisherToken)) {
+        throw "GitHub publication helper token is missing: $publisherToken"
+    }
+}
+
+$workflow = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root '.github\workflows\release.yml') -Raw
 foreach ($workflowToken in @(
     'windows-2022',
     'actions/checkout@v5',
@@ -801,7 +840,7 @@ foreach ($workflowToken in @(
     }
 }
 
-$portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
+$portableBuilder = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
     '1.20.13',
     'MCST-Watchdog.exe',
@@ -825,7 +864,7 @@ foreach ($packageToken in @(
     }
 }
 
-$coveredProbe = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\CoveredQueueProbe.h') -Raw
+$coveredProbe = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\CoveredQueueProbe.h') -Raw
 foreach ($probeToken in @(
     'JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE', 'CREATE_SUSPENDED | CREATE_NO_WINDOW',
     'WaitForSingleObject(process.hProcess, 300)', 'std::chrono::seconds(60)',
