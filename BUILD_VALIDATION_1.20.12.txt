@@ -1,0 +1,28 @@
+MCST-Watchdog 1.20.12 - source validation, 27 September 2026
+================================================================
+
+Scope
+-----
+- Replaced the fixed MC16-only AT research candidate list with passive dynamic
+  Charting.dll candidate discovery.
+- Added multi-snapshot exact boolean transition ranking with reverse-direction
+  verification.
+- Added Charting.dll PE timestamp and image-size evidence to the research file.
+- Prevented zero-result sessions from recommending a legacy candidate.
+- Preserved the verified MC16 production compatibility profile unchanged.
+- Retained Tracker Bridge V179 and Protocol V2 unchanged.
+
+Safety
+------
+- Research uses process/module enumeration, VirtualQueryEx and
+  ReadProcessMemory only.
+- It does not click MultiCharts, send input, place orders, change AutoTrading,
+  or write to MultiCharts memory.
+- An MC17 production profile is not created automatically. A high-confidence
+  research result still requires developer review.
+
+Validation status
+-----------------
+- Static source and package validation performed in the preparation
+  environment.
+- Windows Release x64 compilation and MC17 live capture remain required.

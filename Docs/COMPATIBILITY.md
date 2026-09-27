@@ -89,6 +89,14 @@ autotrading_offset=0x142
 verification=Controlled research session: 8/8 exact toggle responses
 ```
 
+Version 1.20.12 retains this MC16 profile unchanged. For an unknown build such
+as MC17, `AT Start` performs a dynamic passive candidate scan and records the
+exact `Charting.dll` PE timestamp and image size. `AT Capture` must be run after
+each single controlled chart AutoTrading change in both directions. `AT Finish`
+ranks the RVA/offset pairs, but it does not create or enable a production
+profile automatically. A separately reviewed MC17 profile can be added beside
+the MC16 profile, allowing both major versions to remain supported.
+
 Legacy `pe_timestamp` and `image_size` aliases remain readable for compatibility with older databases, but new profile data should use the canonical `charting_*` names.
 
 ### Tracker / ATOnPTracker.dll

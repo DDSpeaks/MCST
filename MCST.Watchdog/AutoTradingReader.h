@@ -43,9 +43,10 @@ bool RunAutoTradingDynamicChangeDetection(const std::wstring& reportPath, const 
 // This is passive and can be run repeatedly while strategies are toggled.
 bool WriteAutoTradingCandidateMonitor(const std::wstring& reportPath, std::wstring& diagnostic);
 
-// Automated multi-snapshot research session. The user only starts a session,
-// toggles one strategy between captures, captures snapshots, and finishes.
-// All measurements and the automatic candidate ranking are written to one file.
+// Automated multi-snapshot research session for an unknown MultiCharts build.
+// AT Start dynamically maps the active Charting.dll candidate objects; the user
+// toggles one chart between captures, and AT Finish ranks exact 0/1 field changes.
+// All reads are passive. Verified production compatibility profiles are not changed.
 bool StartAutoTradingResearchSession(const std::wstring& historyPath, std::wstring& diagnostic);
 bool CaptureAutoTradingResearchSnapshot(const std::wstring& historyPath, std::wstring& diagnostic);
 bool FinishAutoTradingResearchSession(const std::wstring& historyPath, std::wstring& diagnostic);

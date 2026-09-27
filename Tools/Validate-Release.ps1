@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.11'
+$currentVersion = '1.20.12'
 $currentBridgeBuild = 179
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -26,6 +26,7 @@ $required = @(
     'MCST.Watchdog\main.cpp',
     'MCST.Watchdog\DeveloperHelpContent.h',
     'MCST.Watchdog\DeveloperHelpContent.cpp',
+    'MCST.Watchdog\AutoTradingReader.cpp',
     'MCST.Watchdog\TrackerDateParser.h',
     'MCST.Watchdog\TrackerDateParser.cpp',
     'MCST.Watchdog\CompatibilityManager.cpp',
@@ -45,7 +46,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.11.txt',
+    'BUILD_VALIDATION_1.20.12.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -157,6 +158,32 @@ Get-ChildItem -Path $root -Recurse -Filter *.vcxproj | ForEach-Object {
 }
 
 $watchdogMain = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
+$autoTradingReader = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\AutoTradingReader.cpp') -Raw
+$compatibilityManager = Get-Content -LiteralPath (Join-Path $root 'MCST.Watchdog\CompatibilityManager.cpp') -Raw
+foreach ($token in @(
+    'AutoTrading Dynamic Research Session 0.578',
+    'CompareDynamicResearchSnapshots',
+    'Charting.dll PE timestamp',
+    'image size:',
+    'FULL MATCH WITH REVERSE VERIFICATION',
+    'NO CANDIDATE FOUND',
+    'Existing verified MC16 production compatibility remains unchanged'
+)) {
+    if ($autoTradingReader -notmatch [regex]::Escape($token)) {
+        throw "The 1.20.12 dynamic AutoTrading research contract is missing: $token"
+    }
+}
+foreach ($mc16Token in @(
+    'Profile.MC16-Charting-6A5684BF',
+    'charting_pe_timestamp", L"0x6A5684BF',
+    'charting_image_size", L"18493440',
+    'strategy_vtable_rva", L"0xA457B8',
+    'autotrading_offset", L"0x142'
+)) {
+    if ($compatibilityManager -notmatch [regex]::Escape($mc16Token)) {
+        throw "The verified MC16 compatibility profile was changed or removed: $mc16Token"
+    }
+}
 if ($watchdogMain -notmatch [regex]::Escape($currentVersion)) {
     throw "Watchdog main window does not identify $currentVersion."
 }
@@ -199,7 +226,7 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
-    throw 'The 1.20.11 activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+    throw 'The retained activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
 }
 $activityHistory = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
@@ -207,7 +234,7 @@ if ($activityHistory -notmatch 'IsSameActivity' -or
     $activityHistory -notmatch 'left.time == right.time' -or
     $activityHistory -notmatch 'left.state == right.state' -or
     $activityHistory -notmatch 'left.text == right.text') {
-    throw 'The 1.20.11 activity-history deduplication contract is missing.'
+    throw 'The retained activity-history deduplication contract is missing.'
 }
 $headlinePolicy = Get-Content -LiteralPath (Join-Path $root 'MCST.Shared\OverallHeadlinePolicy.h') -Raw
 foreach ($headline in @('SYSTEM HEALTHY', 'ATTENTION REQUIRED', 'CRITICAL CONDITION', 'CHECK INCOMPLETE', 'INITIALIZING')) {
@@ -448,9 +475,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,11,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,11,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.11.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,12,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,12,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.12.'
 }
 
 $bridgeSource = Get-Content -LiteralPath (Join-Path $root 'MCST.TrackerBridgeHost\MCTrackerBridge.cpp') -Raw
@@ -735,7 +762,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.11-Windows-x64',
+    'MCST-Watchdog-1.20.12-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -751,7 +778,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.11',
+    '1.20.12',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

@@ -3,7 +3,7 @@
 
 ## Beginner Developer Help build
 
-MCST-Watchdog 1.20.11 retains R33's two-pane Win32 topic selector backed by
+MCST-Watchdog 1.20.12 retains R33's two-pane Win32 topic selector backed by
 `DeveloperHelpContent` and adds a persistent operating-boundary notice. It
 states that these controls are normally used only after a MultiCharts update,
 after an exact Charting.dll or ATOnPTracker.dll fingerprint change, or at a
@@ -18,13 +18,16 @@ The AT Capture contract is intentionally specific: on one chart, select one
 strategy and change only its AutoTrading state from ON to OFF or OFF to ON.
 The chart, workspace, strategy settings, and running MultiCharts process set
 must stay unchanged between snapshots. The Watchdog records the state; it does
-not perform the user's AutoTrading change.
+not perform the user's AutoTrading change. Version 1.20.12 maps the active
+`Charting.dll` dynamically at AT Start instead of limiting research to the
+previously verified MC16 RVA/offset list. The verified MC16 production profile
+itself remains unchanged.
 
 ## Status Report alignment retained
 
-MCST-Watchdog 1.20.11 places `MultiCharts Health` first, uses 30-pixel compact status-row spacing, and separates Developer tools into a labelled read-only diagnostics panel with an 18-pixel gap above the production controls. Latest Activity uses uniform 20-pixel text rows and, when Developer mode is off, fills the available space above the production buttons with as many complete entries as fit from the existing bounded ten-event history. Every additional row follows the original summary-row order: event description at left and full local timestamp in the adjacent value column. The timestamp and detail columns share the exact starting coordinates used by the System Status state and description columns. Because activity events have no separate detail field, the description is repeated in the wide right-hand detail column so long text remains readable. Activity history is merged by exact timestamp, state, and text identity, preventing refresh-time duplication while retaining genuine concurrent events. Activity rows use no health-state indicators or System Status styling. When Developer mode is on, the original three-row summary remains compact. It retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged report component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
+MCST-Watchdog 1.20.12 places `MultiCharts Health` first, uses 30-pixel compact status-row spacing, and separates Developer tools into a labelled read-only diagnostics panel with an 18-pixel gap above the production controls. Latest Activity uses uniform 20-pixel text rows and, when Developer mode is off, fills the available space above the production buttons with as many complete entries as fit from the existing bounded ten-event history. Every additional row follows the original summary-row order: event description at left and full local timestamp in the adjacent value column. The timestamp and detail columns share the exact starting coordinates used by the System Status state and description columns. Because activity events have no separate detail field, the description is repeated in the wide right-hand detail column so long text remains readable. Activity history is merged by exact timestamp, state, and text identity, preventing refresh-time duplication while retaining genuine concurrent events. Activity rows use no health-state indicators or System Status styling. When Developer mode is on, the original three-row summary remains compact. It retains R30's emphasized `OVERALL STATUS`, protected 15-pixel preformatted System Status and Open Positions flows, and fixed outer `ch` widths. It retains R32's enlarged report component status dots at `1.5em`, the `2em` Overall dot, and the fixed dot column. Every status and position row remains one line and may continue to the right without iOS Mail changing the column geometry.
 
-Version 1.20.11 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V179 validates the latest object hint, searches remembered allocations in blocks, and performs a bounded process-wide RTTI fallback after a targeted miss. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
+Version 1.20.12 retains optional Position History and Protocol V2. Realized P/L aggregation is keyed by the account values currently present in `snapshot.accounts`; history rows for all other accounts are discarded before date inference or arithmetic. Empty Open Positions sections use `(no rows)`, matching Accounts and Recent Logs, before any monthly Realized P/L rows. Bridge V179 validates the latest object hint, searches remembered allocations in blocks, and performs a bounded process-wide RTTI fallback after a targeted miss. BrokerMonitor and LogAlertEngine use only current live monitoring history; reports continue to show ten log rows.
 
 The Broker regression sequence is newest-first: many unrelated UIC warnings, a successful `Connection to Saxo Group has been established` row, and an older `No connection to Saxo Group trading system` row. BrokerMonitor processes oldest-to-newest and must finish Connected because the successful connection is the newest Broker-state evidence.
 
@@ -142,11 +145,13 @@ Current controls are `AT Start`, `AT Capture`, `AT Finish`, `Tracker Capture`, `
 
 ### Developer control contract
 
-- `AT Start` creates/replaces the controlled AutoTrading research baseline.
+- `AT Start` creates/replaces the controlled AutoTrading research baseline and
+  discovers the current build's repeated `Charting.dll` candidate objects.
 - `AT Capture` appends a settled post-change state. Before each capture the
   user changes only one strategy's AutoTrading ON/OFF state on one chart;
   multiple controlled captures are expected.
-- `AT Finish` analyzes the active session and writes `C:\Temp\MCST-Watchdog\AutoTradingResearch.txt`.
+- `AT Finish` analyzes the active session, requires both toggle directions for
+  the strongest confidence, and writes `C:\Temp\MCST-Watchdog\AutoTradingResearch.txt`.
 - `Tracker Capture` requests the Bridge's passive read-only Tracker research bundle.
 - `Position CCY` runs the retained optional currency research against representative visible positions.
 - `Open Compat` opens the shared compatibility database but never validates or enables a candidate.

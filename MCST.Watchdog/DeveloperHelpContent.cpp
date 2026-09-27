@@ -61,7 +61,7 @@ const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
             Topic(
                 L"AT START",
                 L"Create a trustworthy baseline for an AutoTrading compatibility investigation.",
-                L"Starts a new research session and records the current AutoTrading state as snapshot 1. Starting again replaces any unfinished session.",
+                L"Starts a new research session, dynamically maps the current Charting.dll candidate objects, and records snapshot 1. Starting again replaces any unfinished session.",
                 L"Use when a MultiCharts update has made the AutoTrading count unknown or when a developer has asked for a controlled capture.",
                 L"1. Start every MultiCharts instance that will remain open during the test.\r\n2. Open the chart whose strategy will be used.\r\n3. Confirm the strategy and its current AutoTrading ON/OFF state.\r\n4. Do not change anything yet.",
                 L"Click AT Start once. Wait for the result message before touching MultiCharts.",
@@ -75,12 +75,12 @@ const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
             Topic(
                 L"AT CAPTURE",
                 L"Record the AutoTrading state after one controlled change so it can be compared with the previous capture.",
-                L"Adds one snapshot to the active AutoTrading research session and records which verified candidates reacted to the controlled ON/OFF change.",
+                L"Adds one snapshot to the active AutoTrading research session and records which dynamically discovered RVA/offset candidates reacted to the controlled ON/OFF change.",
                 L"Use only after AT Start and after one deliberate AutoTrading state change.",
                 L"1. Press AT Start first.\r\n2. On ONE chart, choose ONE strategy.\r\n3. Change only that strategy's AutoTrading state: ON to OFF, or OFF to ON.\r\n4. Do not change strategy settings, charts, workspaces, or the number of running MultiCharts instances.\r\n5. Wait until the new AutoTrading state is stable.",
                 L"Click AT Capture once. Do not double-click and do not make another change while capture is running.",
                 L"A message says that a numbered snapshot was captured. The comparison is appended to C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt.",
-                L"For another comparison, change only the AutoTrading ON/OFF state of one strategy on one chart again, wait, and press AT Capture. When enough comparisons exist, press AT Finish.",
+                L"For another comparison, change only the same chart's AutoTrading ON/OFF state again, wait, and press AT Capture. Capture both directions (OFF and ON), preferably at least three transitions, then press AT Finish.",
                 L"If there is no active session, press AT Start and repeat the steps. If the MultiCharts process set changed, return all intended instances to a stable state and restart the research session with AT Start.",
                 L"Read-only research. The button does not click MultiCharts, change a strategy, place orders, or write to MultiCharts memory. The user performs the single ON/OFF change.")
         },
@@ -90,7 +90,7 @@ const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
                 L"AT FINISH",
                 L"Turn the captured changes into a ranked compatibility report.",
                 L"Ends the active AutoTrading research session, analyzes the baseline and captures, and ranks candidates that followed the controlled changes.",
-                L"Use after AT Start and at least one successful AT Capture. Several clean captures are better than one.",
+                L"Use after AT Start and successful AT Captures in both directions. At least three clean transitions are recommended.",
                 L"Stop making changes. Confirm that the latest AT Capture succeeded and that the MultiCharts instances used throughout the session are still running.",
                 L"Click AT Finish once and wait for analysis to complete.",
                 L"A summary message appears and C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt opens with the automatic ranking.",

@@ -1,9 +1,25 @@
-# MCST 1.20.11 GitHub Publication-Ready Package
+# MCST 1.20.12 MultiCharts 17 AutoTrading Research Package
 
 Tracker Bridge internal build: V179  
 Bridge protocol: Protocol V2
 
-## iOS Mail status-cell separator correction
+## Dynamic AutoTrading compatibility research
+
+- `AT Start` now discovers repeated pointers into the active `Charting.dll`
+  instead of testing only hard-coded MC16 RVA/offset pairs.
+- `AT Capture` compares stable candidate objects after one controlled chart
+  AutoTrading change and records exact single-object boolean transitions.
+- `AT Finish` ranks fields across the complete session and requires both
+  toggle directions for the strongest research confidence.
+- Every snapshot records the `Charting.dll` PE timestamp and image size.
+- Sessions without a real response report `NO CANDIDATE FOUND` rather than
+  recommending the first legacy entry.
+- The verified MC16 profile remains unchanged and continues to support users
+  who stay on MultiCharts 16.
+- No unverified MC17 address is used by production monitoring. A separate
+  verified MC17 profile will be added after the research result is reviewed.
+
+## Retained iOS Mail status-cell separator correction
 
 - Adds a non-breaking text separator inside the fixed-width status and value
   cells of HTML email reports.

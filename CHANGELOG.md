@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 1.20.12
+
+- Replaced the fixed MC16 AutoTrading research candidate list with a dynamic,
+  read-only scan of the active `Charting.dll` layout.
+- Made each controlled snapshot compare stable candidate objects across all
+  detected MultiCharts processes and rank exact `0 -> 1` / `1 -> 0` changes.
+- Added the `Charting.dll` PE timestamp and image size to every research
+  snapshot so a verified result can be tied to the exact MC17 build.
+- Prevented an empty research session from recommending the first legacy
+  candidate; it now reports `NO CANDIDATE FOUND`.
+- Preserved the verified MC16 production compatibility profile unchanged.
+- Retained the 1.20.11 iOS Mail correction and Tracker Bridge V179 unchanged.
+
 ## 1.20.11
 
 - Added real non-breaking separators between HTML status, value and detail

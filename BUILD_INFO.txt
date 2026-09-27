@@ -1,15 +1,15 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.20.11
+MCST-Watchdog version: 1.20.12
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V179, Protocol V2
-Current change:        iOS Mail status-cell separator correction
+Current change:        MultiCharts 17 dynamic AutoTrading research
 Windows validation:    NOT run; source-only diagnostic trial
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-Retained Tracker recovery method (unchanged in 1.20.11)
+Retained Tracker recovery method (unchanged in 1.20.12)
 ------------------------
 1. Revalidate the most recently accepted CATPTTabView address first.
 2. Scan the remembered allocator neighborhood first and in 256 KiB blocks.

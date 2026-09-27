@@ -1136,7 +1136,7 @@ bool RunAutoTradingToggleVerification(const std::wstring& reportPath, const std:
 namespace
 {
     constexpr DWORD kDynamicBaselineMagic = 0x4454534D; // "MSTD"
-    constexpr DWORD kDynamicBaselineVersion = 1;
+    constexpr DWORD kDynamicBaselineVersion = 2;
     constexpr SIZE_T kDynamicPrefixSize = 0x300;
     constexpr SIZE_T kDynamicMaxObjectsPerVtable = 512;
 
@@ -1154,6 +1154,7 @@ namespace
         DWORD processId = 0;
         DWORD candidateCount = 0;
         ULONGLONG chartingBase = 0;
+        ULONGLONG chartingSize = 0;
         DWORD peTimestamp = 0;
         DWORD reserved = 0;
     };
@@ -1187,6 +1188,7 @@ namespace
     {
         DWORD processId = 0;
         ULONG_PTR chartingBase = 0;
+        SIZE_T chartingSize = 0;
         DWORD peTimestamp = 0;
         std::vector<DynamicCandidateSnapshot> candidates;
     };
@@ -1227,6 +1229,7 @@ namespace
             DynamicProcessSnapshot processSnapshot;
             processSnapshot.processId = processId;
             processSnapshot.chartingBase = charting->base;
+            processSnapshot.chartingSize = charting->size;
             ReadRemotePeTimestamp(process, charting->base, processSnapshot.peTimestamp);
 
             int regionsRead = 0;
@@ -1295,6 +1298,7 @@ namespace
             processHeader.processId = process.processId;
             processHeader.candidateCount = static_cast<DWORD>(process.candidates.size());
             processHeader.chartingBase = static_cast<ULONGLONG>(process.chartingBase);
+            processHeader.chartingSize = static_cast<ULONGLONG>(process.chartingSize);
             processHeader.peTimestamp = process.peTimestamp;
             out.write(reinterpret_cast<const char*>(&processHeader), sizeof(processHeader));
 
@@ -1339,6 +1343,7 @@ namespace
             DynamicProcessSnapshot process;
             process.processId = processHeader.processId;
             process.chartingBase = static_cast<ULONG_PTR>(processHeader.chartingBase);
+            process.chartingSize = static_cast<SIZE_T>(processHeader.chartingSize);
             process.peTimestamp = processHeader.peTimestamp;
             process.candidates.reserve(processHeader.candidateCount);
 
@@ -1792,6 +1797,7 @@ bool WriteAutoTradingCandidateMonitor(const std::wstring& reportPath, std::wstri
     return true;
 }
 
+#if 0 // Retired in 1.20.12: fixed MC16 candidate research could not discover MC17 layouts.
 namespace
 {
     struct ResearchSpec
@@ -2109,6 +2115,448 @@ bool FinishAutoTradingResearchSession(const std::wstring& historyPath, std::wstr
     const SIZE_T snapshots = g_researchSnapshots.size();
     g_researchSnapshots.clear();
     diagnostic = L"AutoTrading research session finished.\n\nSnapshots analyzed: " + std::to_wstring(snapshots)
+        + L"\nFull history and automatic ranking:\n" + historyPath;
+    return true;
+}
+#endif
+
+namespace
+{
+    struct DynamicResearchSnapshot
+    {
+        std::chrono::system_clock::time_point time{};
+        std::set<DWORD> processIds;
+        std::vector<DynamicProcessSnapshot> processes;
+    };
+
+    struct DynamicResearchKey
+    {
+        ULONG_PTR rva = 0;
+        SIZE_T offset = 0;
+
+        bool operator<(const DynamicResearchKey& other) const
+        {
+            if (rva != other.rva) return rva < other.rva;
+            return offset < other.offset;
+        }
+    };
+
+    struct DynamicResearchTransition
+    {
+        int oneToZero = 0;
+        int zeroToOne = 0;
+        std::set<DWORD> processIds;
+    };
+
+    struct DynamicResearchScore
+    {
+        DynamicResearchKey key;
+        int exact = 0;
+        int unchanged = 0;
+        int ambiguous = 0;
+        int exactOneToZero = 0;
+        int exactZeroToOne = 0;
+        SIZE_T objects = 0;
+        int processes = 0;
+    };
+
+    std::mutex g_dynamicResearchMutex;
+    bool g_dynamicResearchActive = false;
+    std::vector<DynamicResearchSnapshot> g_dynamicResearchSnapshots;
+
+    std::wstring DynamicResearchTime(std::chrono::system_clock::time_point value)
+    {
+        const std::time_t tt = std::chrono::system_clock::to_time_t(value);
+        tm local{};
+        localtime_s(&local, &tt);
+        std::wostringstream out;
+        out << std::put_time(&local, L"%Y-%m-%d %H:%M:%S");
+        return out.str();
+    }
+
+    bool ReadDynamicResearchSnapshot(DynamicResearchSnapshot& snapshot, std::wstring& diagnostic)
+    {
+        snapshot = DynamicResearchSnapshot{};
+        snapshot.time = std::chrono::system_clock::now();
+        const auto detected = CollectMultiChartsProcessIds();
+        snapshot.processIds.insert(detected.begin(), detected.end());
+        if (snapshot.processIds.empty())
+        {
+            diagnostic = L"No MultiCharts processes were detected.";
+            return false;
+        }
+
+        std::wstring scanDiagnostic;
+        if (!CollectDynamicSnapshots(snapshot.processes, scanDiagnostic))
+        {
+            diagnostic = L"The dynamic Charting.dll scan found no readable candidate objects. " + scanDiagnostic;
+            return false;
+        }
+
+        std::wostringstream message;
+        message << L"Snapshot captured from " << snapshot.processIds.size()
+                << L" MultiCharts process(es). " << scanDiagnostic;
+        diagnostic = message.str();
+        return true;
+    }
+
+    SIZE_T DynamicCandidateCount(const DynamicResearchSnapshot& snapshot)
+    {
+        SIZE_T total = 0;
+        for (const auto& process : snapshot.processes)
+            total += process.candidates.size();
+        return total;
+    }
+
+    SIZE_T DynamicObjectCount(const DynamicResearchSnapshot& snapshot)
+    {
+        SIZE_T total = 0;
+        for (const auto& process : snapshot.processes)
+            for (const auto& candidate : process.candidates)
+                total += candidate.objects.size();
+        return total;
+    }
+
+    void AppendDynamicResearchSnapshot(std::wofstream& out, const DynamicResearchSnapshot& snapshot, SIZE_T number)
+    {
+        out << L"\n============================================================\n"
+            << L"SNAPSHOT " << number << L"\n"
+            << L"Time: " << DynamicResearchTime(snapshot.time) << L"\n"
+            << L"Detected MultiCharts processes: " << snapshot.processIds.size() << L"\n"
+            << L"Charting.dll candidate vtables: " << DynamicCandidateCount(snapshot) << L"\n"
+            << L"Readable candidate objects: " << DynamicObjectCount(snapshot) << L"\n";
+
+        for (DWORD pid : snapshot.processIds)
+        {
+            out << L"  PID " << pid;
+            const auto titles = WindowTitlesForProcess(pid);
+            if (!titles.empty()) out << L"  Window: " << titles.front();
+            const DynamicProcessSnapshot* process = FindDynamicProcess(snapshot.processes, pid);
+            if (process == nullptr)
+            {
+                out << L"\n    Charting.dll candidate scan: unavailable\n";
+                continue;
+            }
+            SIZE_T objects = 0;
+            for (const auto& candidate : process->candidates)
+                objects += candidate.objects.size();
+            out << L"\n    Charting.dll PE timestamp: " << HexValue(process->peTimestamp)
+                << L"  image size: " << process->chartingSize
+                << L"  candidates: " << process->candidates.size()
+                << L"  objects: " << objects << L"\n";
+        }
+    }
+
+    std::map<DynamicResearchKey, DynamicResearchTransition> CompareDynamicResearchSnapshots(
+        const DynamicResearchSnapshot& before,
+        const DynamicResearchSnapshot& after)
+    {
+        std::map<DynamicResearchKey, DynamicResearchTransition> changes;
+        for (const auto& beforeProcess : before.processes)
+        {
+            const DynamicProcessSnapshot* afterProcess = FindDynamicProcess(after.processes, beforeProcess.processId);
+            if (afterProcess == nullptr ||
+                beforeProcess.peTimestamp != afterProcess->peTimestamp ||
+                beforeProcess.chartingSize != afterProcess->chartingSize)
+            {
+                continue;
+            }
+
+            for (const auto& beforeCandidate : beforeProcess.candidates)
+            {
+                const DynamicCandidateSnapshot* afterCandidate = FindDynamicCandidate(*afterProcess, beforeCandidate.rva);
+                if (afterCandidate == nullptr)
+                    continue;
+
+                for (const auto& beforeObject : beforeCandidate.objects)
+                {
+                    const DynamicObjectSnapshot* afterObject = FindDynamicObject(*afterCandidate, beforeObject.address);
+                    if (afterObject == nullptr)
+                        continue;
+                    const SIZE_T bytes = (std::min)(beforeObject.bytes.size(), afterObject->bytes.size());
+                    for (SIZE_T offset = 0; offset < bytes; ++offset)
+                    {
+                        const unsigned char oldValue = beforeObject.bytes[offset];
+                        const unsigned char newValue = afterObject->bytes[offset];
+                        if (oldValue > 1 || newValue > 1 || oldValue == newValue)
+                            continue;
+
+                        DynamicResearchKey key{ beforeCandidate.rva, offset };
+                        auto& change = changes[key];
+                        if (oldValue == 1 && newValue == 0)
+                            ++change.oneToZero;
+                        else if (oldValue == 0 && newValue == 1)
+                            ++change.zeroToOne;
+                        change.processIds.insert(beforeProcess.processId);
+                    }
+                }
+            }
+        }
+        return changes;
+    }
+
+    void AppendDynamicResearchChanges(std::wofstream& out,
+        const DynamicResearchSnapshot& before,
+        const DynamicResearchSnapshot& after,
+        SIZE_T beforeNumber,
+        SIZE_T afterNumber)
+    {
+        const auto changes = CompareDynamicResearchSnapshots(before, after);
+        SIZE_T exact = 0;
+        for (const auto& item : changes)
+            if (item.second.oneToZero + item.second.zeroToOne == 1)
+                ++exact;
+
+        out << L"\nCHANGES FROM SNAPSHOT " << beforeNumber << L" -> " << afterNumber << L"\n"
+            << L"Boolean fields changed: " << changes.size() << L"\n"
+            << L"Exact single-object toggle responses: " << exact << L"\n";
+
+        SIZE_T written = 0;
+        for (const auto& item : changes)
+        {
+            if (item.second.oneToZero + item.second.zeroToOne != 1)
+                continue;
+            out << L"  RVA=" << HexValue(item.first.rva)
+                << L"  offset=" << HexValue(item.first.offset)
+                << L"  1->0=" << item.second.oneToZero
+                << L"  0->1=" << item.second.zeroToOne
+                << L"  processes=" << item.second.processIds.size()
+                << L"  [EXACT SINGLE TOGGLE]\n";
+            if (++written >= 100)
+            {
+                out << L"  ... additional exact responses omitted from this transition view\n";
+                break;
+            }
+        }
+        if (exact == 0)
+            out << L"  No exact single-object boolean response was detected.\n";
+    }
+
+    void FillDynamicResearchPopulation(DynamicResearchScore& score, const DynamicResearchSnapshot& snapshot)
+    {
+        score.objects = 0;
+        score.processes = 0;
+        for (const auto& process : snapshot.processes)
+        {
+            const DynamicCandidateSnapshot* candidate = FindDynamicCandidate(process, score.key.rva);
+            if (candidate == nullptr)
+                continue;
+            ++score.processes;
+            score.objects += candidate->objects.size();
+        }
+    }
+}
+
+bool StartAutoTradingResearchSession(const std::wstring& historyPath, std::wstring& diagnostic)
+{
+    std::lock_guard<std::mutex> lock(g_dynamicResearchMutex);
+    DynamicResearchSnapshot first;
+    if (!ReadDynamicResearchSnapshot(first, diagnostic))
+        return false;
+
+    g_dynamicResearchSnapshots.clear();
+    g_dynamicResearchSnapshots.push_back(first);
+    g_dynamicResearchActive = true;
+
+    std::wofstream out(historyPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        g_dynamicResearchActive = false;
+        diagnostic = L"Could not create research history file: " + historyPath;
+        return false;
+    }
+    out << L"MCST-Watchdog AutoTrading Dynamic Research Session 0.578\n"
+        << L"=========================================================\n\n"
+        << L"Passive research only: no clicks, no input and no writes to MultiCharts memory.\n"
+        << L"This scanner discovers the current Charting.dll layout instead of relying on MC16 addresses.\n"
+        << L"Existing verified MC16 production compatibility remains unchanged.\n"
+        << L"After each single chart AutoTrading ON/OFF change, press AT Capture.\n"
+        << L"For best confidence, toggle the same chart OFF, ON, OFF and ON without changing workspaces.\n"
+        << L"AT Finish ranks RVA/offset pairs that followed every controlled change.\n";
+    AppendDynamicResearchSnapshot(out, first, 1);
+    out.close();
+
+    diagnostic = L"Dynamic AutoTrading research started.\n\nBaseline snapshot 1 captured from "
+        + std::to_wstring(first.processIds.size()) + L" MultiCharts process(es).\n\n"
+        + L"Toggle exactly one chart AutoTrading state, then press AT Capture.";
+    return true;
+}
+
+bool CaptureAutoTradingResearchSnapshot(const std::wstring& historyPath, std::wstring& diagnostic)
+{
+    std::lock_guard<std::mutex> lock(g_dynamicResearchMutex);
+    if (!g_dynamicResearchActive || g_dynamicResearchSnapshots.empty())
+    {
+        diagnostic = L"No active AutoTrading research session. Press AT Start first.";
+        return false;
+    }
+
+    DynamicResearchSnapshot snapshot;
+    if (!ReadDynamicResearchSnapshot(snapshot, diagnostic))
+        return false;
+    if (snapshot.processIds != g_dynamicResearchSnapshots.front().processIds)
+    {
+        diagnostic = L"The MultiCharts process set changed. Restart the research session with all intended instances running.";
+        return false;
+    }
+
+    for (const auto& baselineProcess : g_dynamicResearchSnapshots.front().processes)
+    {
+        const DynamicProcessSnapshot* currentProcess = FindDynamicProcess(snapshot.processes, baselineProcess.processId);
+        if (currentProcess == nullptr ||
+            currentProcess->peTimestamp != baselineProcess.peTimestamp ||
+            currentProcess->chartingSize != baselineProcess.chartingSize)
+        {
+            diagnostic = L"Charting.dll changed or became unavailable during the session. Restart AT Research.";
+            return false;
+        }
+    }
+
+    std::wofstream out(historyPath, std::ios::out | std::ios::app);
+    if (!out.is_open())
+    {
+        diagnostic = L"Could not append to research history file: " + historyPath;
+        return false;
+    }
+    const SIZE_T number = g_dynamicResearchSnapshots.size() + 1;
+    AppendDynamicResearchSnapshot(out, snapshot, number);
+    AppendDynamicResearchChanges(out, g_dynamicResearchSnapshots.back(), snapshot, number - 1, number);
+    out.close();
+    g_dynamicResearchSnapshots.push_back(std::move(snapshot));
+
+    diagnostic = L"Snapshot " + std::to_wstring(number) + L" captured.\n\n"
+        + L"Make another single ON/OFF change and capture again, or press AT Finish after both directions have been tested.";
+    return true;
+}
+
+bool FinishAutoTradingResearchSession(const std::wstring& historyPath, std::wstring& diagnostic)
+{
+    std::lock_guard<std::mutex> lock(g_dynamicResearchMutex);
+    if (!g_dynamicResearchActive || g_dynamicResearchSnapshots.empty())
+    {
+        diagnostic = L"No active AutoTrading research session.";
+        return false;
+    }
+
+    std::wofstream out(historyPath, std::ios::out | std::ios::app);
+    if (!out.is_open())
+    {
+        diagnostic = L"Could not append the research summary: " + historyPath;
+        return false;
+    }
+
+    const int transitions = static_cast<int>(g_dynamicResearchSnapshots.size() - 1);
+    std::vector<std::map<DynamicResearchKey, DynamicResearchTransition>> transitionChanges;
+    std::map<DynamicResearchKey, DynamicResearchScore> aggregate;
+    for (SIZE_T i = 1; i < g_dynamicResearchSnapshots.size(); ++i)
+    {
+        auto changes = CompareDynamicResearchSnapshots(g_dynamicResearchSnapshots[i - 1], g_dynamicResearchSnapshots[i]);
+        for (const auto& item : changes)
+        {
+            auto& score = aggregate[item.first];
+            score.key = item.first;
+        }
+        transitionChanges.push_back(std::move(changes));
+    }
+
+    std::vector<DynamicResearchScore> scores;
+    scores.reserve(aggregate.size());
+    for (auto& aggregateItem : aggregate)
+    {
+        auto score = aggregateItem.second;
+        for (const auto& transition : transitionChanges)
+        {
+            const auto found = transition.find(score.key);
+            if (found == transition.end())
+            {
+                ++score.unchanged;
+                continue;
+            }
+            const int total = found->second.oneToZero + found->second.zeroToOne;
+            if (total == 1)
+            {
+                ++score.exact;
+                if (found->second.oneToZero == 1) ++score.exactOneToZero;
+                if (found->second.zeroToOne == 1) ++score.exactZeroToOne;
+            }
+            else
+            {
+                ++score.ambiguous;
+            }
+        }
+        FillDynamicResearchPopulation(score, g_dynamicResearchSnapshots.back());
+        scores.push_back(score);
+    }
+
+    std::sort(scores.begin(), scores.end(), [](const DynamicResearchScore& left, const DynamicResearchScore& right) {
+        if (left.exact != right.exact) return left.exact > right.exact;
+        const bool leftReverse = left.exactOneToZero > 0 && left.exactZeroToOne > 0;
+        const bool rightReverse = right.exactOneToZero > 0 && right.exactZeroToOne > 0;
+        if (leftReverse != rightReverse) return leftReverse > rightReverse;
+        if (left.ambiguous != right.ambiguous) return left.ambiguous < right.ambiguous;
+        if (left.unchanged != right.unchanged) return left.unchanged < right.unchanged;
+        if (left.key.rva != right.key.rva) return left.key.rva < right.key.rva;
+        return left.key.offset < right.key.offset;
+    });
+
+    out << L"\n============================================================\n"
+        << L"AUTOMATIC DYNAMIC SESSION SUMMARY\n"
+        << L"============================================================\n"
+        << L"Snapshots: " << g_dynamicResearchSnapshots.size() << L"\n"
+        << L"Transitions analyzed: " << transitions << L"\n"
+        << L"Distinct boolean fields that changed: " << scores.size() << L"\n\n";
+
+    const SIZE_T reportLimit = (std::min)(scores.size(), static_cast<SIZE_T>(200));
+    for (SIZE_T rank = 0; rank < reportLimit; ++rank)
+    {
+        const auto& score = scores[rank];
+        const bool reverse = score.exactOneToZero > 0 && score.exactZeroToOne > 0;
+        out << L"Rank #" << (rank + 1)
+            << L"  RVA=" << HexValue(score.key.rva)
+            << L"  offset=" << HexValue(score.key.offset)
+            << L"  exact=" << score.exact << L"/" << transitions
+            << L"  unchanged=" << score.unchanged
+            << L"  ambiguous=" << score.ambiguous
+            << L"  1->0=" << score.exactOneToZero
+            << L"  0->1=" << score.exactZeroToOne
+            << L"  objects=" << score.objects
+            << L"  processes=" << score.processes;
+        if (transitions >= 2 && score.exact == transitions && score.ambiguous == 0 && reverse)
+            out << L"  [FULL MATCH WITH REVERSE VERIFICATION]";
+        else if (transitions > 0 && score.exact == transitions && score.ambiguous == 0)
+            out << L"  [FULL ONE-DIRECTION MATCH]";
+        out << L"\n";
+    }
+
+    out << L"\nRECOMMENDED CURRENT CANDIDATE\n";
+    if (scores.empty() || transitions <= 0 || scores.front().exact == 0)
+    {
+        out << L"NO CANDIDATE FOUND.\n"
+            << L"No production profile should be created from this session.\n";
+    }
+    else
+    {
+        const auto& best = scores.front();
+        const bool full = best.exact == transitions && best.ambiguous == 0;
+        const bool reverse = best.exactOneToZero > 0 && best.exactZeroToOne > 0;
+        out << L"RVA: " << HexValue(best.key.rva) << L"\n"
+            << L"Offset: " << HexValue(best.key.offset) << L"\n"
+            << L"Exact responses: " << best.exact << L" / " << transitions << L"\n"
+            << L"Objects in final snapshot: " << best.objects << L"\n"
+            << L"Processes represented: " << best.processes << L"\n";
+        if (transitions >= 3 && full && reverse)
+            out << L"Confidence: HIGH FOR RESEARCH - both toggle directions verified; developer review is still required before adding a production profile.\n";
+        else if (full)
+            out << L"Confidence: MEDIUM - full response observed, but capture more OFF/ON transitions in both directions.\n";
+        else
+            out << L"Confidence: INCONCLUSIVE - the candidate did not follow every controlled transition.\n";
+    }
+    out.close();
+
+    g_dynamicResearchActive = false;
+    const SIZE_T snapshots = g_dynamicResearchSnapshots.size();
+    g_dynamicResearchSnapshots.clear();
+    diagnostic = L"Dynamic AutoTrading research finished.\n\nSnapshots analyzed: " + std::to_wstring(snapshots)
         + L"\nFull history and automatic ranking:\n" + historyPath;
     return true;
 }
