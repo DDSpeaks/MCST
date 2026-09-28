@@ -1,5 +1,20 @@
 ﻿# Changelog
 
+## 1.20.17
+
+- Prevented a previously confirmed red MultiCharts queue warning from remaining
+  active indefinitely when later visual checks cannot inspect the field.
+- Retained a two-refresh grace period for temporarily covered windows and
+  expire the stale warning on the third consecutive unchecked refresh.
+- Reset the expiry counter whenever a checked red or clear result is obtained,
+  so current visual evidence always takes precedence.
+- Restored the `SYSTEM HEALTHY` headline when every monitored status is green;
+  an incomplete visual check is now an overall qualifier only while an actual
+  queue warning is still retained.
+- Retained the verified MC16 and MC17 AutoTrading and Tracker profiles, Tracker
+  Bridge V181, Protocol V2, the embedded header logo and all passive research
+  tools unchanged.
+
 ## 1.20.16
 
 - Added an exact fingerprint-scoped MC17 Tracker profile for

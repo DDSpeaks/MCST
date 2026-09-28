@@ -1,0 +1,27 @@
+MCST-Watchdog 1.20.17 - source validation, 28 September 2026
+================================================================
+
+Change scope
+------------
+- Bounded retention for confirmed visual MultiCharts queue warnings.
+- Two unchecked refreshes retain a confirmed warning.
+- The third consecutive unchecked refresh expires stale visual evidence.
+- A checked red or clear result resets the unchecked counter.
+- Fully green monitored state again uses the SYSTEM HEALTHY headline.
+
+Retained compatibility
+----------------------
+- MultiCharts 16 AutoTrading and Tracker profiles unchanged.
+- MultiCharts 17 AutoTrading and Tracker profiles unchanged.
+- Tracker Bridge internal V181 and Protocol V2 unchanged.
+- Passive AutoTrading and Tracker research tools unchanged.
+
+Validation performed in this workspace
+--------------------------------------
+- Updated shared policy regression coverage for confirmation, grace, expiry,
+  reconfirmation and checked-clear behavior.
+- Verified all UpdateVisibleWarning call sites use the new bounded-state input.
+- Verified product, resource, package and publication versions are 1.20.17.
+- Verified active INI and build-output files are excluded from the source ZIP.
+
+Windows Release x64 build and live MultiCharts trial are still required.

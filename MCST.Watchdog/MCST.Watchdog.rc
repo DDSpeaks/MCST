@@ -5,8 +5,8 @@
 IDR_WATCHDOG_HEADER_LOGO RCDATA "Assets\\WatchdogHeaderLogo.png"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,20,16,0
- PRODUCTVERSION 1,20,16,0
+ FILEVERSION 1,20,17,0
+ PRODUCTVERSION 1,20,17,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -19,11 +19,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "MCST\0"
             VALUE "FileDescription", "MCST-Watchdog\0"
-            VALUE "FileVersion", "1.20.16\0"
+            VALUE "FileVersion", "1.20.17\0"
             VALUE "InternalName", "MCST-Watchdog.exe\0"
             VALUE "OriginalFilename", "MCST-Watchdog.exe\0"
             VALUE "ProductName", "MCST-Watchdog\0"
-            VALUE "ProductVersion", "1.20.16\0"
+            VALUE "ProductVersion", "1.20.17\0"
         END
     END
     BLOCK "VarFileInfo"

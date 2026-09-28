@@ -44,6 +44,7 @@ namespace
         bool queueSeen = false;
         int redWarningSamples = 0;
         int clearWarningSamples = 0;
+        int uncheckedWarningSamples = 0;
         bool redWarningConfirmed = false;
     };
 
@@ -503,13 +504,15 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
 
         mcst::UpdateVisibleWarning(processStatus.visibleQueueWarningChecked,
             processStatus.visibleQueueWarningRed, history.redWarningSamples,
-            history.clearWarningSamples, history.redWarningConfirmed);
+            history.clearWarningSamples, history.uncheckedWarningSamples,
+            history.redWarningConfirmed);
         // One completed covered probe already contains two positive renderings.
         if (processStatus.visibleQueueWarningRendered)
         {
             history.redWarningConfirmed = true;
             history.redWarningSamples = 2;
             history.clearWarningSamples = 0;
+            history.uncheckedWarningSamples = 0;
         }
         processStatus.visibleQueueWarningConfirmed = history.redWarningConfirmed;
 
@@ -609,7 +612,7 @@ mcst::MultiChartsHealthSnapshot ReadMultiChartsHealth()
         snapshot.detail = L"Red MultiCharts queue warning detected - queue values unavailable";
         if (snapshot.visibleQueueUncheckedCount > 0)
             snapshot.detail += L"; " + std::to_wstring(snapshot.visibleQueueUncheckedCount) +
-                L" instance(s) not visually checked; last confirmed warnings retained";
+                L" instance(s) not visually checked; confirmed warnings retained briefly pending recheck";
     }
     else if (snapshot.maximumQueueAgeSeconds >= 3)
     {

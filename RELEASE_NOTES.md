@@ -1,9 +1,23 @@
-# MCST 1.20.16 GitHub Publication-Ready Package
+# MCST 1.20.17 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
+
+## Bounded queue-warning retention
+
+- A confirmed red MultiCharts queue warning remains active through two
+  consecutive unchecked refreshes, protecting against momentary window
+  coverage or an incomplete visual probe.
+- If the field remains unchecked for a third consecutive refresh, the old
+  visual evidence expires instead of leaving processes in WARNING forever.
+- Any new checked red or clear result resets that expiry counter and is handled
+  by the existing two-sample confirmation policy.
+- When every monitored item is green, an unchecked visual probe no longer
+  replaces the dashboard headline: it again reads `SYSTEM HEALTHY`.
+- This change affects only Watchdog queue-warning state. MC16/MC17 profiles,
+  Tracker Bridge V181 and Protocol V2 are unchanged.
 
 ## MultiCharts 17 production Tracker support
 
@@ -40,7 +54,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.20.16 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.20.17 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 
@@ -107,8 +121,9 @@ Bridge protocol: Protocol V2
   `CHECK INCOMPLETE`.
 - Warning and critical states remain `ATTENTION REQUIRED` and
   `CRITICAL CONDITION`.
-- The saved report may still state `Queue visual check incomplete`; this
-  diagnostic detail does not rename a Healthy overall state.
+- The saved report states `Queue visual check incomplete` only while a
+  confirmed warning is still inside its bounded unchecked grace period; it
+  does not rename a fully Healthy overall state.
 - This release changes only Watchdog. Tracker Bridge V179 and Protocol V2 are
   unchanged, so users upgrading from 1.20.9 may replace only the EXE.
 

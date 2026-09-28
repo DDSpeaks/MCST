@@ -1636,7 +1636,7 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 370, 52 }, L"MCST-Watchdog 1.20.16", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 8, client.right - 370, 52 }, L"MCST-Watchdog 1.20.17", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
         const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
@@ -1962,7 +1962,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.16", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.17", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2571,7 +2571,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.16 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.17 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2644,7 +2644,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.16 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.20.17 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

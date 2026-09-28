@@ -677,17 +677,23 @@ int RunLogicTests()
         throw std::runtime_error("The newest broker-state event outside the ten-row display window did not win");
     }
 
-    int redSamples = 0, clearSamples = 0;
+    int redSamples = 0, clearSamples = 0, uncheckedSamples = 0;
     bool confirmedWarning = false;
-    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, confirmedWarning);
+    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
     if (confirmedWarning) throw std::runtime_error("One red sample must not confirm a warning");
-    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, confirmedWarning);
+    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
     if (!confirmedWarning) throw std::runtime_error("Two red samples must confirm a warning");
-    mcst::UpdateVisibleWarning(false, false, redSamples, clearSamples, confirmedWarning);
-    if (!confirmedWarning) throw std::runtime_error("An unchecked warning must remain confirmed");
-    mcst::UpdateVisibleWarning(true, false, redSamples, clearSamples, confirmedWarning);
+    mcst::UpdateVisibleWarning(false, false, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
+    mcst::UpdateVisibleWarning(false, false, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
+    if (!confirmedWarning) throw std::runtime_error("A warning must survive the unchecked grace period");
+    mcst::UpdateVisibleWarning(false, false, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
+    if (confirmedWarning) throw std::runtime_error("Stale visual evidence must expire after three unchecked samples");
+    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
+    mcst::UpdateVisibleWarning(true, true, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
+    if (!confirmedWarning) throw std::runtime_error("A new red warning must be confirmable after expiry");
+    mcst::UpdateVisibleWarning(true, false, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
     if (!confirmedWarning) throw std::runtime_error("One clear sample must not clear a warning");
-    mcst::UpdateVisibleWarning(true, false, redSamples, clearSamples, confirmedWarning);
+    mcst::UpdateVisibleWarning(true, false, redSamples, clearSamples, uncheckedSamples, confirmedWarning);
     if (confirmedWarning) throw std::runtime_error("Two clear samples must clear a warning");
     if (!mcst::IsVisibleRedWarning(80, 80, 60) ||
         mcst::IsVisibleRedWarning(80, 79, 60) || mcst::IsVisibleRedWarning(80, 80, 1))

@@ -61,6 +61,7 @@ namespace
     {
         const std::vector<std::pair<std::wstring, mcst::MonitorStatus>> rows = {
             { L"OVERALL STATUS", { status.overall, L"",
+                status.multiChartsProcesses.visibleQueueWarningCount > 0 &&
                 status.multiChartsProcesses.visibleQueueUncheckedCount > 0
                     ? L"Queue visual check incomplete" : L"" } },
             { L"MultiCharts Health", status.multiChartsHealth },
@@ -810,7 +811,7 @@ std::wstring BuildStatusReport(const mcst::WatchdogSystemStatus& status, const T
     out << L"MCST-Watchdog Status Report\n"
         << L"===========================\n";
     std::vector<std::pair<std::wstring, std::wstring>> identityRows = {
-        { L"Watchdog version", L"1.20.16" },
+        { L"Watchdog version", L"1.20.17" },
         { L"Tracker Bridge", L"MCST Tracker Bridge 1.0 (internal V" +
             std::to_wstring(snapshot.bridgeVersion) + L", protocol V" +
             std::to_wstring(snapshot.protocolVersion) + L")" },

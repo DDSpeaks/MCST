@@ -1,8 +1,12 @@
 ﻿# MCST
 
-## Package: 1.20.16 — MultiCharts 16 + 17 AutoTrading
+## Package: 1.20.17 — MultiCharts 16 + 17 AutoTrading
 
-Version 1.20.16 adds the exact verified MC17 Tracker profile for
+Version 1.20.17 prevents a confirmed red queue warning from remaining active
+forever when subsequent visual checks cannot inspect the field. It retains the
+warning through two unchecked refreshes and expires the stale visual evidence
+on the third. When all monitored statuses are green, the headline is again
+`SYSTEM HEALTHY`. It retains the exact verified MC17 Tracker profile for
 `ATOnPTracker.dll 0x6AB58F4C / 3534848` while retaining the existing MC16
 Tracker profile unchanged. It embeds the selected doctor-and-patient logo before
 the program name and retains the compact descriptive Windows title bar. It also retains
@@ -54,7 +58,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.16**
+- MCST-Watchdog: **1.20.17**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V181**
 - Bridge protocol: **V2**
@@ -72,7 +76,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.16` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.17` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

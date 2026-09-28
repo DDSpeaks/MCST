@@ -14,13 +14,24 @@ namespace mcst
     }
 
     inline void UpdateVisibleWarning(bool checked, bool red, int& redSamples,
-        int& clearSamples, bool& confirmed)
+        int& clearSamples, int& uncheckedSamples, bool& confirmed)
     {
         if (!checked)
         {
             redSamples = clearSamples = 0;
-            return; // Unknown visibility never clears a confirmed warning.
+            if (confirmed)
+            {
+                uncheckedSamples = (std::min)(uncheckedSamples + 1, 3);
+                if (uncheckedSamples >= 3)
+                    confirmed = false;
+            }
+            else
+            {
+                uncheckedSamples = 0;
+            }
+            return; // Keep two grace samples, then expire stale visual evidence.
         }
+        uncheckedSamples = 0;
         if (red)
         {
             redSamples = (std::min)(redSamples + 1, 2);

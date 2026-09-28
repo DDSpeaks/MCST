@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.16'
+$currentVersion = '1.20.17'
 $currentBridgeBuild = 181
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -65,7 +65,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.16.txt',
+    'BUILD_VALIDATION_1.20.17.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -525,9 +525,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,16,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,16,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.16.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,17,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,17,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.17.'
 }
 if ($watchdogRc -notmatch 'IDR_WATCHDOG_HEADER_LOGO' -or
     $watchdogRc -notmatch 'Assets\\\\WatchdogHeaderLogo\.png') {
@@ -845,7 +845,7 @@ $publisher = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Publish-G
 foreach ($publisherToken in @(
     'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe',
     'Tools\Validate-Release.ps1',
-    'v1.20.16',
+    'v1.20.17',
     'git.exe',
     'push',
     'tag'
@@ -861,7 +861,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.16-Windows-x64',
+    'MCST-Watchdog-1.20.17-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -877,7 +877,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.16',
+    '1.20.17',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',
