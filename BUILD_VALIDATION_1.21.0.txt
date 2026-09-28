@@ -1,0 +1,34 @@
+MCST-Watchdog 1.21.0 - source validation, 28 September 2026
+================================================================
+
+Change scope
+------------
+- Visible MC Compatibility banner and System Status row.
+- Exact-profile, automatic-adaptation and update-required states.
+- Passive AutoTrading family fallback for nearby MC16/MC17 DLL image sizes.
+- Structural acceptance gate: at least two objects, active count within object
+  count, valid boolean reads and zero read failures.
+- Exact-fingerprint persistence of accepted automatic profiles; live structural
+  revalidation remains mandatory on every read.
+- Separate normal Release and ReleaseDeveloper interfaces.
+- User Help excludes maintainer research instructions.
+
+Retained compatibility
+----------------------
+- Verified MC16 and MC17 AutoTrading profiles remain the first-choice path.
+- Verified MC16 and MC17 Tracker profiles remain unchanged.
+- Tracker Bridge internal V181 and Protocol V2 remain unchanged.
+- Unvalidated layouts remain unavailable; no guessed count is returned.
+
+Validation performed in this workspace
+--------------------------------------
+- Added logic coverage for automatic profile structural acceptance/rejection.
+- Confirmed normal Release omits accessible Developer Mode controls.
+- Confirmed ReleaseDeveloper defines MCST_DEVELOPER_BUILD and produces the
+  separate MCST-Watchdog-Developer target.
+- Confirmed version resources, report version and publication scripts use
+  1.21.0.
+- Confirmed source ZIP exclusion rules remove active INI and build outputs.
+
+Windows Release x64 and ReleaseDeveloper x64 builds plus a live MultiCharts
+trial are still required.

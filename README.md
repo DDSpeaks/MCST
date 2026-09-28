@@ -1,25 +1,20 @@
 ﻿# MCST
 
-## Package: 1.20.17 — MultiCharts 16 + 17 AutoTrading
+## Package: 1.21.0 — MultiCharts 16 + 17 AutoTrading
 
-Version 1.20.17 prevents a confirmed red queue warning from remaining active
-forever when subsequent visual checks cannot inspect the field. It retains the
-warning through two unchecked refreshes and expires the stale visual evidence
-on the third. When all monitored statuses are green, the headline is again
-`SYSTEM HEALTHY`. It retains the exact verified MC17 Tracker profile for
-`ATOnPTracker.dll 0x6AB58F4C / 3534848` while retaining the existing MC16
-Tracker profile unchanged. It embeds the selected doctor-and-patient logo before
-the program name and retains the compact descriptive Windows title bar. It also retains
-the production AutoTrading profile verified for the exact MC17 `Charting.dll`
-fingerprint `0x6AB57EE6 / 18624512`. Its dynamically
-discovered `RVA 0xB74CF0 / offset 0x18` followed all four controlled changes,
-including two changes in each direction. The existing MC16 profile remains
-installed and unchanged. MultiCharts process discovery now uses exact executable
-identity instead of accepting another program merely because its window title
-contains “MultiCharts”. Unknown fingerprints continue to fail safely.
-The research workflow, iOS Mail separator correction, queue-warning experiment,
-and the V181 Bridge's bounded structural fallback are included. Later unknown
-MC17 fingerprints are never given a fixed address from another build.
+Version 1.21.0 adds a visible MC compatibility state and conservative automatic
+adaptation for nearby MC16/MC17 AutoTrading layouts. A family candidate is
+accepted only after passive live validation finds at least two strategy objects,
+valid boolean states and no field-read failures. Successful results are cached
+under the exact new DLL fingerprint and revalidated on every read. Uncertain
+layouts remain unavailable and show `UPDATE REQUIRED` instead of guessed data.
+
+The ordinary `Release|x64` build contains no accessible research controls and
+provides user-focused Help. The separate `ReleaseDeveloper|x64` configuration
+produces `MCST-Watchdog-Developer.exe` with the retained passive investigation
+tools. The verified MC16 and MC17 profiles, Tracker Bridge V181, Protocol V2,
+embedded logo and bounded queue-warning expiry remain included.
+
 The logo is compiled into the executable and requires no separate installed file.
 This source package has not been built or run on Windows during preparation.
 
@@ -58,7 +53,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.17**
+- MCST-Watchdog: **1.21.0**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V181**
 - Bridge protocol: **V2**
@@ -76,7 +71,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.17` runs the Windows Release x64 build, executes
+Pushing tag `v1.21.0` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release
@@ -197,23 +192,25 @@ The **Reload Compat** Developer action forces Watchdog to re-evaluate AutoTradin
 
 See `Docs/COMPATIBILITY.md` for the full profile schema and verification workflow.
 
-## Developer Mode
+## Separate Developer build
 
-Developer Mode is disabled by default:
+The ordinary `Release|x64` user build does not expose Developer Mode or any
+research buttons. For maintainer investigations, build:
 
-```ini
-[Developer]
-enabled=false
+```text
+Configuration: ReleaseDeveloper
+Platform:      x64
 ```
 
-When enabled, a compact toolbar exposes research actions without competing visually with normal production controls:
+This produces `MCST-Watchdog-Developer.exe`. Its optional Developer Mode
+toolbar exposes:
 
 ```text
 AT Start | AT Capture | AT Finish | Tracker Capture | Position CCY | Open Compat | Reload Compat | Help
 ```
 
-Developer tools are not required for normal monitoring.
-`Help` opens a two-pane selectable button-by-button guide. The AutoTrading
+Ordinary users receive user-focused Help and never need these controls.
+Developer Help opens a two-pane selectable button-by-button guide. The AutoTrading
 research sequence is `AT Start` → change only one chart strategy's AutoTrading
 ON/OFF state → `AT Capture` (repeat as needed) → `AT Finish`.
 Tracker and compatibility actions are documented individually in `Docs/USER_GUIDE.md`.

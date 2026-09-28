@@ -7,6 +7,7 @@ struct AutoTradingReadResult
 {
     bool succeeded = false;
     bool fromCache = false;
+    bool autoAdapted = false;
     int activeStrategies = 0;
     int strategyObjectsFound = 0;
     int readFailures = 0;

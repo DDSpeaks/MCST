@@ -38,6 +38,80 @@ const wchar_t* GetDeveloperToolsNormalUseRule()
         L"Do not use them during normal monitoring.";
 }
 
+const std::vector<DeveloperHelpTopic>& GetUserHelpTopics()
+{
+    static const std::vector<DeveloperHelpTopic> topics = {
+        {
+            L"Overview",
+            L"MCST-WATCHDOG HELP\r\n\r\n"
+            L"MCST-Watchdog monitors MultiCharts health, AutoTrading, Order and Position Tracker data, broker connectivity, recent logs, status reports and email delivery.\r\n\r\n"
+            L"STATUS COLORS\r\n"
+            L"Green: operating normally.\r\n"
+            L"Yellow: attention may be required.\r\n"
+            L"Red: a critical problem has been detected.\r\n"
+            L"Gray: disabled, unavailable or still being checked.\r\n\r\n"
+            L"Version-dependent information is displayed only when it can be validated safely. Missing information is shown as unavailable instead of being estimated."
+        },
+        {
+            L"MC Compatibility",
+            L"MC COMPATIBILITY\r\n\r\n"
+            L"The indicator at the top shows whether MCST-Watchdog can safely monitor the installed MultiCharts version.\r\n\r\n"
+            L"COMPATIBILITY VERIFIED\r\nThe installed build has an approved profile.\r\n\r\n"
+            L"COMPATIBILITY AUTO-ADAPTED\r\nThe current build was recognized and validated automatically. The result is revalidated during normal reads.\r\n\r\n"
+            L"COMPATIBILITY LIMITED\r\nMultiCharts is running, but some version-dependent information is unavailable.\r\n\r\n"
+            L"COMPATIBILITY UPDATE REQUIRED\r\nThe current internal structure could not be validated safely. Install a newer MCST-Watchdog release when available.\r\n\r\n"
+            L"COMPATIBILITY CHECKING...\r\nVerification is still in progress. This is normal briefly after startup."
+        },
+        {
+            L"Normal Startup",
+            L"NORMAL STARTUP\r\n\r\n"
+            L"1. Start MultiCharts.\r\n"
+            L"2. Open the required workspaces and Order and Position Tracker.\r\n"
+            L"3. Wait until MultiCharts has finished loading.\r\n"
+            L"4. Start MCST-Watchdog.\r\n"
+            L"5. Confirm that MC Compatibility and the required status rows are green.\r\n\r\n"
+            L"MCST-Watchdog retries temporarily unavailable information automatically. A short UNKNOWN or CHECKING state immediately after startup does not necessarily indicate a fault."
+        },
+        {
+            L"Updating",
+            L"UPDATING MCST-WATCHDOG\r\n\r\n"
+            L"1. Download the latest normal user package from the official GitHub Releases page.\r\n"
+            L"2. Close MCST-Watchdog and MultiCharts.\r\n"
+            L"3. Extract the package and follow its installation guide.\r\n"
+            L"4. Keep your existing INI settings unless the release instructions explicitly say otherwise.\r\n"
+            L"5. Restart MultiCharts before starting the updated Watchdog."
+        },
+        {
+            L"Buttons",
+            L"BUTTONS\r\n\r\n"
+            L"Refresh: requests an immediate status refresh.\r\n\r\n"
+            L"Save Report: writes the current detailed status report.\r\n\r\n"
+            L"Open Folder: opens the reports and logs folder.\r\n\r\n"
+            L"Open Settings: opens the Watchdog settings file.\r\n\r\n"
+            L"Reload Settings: reloads supported settings without restarting.\r\n\r\n"
+            L"? Help: opens this help window."
+        },
+        {
+            L"Warnings",
+            L"IF A WARNING APPEARS\r\n\r\n"
+            L"Read the text on the same status row and allow a few refresh cycles for a temporary condition to clear.\r\n\r\n"
+            L"If it persists:\r\n"
+            L"1. Save a status report.\r\n"
+            L"2. Confirm that MultiCharts and Order and Position Tracker are open and responsive.\r\n"
+            L"3. Restart MultiCharts if the Tracker Bridge was replaced.\r\n"
+            L"4. Check the compatibility indicator.\r\n"
+            L"5. Install the latest release if UPDATE REQUIRED is displayed."
+        },
+        {
+            L"Safety & Privacy",
+            L"SAFE OPERATION AND PRIVACY\r\n\r\n"
+            L"MCST-Watchdog monitors MultiCharts passively. It does not place, modify or cancel trading orders.\r\n\r\n"
+            L"Status reports may contain account names, account identifiers, positions, profit and loss values, process information and recent log entries. Review a saved report before sharing it or attaching it to a public issue."
+        }
+    };
+    return topics;
+}
+
 const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
 {
     static const std::vector<DeveloperHelpTopic> topics = {

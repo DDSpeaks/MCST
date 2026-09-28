@@ -10,6 +10,7 @@
 #include <vector>
 #include "../MCST.Shared/MCBridgeProtocol.h"
 #include "../MCST.Shared/ActivityHistory.h"
+#include "../MCST.Shared/CompatibilityPolicy.h"
 #include "../MCST.Shared/VisibleWarningPolicy.h"
 #include "../MCST.Shared/OverallHeadlinePolicy.h"
 #include "../MCST.Shared/ReportReadPolicy.h"
@@ -708,6 +709,11 @@ int RunLogicTests()
         mcst::IsConfirmedRenderedWarning(false, 2) || mcst::IsConfirmedRenderedWarning(true, 1) ||
         mcst::IsConfirmedRenderedWarning(true, 0))
         throw std::runtime_error("Covered rendering must complete two positive passes");
+    if (!mcst::IsAutomaticAutoTradingProfileStructurallyValid(80, 79, 0) ||
+        mcst::IsAutomaticAutoTradingProfileStructurallyValid(1, 1, 0) ||
+        mcst::IsAutomaticAutoTradingProfileStructurallyValid(80, 81, 0) ||
+        mcst::IsAutomaticAutoTradingProfileStructurallyValid(80, 79, 1))
+        throw std::runtime_error("Automatic AutoTrading compatibility gate failed");
 
     const std::vector<std::vector<std::wstring>> oldLogs = {{L"one"}, {L"two"}};
     if (mcst::CountAddedLogRows(oldLogs, oldLogs) != 0 ||

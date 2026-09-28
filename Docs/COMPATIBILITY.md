@@ -32,9 +32,16 @@ The database metadata is normalized safely:
 
 ```ini
 [Compatibility]
-schema_version=2
-unknown_build_policy=reject
+schema_version=3
+unknown_build_policy=structural_validate
 ```
+
+Schema 3 allows a nearby MC16/MC17 AutoTrading family layout to be tried as a
+read-only candidate. It becomes `AUTO-ADAPTED` only after the live reader finds
+at least two strategy objects, reads only valid boolean states and encounters
+no field failures. The accepted result is cached under the exact fingerprint
+and the same structural gate is applied again on every read. Failure leaves
+the reader unavailable and reports `UPDATE REQUIRED`.
 
 MCST may create known schema/default metadata, but it never invents verified offsets or addresses for an unknown MultiCharts build.
 
@@ -98,7 +105,7 @@ autotrading_offset=0x18
 verification=Controlled dynamic research: 4/4 exact responses with both toggle directions
 ```
 
-Version 1.20.17 retains the MC16 profile unchanged and adds the independently
+Version 1.21.0 retains the MC16 profile unchanged and adds the independently
 fingerprinted MC17 profile beside it. The MC17 field was the only candidate to
 match every one of four controlled transitions, with two `1 -> 0` and two
 `0 -> 1` responses and no unchanged or ambiguous transition. For any later

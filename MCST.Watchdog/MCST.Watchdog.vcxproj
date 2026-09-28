@@ -1,16 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseDeveloper|x64"><Configuration>ReleaseDeveloper</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
   <PropertyGroup Label="Globals"><VCProjectVersion>17.0</VCProjectVersion><Keyword>Win32Proj</Keyword><ProjectGuid>{05EC3E4D-8EC5-45D8-84C4-F5F547316B21}</ProjectGuid><RootNamespace>MCSTWatchdog</RootNamespace><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><WholeProgramOptimization>false</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDeveloper|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><WholeProgramOptimization>false</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" /><ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets"><Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" /></ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup><TargetName>MCST-Watchdog</TargetName><OutDir>$(SolutionDir)bin\Release\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\Release\</IntDir></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'"><TargetName>MCST-Watchdog</TargetName><OutDir>$(SolutionDir)bin\Release\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\Release\</IntDir></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDeveloper|x64'"><TargetName>MCST-Watchdog-Developer</TargetName><OutDir>$(SolutionDir)bin\ReleaseDeveloper\</OutDir><IntDir>$(SolutionDir)obj\$(ProjectName)\ReleaseDeveloper\</IntDir></PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile><RuntimeLibrary>MultiThreaded</RuntimeLibrary><WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp17</LanguageStandard><PreprocessorDefinitions>NDEBUG;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><Optimization>MaxSpeed</Optimization><FunctionLevelLinking>false</FunctionLevelLinking><IntrinsicFunctions>false</IntrinsicFunctions></ClCompile>
+    <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><AdditionalDependencies>Psapi.lib;Shell32.lib;Version.lib;Gdiplus.lib;UIAutomationCore.lib;Ole32.lib;OleAut32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDeveloper|x64'">
+    <ClCompile><RuntimeLibrary>MultiThreaded</RuntimeLibrary><WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp17</LanguageStandard><PreprocessorDefinitions>MCST_DEVELOPER_BUILD;NDEBUG;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><Optimization>MaxSpeed</Optimization><FunctionLevelLinking>false</FunctionLevelLinking><IntrinsicFunctions>false</IntrinsicFunctions></ClCompile>
     <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><AdditionalDependencies>Psapi.lib;Shell32.lib;Version.lib;Gdiplus.lib;UIAutomationCore.lib;Ole32.lib;OleAut32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup>

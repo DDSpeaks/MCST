@@ -159,7 +159,14 @@ AutoTrading and Tracker compatibility are evaluated independently. A new MultiCh
 
 For Tracker compatibility, a new `ATOnPTracker.dll` build without a verified profile is deliberately blocked rather than read using guessed offsets. The Bridge creates a disabled candidate entry to support later Developer Mode research.
 
-## Developer Mode
+## Ordinary and Developer builds
+
+The normal `Release|x64` package does not contain an accessible Developer Mode
+selector or research toolbar. Its `? Help` button contains only normal startup,
+compatibility, updating, warning, safety and privacy guidance.
+
+The maintainer can build `ReleaseDeveloper|x64`, which produces
+`MCST-Watchdog-Developer.exe` and retains the controls described below.
 
 > **Normally leave Developer mode off.** These research tools are generally
 > needed only after MultiCharts has been updated, when the exact `Charting.dll`
@@ -174,7 +181,7 @@ Developer Mode is disabled by default:
 enabled=false
 ```
 
-The Dashboard also shows an unchecked **Developer mode** box at the right of
+The Developer executable shows an unchecked **Developer mode** box at the right of
 **Reload Settings**. Check it to show the compact research toolbar; clear it to
 hide the toolbar again. The choice is saved to `[Developer] enabled` in
 `MCST-Watchdog.ini`. The research buttons are only 22 pixels high, clearly

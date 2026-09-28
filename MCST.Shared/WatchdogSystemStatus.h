@@ -92,6 +92,7 @@ namespace mcst
         HealthState overall = HealthState::Unknown;
 
         MonitorStatus multiChartsHealth;
+        MonitorStatus compatibility;
         MonitorStatus bridge;
         MonitorStatus trackerSnapshot;
         MonitorStatus autoTrading;

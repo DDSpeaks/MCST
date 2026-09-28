@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 1.21.0
+
+- Added a continuously visible `MC Compatibility` status and a compact
+  compatibility banner in the upper-right header area.
+- Added conservative AutoTrading adaptation for nearby MC16/MC17
+  `Charting.dll` builds. A family template is accepted only after at least two
+  strategy objects are found and every state byte is a valid boolean with no
+  read failures.
+- Cache successful automatic profiles by the exact new DLL fingerprint in
+  `MCST-Compatibility.ini`; every later read still revalidates live objects.
+- Added clear `Verified`, `Auto-adapted`, `Checking...`, and `Update required`
+  compatibility states. An unvalidated layout remains unavailable.
+- Split ordinary and maintenance interfaces at build time. `Release|x64`
+  contains no accessible research controls, while `ReleaseDeveloper|x64`
+  builds `MCST-Watchdog-Developer.exe` with the retained Developer Mode tools.
+- Replaced ordinary Help with user-facing startup, compatibility, updating,
+  warning, safety and privacy guidance.
+- Retained the verified MC16/MC17 profiles, Tracker Bridge V181, Protocol V2
+  and the 1.20.17 bounded queue-warning expiry.
+
 ## 1.20.17
 
 - Prevented a previously confirmed red MultiCharts queue warning from remaining

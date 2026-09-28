@@ -17,6 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="MCBridgeProtocol.h" />
+    <ClInclude Include="CompatibilityPolicy.h" />
     <ClInclude Include="TrackerRecoveryPolicy.h" />
     <ClInclude Include="WatchdogSystemStatus.h" />
   </ItemGroup>

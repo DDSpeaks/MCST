@@ -1,6 +1,6 @@
 # Position Currency Research — 1.114-R16
 
-> Retained diagnostic in the 1.20.17 package. R34 does not continue the search
+> Retained diagnostic in the 1.21.0 package. R34 does not continue the search
 > for Average Price currency. Production Status Reports total only Open P/L rows
 > whose displayed currency is already unambiguous.
 

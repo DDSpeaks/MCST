@@ -10,4 +10,5 @@ struct DeveloperHelpTopic
 };
 
 const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics();
+const std::vector<DeveloperHelpTopic>& GetUserHelpTopics();
 const wchar_t* GetDeveloperToolsNormalUseRule();

@@ -4,6 +4,7 @@
 
 #include "AutoTradingReader.h"
 #include "CompatibilityManager.h"
+#include "../MCST.Shared/CompatibilityPolicy.h"
 
 #include <algorithm>
 #include <chrono>
@@ -34,6 +35,7 @@ namespace
     {
         bool chartingFound = false;
         bool profileMatched = false;
+        bool autoAdapted = false;
         int objects = 0;
         int active = 0;
         int readFailures = 0;
@@ -207,6 +209,7 @@ namespace
         const CompatibilityProfile profile = ResolveCompatibilityProfile(
             peTimestamp, static_cast<unsigned long long>(charting->size));
         result.profileMatched = profile.matched;
+        result.autoAdapted = profile.autoAdapted;
         result.compatibilityProfile = profile.name;
         result.compatibilitySource = profile.source;
         result.compatibilityDiagnostic = profile.diagnostic;
@@ -282,6 +285,25 @@ namespace
         }
 
         CloseHandle(process);
+        if (profile.autoAdapted)
+        {
+            if (!mcst::IsAutomaticAutoTradingProfileStructurallyValid(
+                    result.objects, result.active, result.readFailures))
+            {
+                result.profileMatched = false;
+                result.objects = 0;
+                result.active = 0;
+                result.compatibilityDiagnostic =
+                    L"Automatic compatibility candidate failed structural validation; update required.";
+            }
+            else
+            {
+                std::wstring cacheDiagnostic;
+                PersistAutoAdaptedCompatibilityProfile(profile, cacheDiagnostic);
+                result.compatibilityDiagnostic =
+                    L"Automatic compatibility candidate passed live structural validation. " + cacheDiagnostic;
+            }
+        }
         return result;
     }
 
@@ -300,6 +322,7 @@ namespace
             const StrategyObjectCount count = CountStrategyObjects(processId);
             chartingFound = chartingFound || count.chartingFound;
             anyProfileMatched = anyProfileMatched || count.profileMatched;
+            result.autoAdapted = result.autoAdapted || (count.profileMatched && count.autoAdapted);
             result.strategyObjectsFound += count.objects;
             result.activeStrategies += count.active;
             result.readFailures += count.readFailures;

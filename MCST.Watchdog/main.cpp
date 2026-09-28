@@ -48,6 +48,12 @@
 
 namespace
 {
+#ifdef MCST_DEVELOPER_BUILD
+    constexpr bool kDeveloperBuild = true;
+#else
+    constexpr bool kDeveloperBuild = false;
+#endif
+
     constexpr wchar_t kWindowClass[] = L"MCSTWatchdogDashboardWindow";
     constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\MCST-Watchdog-SingleInstance";
     constexpr UINT WM_APP_REFRESH_COMPLETE = WM_APP + 1;
@@ -377,7 +383,7 @@ namespace
         if (g_developerModeCheckbox)
             MoveWindow(g_developerModeCheckbox, (std::max)(730, static_cast<int>(client.right) - 190), y + 7, 162, 22, TRUE);
         const DeveloperToolbarLayout developerLayout = CalculateDeveloperToolbarLayout(y);
-        if (g_app.config.developerModeEnabled)
+        if (kDeveloperBuild && g_app.config.developerModeEnabled)
         {
             const RECT startRect = CalculateDeveloperToolbarButtonRect(developerLayout, 0);
             const RECT captureRect = CalculateDeveloperToolbarButtonRect(developerLayout, 1);
@@ -398,19 +404,21 @@ namespace
         }
         else
         {
-            // Reload Settings remains on the normal bottom row next to Open Settings.
+            if (g_developerHelpButton)
+                MoveWindow(g_developerHelpButton,
+                    (std::max)(708, static_cast<int>(client.right) - 114), y, 86, 34, TRUE);
         }
         const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
         const int menuX = rowLayout.overflowButtonX;
-        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 220, 30, 24, TRUE);
-        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 310, 30, 24, TRUE);
-        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 340, 30, 24, TRUE);
-        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 370, 30, 24, TRUE);
+        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 250, 30, 24, TRUE);
+        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 340, 30, 24, TRUE);
+        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 370, 30, 24, TRUE);
+        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 400, 30, 24, TRUE);
     }
 
     void UpdateDeveloperControlVisibility(HWND hwnd)
     {
-        const int showResearch = g_app.config.developerModeEnabled ? SW_SHOW : SW_HIDE;
+        const int showResearch = kDeveloperBuild && g_app.config.developerModeEnabled ? SW_SHOW : SW_HIDE;
         if (g_settingsButton) ShowWindow(g_settingsButton, SW_HIDE);
         if (g_testEmailButton) ShowWindow(g_testEmailButton, SW_HIDE);
         for (HWND control : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton,
@@ -420,7 +428,9 @@ namespace
                 ShowWindow(control, showResearch);
         }
         if (g_developerHelpButton)
-            ShowWindow(g_developerHelpButton, showResearch);
+            ShowWindow(g_developerHelpButton, SW_SHOW);
+        if (g_developerModeCheckbox)
+            ShowWindow(g_developerModeCheckbox, kDeveloperBuild ? SW_SHOW : SW_HIDE);
         if (g_developerModeCheckbox)
             SendMessageW(g_developerModeCheckbox, BM_SETCHECK,
                 g_app.config.developerModeEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -667,6 +677,7 @@ namespace
     {
         status.overall = mcst::HealthState::Healthy;
         status.overall = Worst(status.overall, status.multiChartsHealth.state);
+        status.overall = Worst(status.overall, status.compatibility.state);
         status.overall = Worst(status.overall, status.bridge.state);
         status.overall = Worst(status.overall, status.trackerSnapshot.state);
         status.overall = Worst(status.overall, status.recentLogs.state);
@@ -963,6 +974,8 @@ namespace
             result.status.multiChartsProcesses.detail
         };
 
+        bool autoTradingAutoAdapted = false;
+        bool autoTradingReadSucceeded = !config.autoTradingMonitoringEnabled;
         if (config.autoTradingMonitoringEnabled)
         {
             // A disappeared MC process invalidates an earlier aggregate
@@ -973,12 +986,14 @@ namespace
             const AutoTradingReadResult autoTrading = ReadAutoTradingStatus(
                 config.autoTradingCheckMinutes,
                 forceAutoTradingRefresh || processSetChanged);
+            result.status.multiChartsCompatibilityProfile = autoTrading.compatibilityProfile;
             if (autoTrading.succeeded)
             {
+                autoTradingReadSucceeded = true;
+                autoTradingAutoAdapted = autoTrading.autoAdapted;
                 result.status.lastAutoTradingRead = FormatLocalTime(autoTrading.lastSuccessfulRead);
                 result.status.autoTradingActive = autoTrading.activeStrategies;
                 const bool belowMinimum = autoTrading.activeStrategies < config.autoTradingMinimum;
-                result.status.multiChartsCompatibilityProfile = autoTrading.compatibilityProfile;
                 result.status.autoTrading = {
                     belowMinimum ? mcst::HealthState::Critical : mcst::HealthState::Healthy,
                     std::to_wstring(autoTrading.activeStrategies) + L" Active",
@@ -1011,6 +1026,51 @@ namespace
         else
         {
             result.status.autoTrading = { mcst::HealthState::Unknown, L"Disabled", L"" };
+        }
+
+        if (result.status.multiChartsVersion.empty())
+        {
+            result.status.compatibility = {
+                mcst::HealthState::Unknown, L"Checking...",
+                L"Waiting for MultiCharts version and module fingerprints" };
+        }
+        else
+        {
+            const bool autoTradingCompatible = !config.autoTradingMonitoringEnabled ||
+                !result.status.multiChartsCompatibilityProfile.empty();
+            const bool trackerCompatible = !result.status.trackerCompatibilityProfile.empty() &&
+                result.snapshot.trackerCompatibilityMatched;
+            if (autoTradingCompatible && trackerCompatible && autoTradingReadSucceeded)
+            {
+                const bool trackerAutomaticallyLocated =
+                    result.status.trackerCompatibilityProfile.find(L"Auto-adapted") != std::wstring::npos ||
+                    result.status.trackerCompatibilityProfile.find(L"Dynamic") != std::wstring::npos;
+                if (autoTradingAutoAdapted || trackerAutomaticallyLocated)
+                {
+                    result.status.compatibility = {
+                        mcst::HealthState::Healthy, L"Auto-adapted",
+                        L"Validated automatically for MC " + result.status.multiChartsVersion };
+                }
+                else
+                {
+                    result.status.compatibility = {
+                        mcst::HealthState::Healthy, L"Verified",
+                        L"Approved compatibility profiles for MC " + result.status.multiChartsVersion };
+                }
+            }
+            else if (autoTradingCompatible && trackerCompatible)
+            {
+                result.status.compatibility = {
+                    mcst::HealthState::Attention, L"Limited",
+                    L"A compatible reader is available, but the current AutoTrading read could not be completed" };
+            }
+            else
+            {
+                result.status.compatibility = {
+                    mcst::HealthState::Critical, L"Update required",
+                    L"One or more version-dependent readers could not be validated safely for MC " +
+                        result.status.multiChartsVersion };
+            }
         }
 
         if (readOk && result.multiChartsVersionInfo.detected)
@@ -1257,7 +1317,7 @@ namespace
     {
         HMENU menu = CreatePopupMenu();
         AppendMenuW(menu, MF_STRING, kMenuConfigure, L"Configure...");
-        if (rowId == kButtonAutoMenu && g_app.config.developerModeEnabled)
+        if (rowId == kButtonAutoMenu && kDeveloperBuild && g_app.config.developerModeEnabled)
         {
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kMenuAction1, L"Start AutoTrading research");
@@ -1317,11 +1377,17 @@ namespace
             ShellExecuteW(hwnd, L"open", L"C:\\Temp\\MCST-Watchdog\\AutoTradingResearch.txt", nullptr, nullptr, SW_SHOWNORMAL);
     }
 
+    const std::vector<DeveloperHelpTopic>& ActiveHelpTopics()
+    {
+        return kDeveloperBuild && g_app.config.developerModeEnabled
+            ? GetDeveloperHelpTopics() : GetUserHelpTopics();
+    }
+
     void UpdateDeveloperHelpTopic(HWND hwnd)
     {
         const HWND list = GetDlgItem(hwnd, kDeveloperHelpTopics);
         int selected = static_cast<int>(SendMessageW(list, LB_GETCURSEL, 0, 0));
-        const auto& topics = GetDeveloperHelpTopics();
+        const auto& topics = ActiveHelpTopics();
         if (selected < 0 || static_cast<std::size_t>(selected) >= topics.size())
             selected = 0;
         SetWindowTextW(GetDlgItem(hwnd, kDeveloperHelpText), topics[selected].content.c_str());
@@ -1336,23 +1402,29 @@ namespace
         {
         case WM_CREATE:
         {
-            HWND heading = CreateWindowW(L"STATIC", L"Developer Mode Help - choose a button to see exact instructions",
+            const bool developerHelp = kDeveloperBuild && g_app.config.developerModeEnabled;
+            HWND heading = CreateWindowW(L"STATIC", developerHelp
+                    ? L"Developer Mode Help - choose a research control"
+                    : L"MCST-Watchdog Help - choose a topic",
                 WS_CHILD | WS_VISIBLE, 18, 14, 900, 28, hwnd, nullptr, nullptr, nullptr);
             HWND useRule = CreateWindowW(L"STATIC",
-                L"Normally use only after a MultiCharts/module update, a changed fingerprint, or a developer request - not during normal monitoring.",
+                developerHelp
+                    ? L"Normally use only after a MultiCharts/module update, a changed fingerprint, or a developer request."
+                    : L"Normal operation, compatibility, updating and troubleshooting.",
                 WS_CHILD | WS_VISIBLE | SS_LEFT, 18, 44, 932, 22, hwnd, nullptr, nullptr, nullptr);
-            HWND choose = CreateWindowW(L"STATIC", L"CHOOSE A BUTTON",
+            HWND choose = CreateWindowW(L"STATIC", developerHelp ? L"CHOOSE A BUTTON" : L"CHOOSE A TOPIC",
                 WS_CHILD | WS_VISIBLE, 18, 76, 220, 22, hwnd, nullptr, nullptr, nullptr);
             HWND list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
                 18, 102, 220, 386, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDeveloperHelpTopics)), nullptr, nullptr);
-            const auto& topics = GetDeveloperHelpTopics();
+            const auto& topics = ActiveHelpTopics();
             for (const auto& topic : topics)
                 SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(topic.buttonLabel.c_str()));
             SendMessageW(list, LB_SETCURSEL, 0, 0);
-            HWND note = CreateWindowW(L"STATIC",
-                L"Research tools only. They do not switch live trading on or off.",
+            HWND note = CreateWindowW(L"STATIC", developerHelp
+                    ? L"Research tools only. They do not switch live trading on or off."
+                    : L"Monitoring is passive and does not place, modify or cancel orders.",
                 WS_CHILD | WS_VISIBLE | SS_LEFT, 18, 502, 220, 50, hwnd, nullptr, nullptr, nullptr);
             HWND text = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE |
@@ -1424,7 +1496,8 @@ namespace
         }
 
         HWND window = CreateWindowExW(WS_EX_DLGMODALFRAME, className,
-            L"MCST-Watchdog Developer Mode Help",
+            kDeveloperBuild && g_app.config.developerModeEnabled
+                ? L"MCST-Watchdog Developer Mode Help" : L"MCST-Watchdog Help",
             WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | WS_POPUP,
             CW_USEDEFAULT, CW_USEDEFAULT, 1000, 660,
             owner, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -1636,13 +1709,26 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 370, 52 }, L"MCST-Watchdog 1.20.17", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.0", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        std::wstring compatibilityBanner = L"MC";
+        if (!status.multiChartsVersion.empty()) compatibilityBanner += L" " + status.multiChartsVersion;
+        compatibilityBanner += L"  -  ";
+        if (status.compatibility.value == L"Verified") compatibilityBanner += L"COMPATIBILITY VERIFIED";
+        else if (status.compatibility.value == L"Auto-adapted") compatibilityBanner += L"COMPATIBILITY AUTO-ADAPTED";
+        else if (status.compatibility.value == L"Limited") compatibilityBanner += L"COMPATIBILITY LIMITED";
+        else if (status.compatibility.value == L"Update required") compatibilityBanner += L"COMPATIBILITY UPDATE REQUIRED";
+        else compatibilityBanner += L"COMPATIBILITY CHECKING...";
+        DrawModernIndicator(dc, client.right - 500, 5, 12, status.compatibility.state);
+        DrawTextSimple(dc, { client.right - 480, 0, client.right - 28, 22 }, compatibilityBanner,
+            g_statusFont, StateColor(status.compatibility.state),
+            DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
         const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
 
         const int overallDotLeft = client.right - 350;
-        const int overallDotTop = 16;
+        const int overallDotTop = 27;
         BYTE overallAlpha = 255;
         if (status.overall == mcst::HealthState::Healthy)
         {
@@ -1652,7 +1738,7 @@ namespace
         }
         DrawModernIndicator(dc, overallDotLeft, overallDotTop, 27, status.overall, overallAlpha);
 
-        DrawTextSimple(dc, { client.right - 318, 8, client.right - 28, 52 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { client.right - 318, 22, client.right - 28, 60 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
         HPEN divider = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
         HGDIOBJ oldPen = SelectObject(dc, divider);
@@ -1670,6 +1756,7 @@ namespace
         DrawTextSimple(dc, { 28, 94, client.right - 28, 124 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         int y = 128;
         DrawStatusRow(dc, y, L"MultiCharts Health", status.multiChartsHealth, client.right); y += 30;
+        DrawStatusRow(dc, y, L"MC Compatibility", status.compatibility, client.right); y += 30;
         DrawStatusRow(dc, y, L"Bridge", status.bridge, client.right); y += 30;
         DrawStatusRow(dc, y, L"Tracker Snapshot", status.trackerSnapshot, client.right); y += 30;
         DrawStatusRow(dc, y, L"AutoTrading", status.autoTrading, client.right); y += 30;
@@ -1701,7 +1788,7 @@ namespace
 
         const int productionButtonY = (std::max)(620, static_cast<int>(client.bottom) - 58);
 
-        if (g_app.config.developerModeEnabled)
+        if (kDeveloperBuild && g_app.config.developerModeEnabled)
         {
             DrawDeveloperToolsPanel(dc, client.right, productionButtonY);
         }
@@ -1750,18 +1837,21 @@ namespace
             g_settingsButton = CreateWindowW(L"BUTTON", L"Status Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 278, 690, 110, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonSettings)), nullptr, nullptr);
             g_openFolderButton = CreateWindowW(L"BUTTON", L"Open Folder", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 398, 690, 120, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenFolder)), nullptr, nullptr);
             g_openSettingsButton = CreateWindowW(L"BUTTON", L"Open Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 528, 690, 130, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenSettings)), nullptr, nullptr);
-            g_autoTradingDiagnosticsButton = CreateWindowW(L"BUTTON", L"AT Start", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 28, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingDiagnostics)), nullptr, nullptr);
-            g_autoTradingCaptureButton = CreateWindowW(L"BUTTON", L"AT Capture", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 176, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingCapture)), nullptr, nullptr);
-            g_autoTradingFinishButton = CreateWindowW(L"BUTTON", L"AT Finish", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 372, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingFinish)), nullptr, nullptr);
-            g_trackerResearchButton = CreateWindowW(L"BUTTON", L"Tracker Capture", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 520, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTrackerResearch)), nullptr, nullptr);
-            g_positionCurrencyResearchButton = CreateWindowW(L"BUTTON", L"Position CCY", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonPositionCurrencyResearch)), nullptr, nullptr);
-            g_openCompatibilityButton = CreateWindowW(L"BUTTON", L"Open Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenCompatibility)), nullptr, nullptr);
-            g_reloadCompatibilityButton = CreateWindowW(L"BUTTON", L"Reload Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 816, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadCompatibility)), nullptr, nullptr);
+            if (kDeveloperBuild)
+            {
+                g_autoTradingDiagnosticsButton = CreateWindowW(L"BUTTON", L"AT Start", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 28, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingDiagnostics)), nullptr, nullptr);
+                g_autoTradingCaptureButton = CreateWindowW(L"BUTTON", L"AT Capture", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 176, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingCapture)), nullptr, nullptr);
+                g_autoTradingFinishButton = CreateWindowW(L"BUTTON", L"AT Finish", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 372, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoTradingFinish)), nullptr, nullptr);
+                g_trackerResearchButton = CreateWindowW(L"BUTTON", L"Tracker Capture", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 520, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTrackerResearch)), nullptr, nullptr);
+                g_positionCurrencyResearchButton = CreateWindowW(L"BUTTON", L"Position CCY", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonPositionCurrencyResearch)), nullptr, nullptr);
+                g_openCompatibilityButton = CreateWindowW(L"BUTTON", L"Open Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenCompatibility)), nullptr, nullptr);
+                g_reloadCompatibilityButton = CreateWindowW(L"BUTTON", L"Reload Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 816, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadCompatibility)), nullptr, nullptr);
+                g_developerModeCheckbox = CreateWindowW(L"BUTTON", L"Developer mode",
+                    WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
+                    730, 697, 162, 22, hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCheckDeveloperMode)), nullptr, nullptr);
+            }
             g_developerHelpButton = CreateWindowW(L"BUTTON", L"?  Help", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | WS_TABSTOP, 934, 648, 86, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonDeveloperHelp)), nullptr, nullptr);
-            g_developerModeCheckbox = CreateWindowW(L"BUTTON", L"Developer mode",
-                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
-                730, 697, 162, 22, hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCheckDeveloperMode)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
             g_testEmailButton = CreateWindowW(L"BUTTON", L"Send Test Email", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 788, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTestEmail)), nullptr, nullptr);
             g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 220, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
@@ -1769,9 +1859,9 @@ namespace
             g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 340, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
             g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 370, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
             for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton, g_developerModeCheckbox, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
-                SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+                if (button) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton })
-                SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_developerButtonFont), TRUE);
+                if (button) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_developerButtonFont), TRUE);
             UpdateDeveloperControlVisibility(hwnd);
             SetTimer(hwnd, kRefreshTimer, static_cast<UINT>(g_app.config.refreshSeconds * 1000), nullptr);
             SetTimer(hwnd, kClockTimer, 60000, nullptr);
@@ -1812,6 +1902,21 @@ namespace
         }
 
         case WM_COMMAND:
+            if (!kDeveloperBuild)
+            {
+                switch (LOWORD(wParam))
+                {
+                case kButtonAutoTradingDiagnostics:
+                case kButtonAutoTradingCapture:
+                case kButtonAutoTradingFinish:
+                case kButtonTrackerResearch:
+                case kButtonPositionCurrencyResearch:
+                case kButtonOpenCompatibility:
+                case kButtonReloadCompatibility:
+                case kCheckDeveloperMode:
+                    return 0;
+                }
+            }
             switch (LOWORD(wParam))
             {
             case kButtonAutoMenu: ShowRowMenu(hwnd, g_autoMenuButton, kButtonAutoMenu); return 0;
@@ -1962,7 +2067,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.17", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.0", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2571,7 +2676,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.17 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.0 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2644,7 +2749,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.17 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.21.0 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

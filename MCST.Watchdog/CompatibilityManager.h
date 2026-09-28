@@ -7,6 +7,7 @@
 struct CompatibilityProfile
 {
     bool matched = false;
+    bool autoAdapted = false;
     std::wstring name;
     DWORD chartingPeTimestamp = 0;
     unsigned long long chartingImageSize = 0;
@@ -33,3 +34,13 @@ bool EnsureCompatibilityDatabase(std::wstring& diagnostic);
  * rejected safely instead of reusing an unverified memory signature.
  */
 CompatibilityProfile ResolveCompatibilityProfile(DWORD peTimestamp, unsigned long long imageSize);
+
+/**
+ * @brief Stores a structurally validated, fingerprint-scoped automatic profile.
+ *
+ * The profile is revalidated by the reader on every process scan. This never
+ * promotes a research-only candidate or copies a profile without a successful
+ * live structural read.
+ */
+bool PersistAutoAdaptedCompatibilityProfile(const CompatibilityProfile& profile,
+    std::wstring& diagnostic);

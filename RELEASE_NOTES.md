@@ -1,9 +1,29 @@
-# MCST 1.20.17 GitHub Publication-Ready Package
+# MCST 1.21.0 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
+
+## Automatic compatibility status and ordinary-user interface
+
+- Adds an always-visible compatibility banner and an `MC Compatibility`
+  System Status row with `Verified`, `Auto-adapted`, `Checking...`, or
+  `Update required` results.
+- For an unknown but nearby MC16/MC17 `Charting.dll` build, tests the closest
+  known family layout using passive reads. It accepts the candidate only when
+  at least two strategy objects are found, every state is a valid boolean and
+  no field read fails.
+- Stores a successful automatic result under the exact DLL fingerprint in
+  `MCST-Compatibility.ini`. Cached automatic profiles remain subject to the
+  same live validation on every read.
+- Keeps an uncertain layout unavailable and displays `UPDATE REQUIRED`; it
+  never reports a guessed AutoTrading count.
+- The normal `Release|x64` build contains no accessible research controls or
+  Developer Mode selector. Its `? Help` window covers normal startup,
+  compatibility, updates, warnings, safety and report privacy.
+- `ReleaseDeveloper|x64` creates `MCST-Watchdog-Developer.exe` with the
+  existing passive research controls for the maintainer.
 
 ## Bounded queue-warning retention
 
@@ -54,7 +74,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.20.17 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.21.0 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 
@@ -66,8 +86,8 @@ Bridge protocol: Protocol V2
   and two `0 -> 1` changes, with no unchanged or ambiguous transition.
 - Preserved the existing MC16 fingerprint, RVA and offset unchanged, so MC16
   and this exact MC17 build are supported side by side.
-- Unknown fingerprints remain rejected; Watchdog never reuses these values for
-  another `Charting.dll` build.
+- A nearby unknown fingerprint may use this MC17 family layout only after the
+  new live structural validation succeeds. Otherwise it remains unavailable.
 
 ## Correct MultiCharts process identity
 

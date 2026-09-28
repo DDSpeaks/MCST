@@ -5,8 +5,8 @@
 ; automatically and installs its bundled verified AutoTrading profile.
 
 [Compatibility]
-schema_version=2
-unknown_build_policy=reject
+schema_version=3
+unknown_build_policy=structural_validate
 
 ; This disabled candidate demonstrates the Tracker research schema. Every
 ; fingerprint, RVA, offset, slot, and function address must be verified against
