@@ -5,8 +5,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $GitExe = 'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe'
-$ReleaseTag = 'v1.20.15'
-$CommitMessage = 'Release v1.20.15: MultiCharts 16 and 17 AutoTrading support'
+$ReleaseTag = 'v1.20.16'
+$CommitMessage = 'Release v1.20.16: MultiCharts 16 and 17 AutoTrading support'
 
 function Assert-ExitCode {
     param(

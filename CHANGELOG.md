@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 1.20.16
+
+- Added an exact fingerprint-scoped MC17 Tracker profile for
+  `ATOnPTracker.dll` timestamp `0x6AB58F4C`, image size `3534848`, and
+  CATPTTabView primary vtable RVA `0x1D78D8`.
+- Retained the verified MC16 Tracker profile and all existing MC16 behavior
+  unchanged.
+- Confirmed from the passive MC17 capture that the Accounts and Open Positions
+  extractor RVAs remain `0x10FAE6` and `0x10FF56`.
+- Later unknown MC17 subversions use bounded RTTI discovery and structural
+  validation without inheriting either version's fixed vtable address.
+- Raised Tracker Bridge to internal V181 while retaining Protocol V2.
+
 ## 1.20.15
 
 - Extended the existing Developer Mode `Tracker Capture` action with a

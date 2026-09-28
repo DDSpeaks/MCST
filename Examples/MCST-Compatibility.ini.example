@@ -31,3 +31,11 @@ tracker_gettext_rva=
 tracker_accounts_extractor_rva=
 tracker_open_positions_extractor_rva=
 verification=UNVERIFIED - Developer Mode research required before creating an enabled Profile.* section
+
+; Tracker Bridge V181 contains this exact MC17 Tracker profile internally.
+; Users do not need to copy or enable a Tracker section in an active INI.
+; ATOnPTracker timestamp: 0x6AB58F4C
+; ATOnPTracker image size: 3534848
+; CATPTTabView primary vtable RVA: 0x1D78D8
+; Accounts extractor RVA: 0x10FAE6
+; Open Positions extractor RVA: 0x10FF56

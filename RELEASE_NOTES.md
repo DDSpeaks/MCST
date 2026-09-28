@@ -1,11 +1,24 @@
-# MCST 1.20.15 GitHub Publication-Ready Package
+# MCST 1.20.16 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
-Tracker Bridge internal build: V180  
+Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
 
-## MC17 Tracker research and clearer Help access
+## MultiCharts 17 production Tracker support
+
+- Adds the exact verified MC17 `ATOnPTracker.dll` fingerprint
+  `0x6AB58F4C / 3534848`.
+- Selects CATPTTabView primary vtable RVA `0x1D78D8` only for that exact
+  fingerprint. The verified MC16 RVA `0x1D78C8` remains unchanged.
+- Retains Accounts and Open Positions extractor RVAs `0x10FAE6` and
+  `0x10FF56`, which the passive MC17 capture independently confirmed.
+- Unknown later MC17 fingerprints inherit no fixed address. They may proceed
+  only through bounded RTTI discovery and structural validation; incompatible
+  layouts remain unavailable instead of returning guessed data.
+- Raises Tracker Bridge to internal V181 while retaining Protocol V2.
+
+## Retained MC17 Tracker research and clearer Help access
 
 - Extends the existing `Tracker Capture` action; no additional Developer Mode
   button is required.
@@ -18,8 +31,7 @@ Bridge protocol: Protocol V2
   cannot read the changed MC17 structure.
 - Highlights the rightmost `? Help` button with a light-blue background,
   stronger blue border and circled question mark.
-- Tracker Bridge is now internal V180. Protocol V2 and the verified MC16
-  production compatibility remain unchanged.
+- The passive research tools remain available for later MultiCharts updates.
 
 ## Embedded Watchdog header logo
 
@@ -28,7 +40,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.20.15 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.20.16 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 

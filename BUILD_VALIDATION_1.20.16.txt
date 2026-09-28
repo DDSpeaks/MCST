@@ -1,0 +1,36 @@
+MCST-Watchdog 1.20.16 - source validation, 28 September 2026
+================================================================
+
+Scope
+-----
+- Added the exact MC17 ATOnPTracker.dll fingerprint captured from the passive
+  live Tracker research session.
+- Retained the existing MC16 profile and Protocol V2 behavior.
+- Raised Tracker Bridge to internal V181.
+
+Verified MC17 evidence
+----------------------
+- ATOnPTracker PE timestamp: 0x6AB58F4C
+- ATOnPTracker image size: 3534848 bytes
+- CATPTTabView primary vtable RVA: 0x1D78D8
+- CATPTTabView secondary vtable RVA: 0x1D7900
+- Candidate score: 288; stable vtable, secondary vtable and Tracker layout
+  signature all present.
+- Accounts extractor RVA remained 0x10FAE6.
+- Open Positions extractor RVA remained 0x10FF56.
+
+Compatibility behavior
+----------------------
+- MC16 timestamp 0x6A5694FB continues to select vtable RVA 0x1D78C8.
+- MC17 timestamp 0x6AB58F4C selects vtable RVA 0x1D78D8.
+- An unknown later fingerprint receives no fixed vtable address. It may be
+  located only through bounded RTTI discovery plus structural validation.
+- Unknown layouts remain rejected rather than producing guessed table data.
+
+Validation required on Windows
+------------------------------
+- Build Release x64 in Visual Studio/MSBuild.
+- Run MCST-LogicTests.exe.
+- Restart MultiCharts so Tracker Bridge V181 is loaded.
+- Confirm Accounts, Open Positions, Recent Logs and monthly Realized P/L on
+  both MC16 and the captured MC17 build where available.

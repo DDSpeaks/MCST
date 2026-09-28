@@ -26,21 +26,21 @@ From the repository root, run the included Windows PowerShell 5.1 helper:
 
 It runs the complete release validator, stages and commits the validated
 source when needed, pushes the current branch, creates the annotated
-`v1.20.15` tag, and pushes that tag. It uses the Git executable shipped with
+`v1.20.16` tag, and pushes that tag. It uses the Git executable shipped with
 GitHub Desktop at the configured Administrator profile path. A failed step
 stops the script before later publication steps are attempted.
 
 The equivalent manual tag commands are:
 
 ```powershell
-git tag v1.20.15
-git push origin v1.20.15
+git tag v1.20.16
+git push origin v1.20.16
 ```
 
 The tag starts the same validated build and then creates a GitHub Release with:
 
-- `MCST-Watchdog-1.20.15-Windows-x64.zip`
-- `MCST-Watchdog-1.20.15-SHA256SUMS.txt`
+- `MCST-Watchdog-1.20.16-Windows-x64.zip`
+- `MCST-Watchdog-1.20.16-SHA256SUMS.txt`
 - the repository's `RELEASE_NOTES.md` as the Release description
 
 `Build-PortableRelease.ps1` rejects a tag whose name does not match the source
@@ -51,7 +51,7 @@ version. `gh release create --verify-tag` also requires the tag to exist.
 The user package contains only the required runtime and integration files:
 
 ```text
-MCST-Watchdog-1.20.15-Windows-x64/
+MCST-Watchdog-1.20.16-Windows-x64/
   MCExtras/
     MCST-Watchdog.exe
     MCST-TrackerBridge.dll

@@ -98,7 +98,7 @@ autotrading_offset=0x18
 verification=Controlled dynamic research: 4/4 exact responses with both toggle directions
 ```
 
-Version 1.20.15 retains the MC16 profile unchanged and adds the independently
+Version 1.20.16 retains the MC16 profile unchanged and adds the independently
 fingerprinted MC17 profile beside it. The MC17 field was the only candidate to
 match every one of four controlled transitions, with two `1 -> 0` and two
 `0 -> 1` responses and no unchanged or ambiguous transition. For any later
@@ -147,6 +147,14 @@ For the exact verified V147 fingerprint (PE timestamp `0x6A5694FB`, image size
 must pass structural scoring and expose a secondary vtable, a Tracker layout
 signature, or at least five credible page pointers. Other fingerprints do not
 inherit this anchor.
+
+Bridge V181 adds the independently captured MC17 fingerprint (PE timestamp
+`0x6AB58F4C`, image size `3534848`) with CATPTTabView primary vtable RVA
+`0x1D78D8`. The passive capture also confirmed that the Accounts and Open
+Positions extractor RVAs remain `0x10FAE6` and `0x10FF56`. MC16 and MC17 are
+selected strictly by their own fingerprints. A later unknown MC17 subversion
+receives no fixed vtable RVA; it must pass bounded RTTI discovery and the same
+structural checks, otherwise Tracker data remains unavailable.
 
 Optional research metadata can include:
 

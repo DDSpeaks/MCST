@@ -44,7 +44,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 180;
+    constexpr int kBridgeVersion = 181;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -810,6 +810,19 @@ namespace
     constexpr DWORD kKnownAtonpSize = 3534848;
     constexpr DWORD kPositionHistoryAtonpTimestamp = 0x6A5694FBu;
     constexpr std::uintptr_t kKnownTabViewPrimaryVtableRva = 0x1D78C8u;
+    constexpr DWORD kMc17VerifiedAtonpTimestamp = 0x6AB58F4Cu;
+    constexpr std::uintptr_t kMc17VerifiedTabViewPrimaryVtableRva = 0x1D78D8u;
+
+    std::uintptr_t VerifiedTabViewVtableRva(DWORD timestamp, std::uint64_t imageSize)
+    {
+        if (imageSize != kKnownAtonpSize)
+            return 0;
+        if (timestamp == kPositionHistoryAtonpTimestamp)
+            return kKnownTabViewPrimaryVtableRva;
+        if (timestamp == kMc17VerifiedAtonpTimestamp)
+            return kMc17VerifiedTabViewPrimaryVtableRva;
+        return 0;
+    }
 
     struct TrackerCompatibilityProfile
     {
@@ -1103,30 +1116,31 @@ namespace
         profile.mode = L"embedded_legacy";
         profile.atonpTrackerPeTimestamp = snapshot.atonpTrackerPeTimestamp;
         profile.atonpTrackerImageSize = snapshot.atonpTrackerSize;
-        // The exact V147 image exposes CATPTTabView's primary RTTI vtable at
-        // RVA 0x1D78C8. Supplying it only for that fingerprint authorizes the
-        // same bounded fresh recovery scan used by external exact profiles.
-        // Other same-size legacy images retain RTTI-only normal discovery.
-        profile.tabViewVtableRva =
-            snapshot.atonpTrackerPeTimestamp == kPositionHistoryAtonpTimestamp
-                ? kKnownTabViewPrimaryVtableRva
-                : 0;
+        // Exact MC16 and MC17 fingerprints have independently verified
+        // CATPTTabView primary vtables. Later unknown subversions deliberately
+        // receive no fixed address and continue through bounded RTTI discovery
+        // and structural validation instead of inheriting a stale anchor.
+        profile.tabViewVtableRva = VerifiedTabViewVtableRva(
+            snapshot.atonpTrackerPeTimestamp, snapshot.atonpTrackerSize);
         profile.accountsExtractorRva = kExtractAccountsRva;
         profile.openPositionsExtractorRva = kExtractOpenPositionsRva;
         profile.accountsPageOffset = 0x58;
         profile.openPositionsPageOffset = 0x68;
-        // The exact V147 image was verified from the live CATPTTabView object:
-        // tabs are stored in UI order at 8-byte intervals and Positions History
-        // is the +0x78 page. Never apply this new offset to another timestamp.
-        profile.positionHistoryPageOffset =
-            snapshot.atonpTrackerPeTimestamp == kPositionHistoryAtonpTimestamp ? 0x78 : 0;
+        // Both exact MC16 and MC17 captures expose tabs in the same UI order
+        // at 8-byte intervals, with Positions History at +0x78. Never apply
+        // this optional page to an unverified fingerprint.
+        profile.positionHistoryPageOffset = profile.tabViewVtableRva != 0 ? 0x78 : 0;
         profile.logsPageOffset = 0x80;
         profile.gridMemberOffset = 0x118;
         profile.rowsOffset1 = 0xD20;
         profile.rowsOffset2 = 0xD24;
         profile.getTextSlot = 60;
         profile.allowAdaptiveFlexGridIdentity = true;
-        profile.diagnostic = L"Using the embedded validated Tracker baseline for the original authorized ATOnPTracker.dll image size.";
+        if (snapshot.atonpTrackerPeTimestamp == kMc17VerifiedAtonpTimestamp)
+            profile.name = L"Embedded validated MC17 Tracker profile";
+        profile.diagnostic = profile.tabViewVtableRva != 0
+            ? L"Using an exact fingerprint-scoped embedded Tracker profile."
+            : L"Using the compatible Tracker layout with bounded RTTI discovery; no fixed address is inherited by this fingerprint.";
         return profile;
     }
 
@@ -7069,7 +7083,7 @@ DWORD sehCode = 0;
 
         const bool written = WriteUtf8File(reportPath, out.str());
         std::ostringstream summary;
-        summary << "{\"capture\":\"dynamic_tracker_locator\",\"version\":180,"
+        summary << "{\"capture\":\"dynamic_tracker_locator\",\"version\":181,"
                 << "\"read_only\":true,\"rtti_vtables\":" << vtables.size() << ','
                 << "\"candidates\":" << candidates.size() << ','
                 << "\"report_written\":" << (written ? "true" : "false") << ','

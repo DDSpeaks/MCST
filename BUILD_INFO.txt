@@ -1,15 +1,15 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.20.15
+MCST-Watchdog version: 1.20.16
 Base production:       1.114
 Build:                 Release x64, static /MT
-Tracker Bridge:        Product 1.0, internal V180, Protocol V2
-Current change:        MC17 dynamic Tracker research and highlighted Help
-Windows validation:    NOT run; source-only diagnostic trial
+Tracker Bridge:        Product 1.0, internal V181, Protocol V2
+Current change:        Exact MC17 Tracker profile with safe RTTI fallback
+Windows validation:    NOT run; source validation performed in this workspace
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-Retained Tracker recovery method (unchanged in 1.20.15)
+Retained Tracker recovery method (unchanged in 1.20.16)
 ------------------------
 1. Revalidate the most recently accepted CATPTTabView address first.
 2. Scan the remembered allocator neighborhood first and in 256 KiB blocks.
@@ -40,3 +40,5 @@ R26 targeted structural recovery Bridge: V176
 R31 progressive diagnostic recovery Bridge: V177
 R32 shared recovery-policy Bridge: V178
 1.20.9 hint-first/full-fallback recovery Bridge: V179
+1.20.15 passive MC17 Tracker research Bridge: V180
+1.20.16 exact MC17 Tracker profile Bridge: V181
