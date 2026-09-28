@@ -51,11 +51,11 @@ The Bridge runs inside MultiCharts and provides a stable Tracker snapshot bounda
 
 ```text
 Product version: 1.0
-Internal build:  V179
+Internal build:  V180
 Protocol:        V2
 ```
 
-The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling, V171 added fingerprint-scoped currency verification, V172 added bounded Tracker recovery, V173 added monitoring-only Logs history, V174 made failed recovery non-sticky, V175 added optional Position History capture, V176 added fingerprint-scoped structural recovery, V177 added progressive diagnostic recovery, V178 shared its tier-selection policy with LogicTests, and V179 adds validated-hint and process-wide fallback recovery. Protocol V2 remains unchanged.
+The internal Bridge build is not a MultiCharts compatibility fingerprint. V156 introduced profile-driven Tracker compatibility handling, V171 added fingerprint-scoped currency verification, V172 added bounded Tracker recovery, V173 added monitoring-only Logs history, V174 made failed recovery non-sticky, V175 added optional Position History capture, V176 added fingerprint-scoped structural recovery, V177 added progressive diagnostic recovery, V178 shared its tier-selection policy with LogicTests, V179 added validated-hint and process-wide fallback recovery, and V180 adds passive dynamic Tracker-locator evidence for changed MC17 structures. Protocol V2 remains unchanged.
 
 Recovery is deliberately read-only. V179 validates the most recent object hint first, scans remembered allocation neighborhoods in 256 KiB blocks, and runs a time/byte-bounded process-wide RTTI fallback after a targeted miss. Every candidate must match the exact verified profile vtable and the retained structural acceptance rules. Failed recovery attempts are spaced at 30 seconds initially, 60 seconds after three failures, and five minutes after ten failures. Each stage logs candidates, scores, limits, elapsed time, and its decision. V176's exact V147 vtable RVA `0x1D78C8` remains unchanged.
 

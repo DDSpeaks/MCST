@@ -394,7 +394,7 @@ namespace
             if (g_positionCurrencyResearchButton) MoveWindow(g_positionCurrencyResearchButton, positionCurrencyRect.left, positionCurrencyRect.top, positionCurrencyRect.right - positionCurrencyRect.left, positionCurrencyRect.bottom - positionCurrencyRect.top, TRUE);
             if (g_openCompatibilityButton) MoveWindow(g_openCompatibilityButton, openCompatRect.left, openCompatRect.top, openCompatRect.right - openCompatRect.left, openCompatRect.bottom - openCompatRect.top, TRUE);
             if (g_reloadCompatibilityButton) MoveWindow(g_reloadCompatibilityButton, reloadCompatRect.left, reloadCompatRect.top, reloadCompatRect.right - reloadCompatRect.left, reloadCompatRect.bottom - reloadCompatRect.top, TRUE);
-            if (g_developerHelpButton) MoveWindow(g_developerHelpButton, helpRect.left, helpRect.top, 70, helpRect.bottom - helpRect.top, TRUE);
+            if (g_developerHelpButton) MoveWindow(g_developerHelpButton, helpRect.left, helpRect.top, 86, helpRect.bottom - helpRect.top, TRUE);
         }
         else
         {
@@ -1535,6 +1535,61 @@ namespace
             RGB(58, 82, 116), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
+    void DrawDeveloperHelpButton(const DRAWITEMSTRUCT& item)
+    {
+        const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+        const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+        const COLORREF background = disabled ? RGB(238, 241, 245) :
+            (pressed ? RGB(205, 224, 247) : RGB(226, 239, 255));
+        const COLORREF border = disabled ? RGB(188, 194, 202) : RGB(70, 125, 190);
+        const COLORREF foreground = disabled ? RGB(133, 140, 149) : RGB(31, 83, 145);
+
+        HBRUSH brush = CreateSolidBrush(background);
+        HPEN pen = CreatePen(PS_SOLID, 1, border);
+        HGDIOBJ oldBrush = SelectObject(item.hDC, brush);
+        HGDIOBJ oldPen = SelectObject(item.hDC, pen);
+        RoundRect(item.hDC, item.rcItem.left, item.rcItem.top,
+            item.rcItem.right, item.rcItem.bottom, 7, 7);
+        SelectObject(item.hDC, oldPen);
+        SelectObject(item.hDC, oldBrush);
+        DeleteObject(pen);
+        DeleteObject(brush);
+
+        RECT icon = item.rcItem;
+        icon.left += 7;
+        icon.right = icon.left + 17;
+        icon.top += 3;
+        icon.bottom -= 3;
+        HBRUSH iconBrush = CreateSolidBrush(RGB(255, 255, 255));
+        HPEN iconPen = CreatePen(PS_SOLID, 1, border);
+        oldBrush = SelectObject(item.hDC, iconBrush);
+        oldPen = SelectObject(item.hDC, iconPen);
+        Ellipse(item.hDC, icon.left, icon.top, icon.right, icon.bottom);
+        SelectObject(item.hDC, oldPen);
+        SelectObject(item.hDC, oldBrush);
+        DeleteObject(iconPen);
+        DeleteObject(iconBrush);
+
+        SetBkMode(item.hDC, TRANSPARENT);
+        SetTextColor(item.hDC, foreground);
+        HGDIOBJ oldFont = SelectObject(item.hDC, g_developerButtonFont);
+        DrawTextW(item.hDC, L"?", -1, &icon,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        RECT label = item.rcItem;
+        label.left = icon.right + 4;
+        label.right -= 5;
+        DrawTextW(item.hDC, L"Help", -1, &label,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(item.hDC, oldFont);
+
+        if ((item.itemState & ODS_FOCUS) != 0)
+        {
+            RECT focus = item.rcItem;
+            InflateRect(&focus, -3, -3);
+            DrawFocusRect(item.hDC, &focus);
+        }
+    }
+
     void DrawLatestActivityRows(HDC dc, const std::vector<mcst::ActivityItem>& activity,
         int& y, int bottom, int width, int rowHeight)
     {
@@ -1581,7 +1636,7 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 370, 52 }, L"MCST-Watchdog 1.20.14", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 8, client.right - 370, 52 }, L"MCST-Watchdog 1.20.15", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
         const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
@@ -1702,7 +1757,7 @@ namespace
             g_positionCurrencyResearchButton = CreateWindowW(L"BUTTON", L"Position CCY", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonPositionCurrencyResearch)), nullptr, nullptr);
             g_openCompatibilityButton = CreateWindowW(L"BUTTON", L"Open Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 668, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonOpenCompatibility)), nullptr, nullptr);
             g_reloadCompatibilityButton = CreateWindowW(L"BUTTON", L"Reload Compat", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 816, 648, 140, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadCompatibility)), nullptr, nullptr);
-            g_developerHelpButton = CreateWindowW(L"BUTTON", L"Help", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 934, 648, 70, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonDeveloperHelp)), nullptr, nullptr);
+            g_developerHelpButton = CreateWindowW(L"BUTTON", L"?  Help", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | WS_TABSTOP, 934, 648, 86, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonDeveloperHelp)), nullptr, nullptr);
             g_developerModeCheckbox = CreateWindowW(L"BUTTON", L"Developer mode",
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP,
                 730, 697, 162, 22, hwnd,
@@ -1739,6 +1794,14 @@ namespace
         case WM_SIZE:
             LayoutButtons(hwnd);
             return 0;
+
+        case WM_DRAWITEM:
+            if (wParam == kButtonDeveloperHelp && lParam)
+            {
+                DrawDeveloperHelpButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+                return TRUE;
+            }
+            break;
 
         case WM_GETMINMAXINFO:
         {
@@ -1899,7 +1962,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.14", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.20.15", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2508,7 +2571,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.14 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.20.15 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2581,7 +2644,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.20.14 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.20.15 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

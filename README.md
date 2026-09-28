@@ -1,8 +1,8 @@
 ﻿# MCST
 
-## Package: 1.20.14 — MultiCharts 16 + 17 AutoTrading
+## Package: 1.20.15 — MultiCharts 16 + 17 AutoTrading
 
-Version 1.20.14 embeds the selected doctor-and-patient logo before the program
+Version 1.20.15 embeds the selected doctor-and-patient logo before the program
 name while retaining the compact descriptive Windows title bar. It also retains
 the production AutoTrading profile verified for the exact MC17 `Charting.dll`
 fingerprint `0x6AB57EE6 / 18624512`. Its dynamically
@@ -12,14 +12,14 @@ installed and unchanged. MultiCharts process discovery now uses exact executable
 identity instead of accepting another program merely because its window title
 contains “MultiCharts”. Unknown fingerprints continue to fail safely.
 The research workflow, iOS Mail separator correction, queue-warning experiment,
-and Bridge V179 are retained.
+and the V180 Bridge's passive MC17 Tracker research are included.
 The logo is compiled into the executable and requires no separate installed file.
 This source package has not been built or run on Windows during preparation.
 
 ### Retained features
 
-MCST-Watchdog retains Tracker Bridge V179. When a Tracker object can no
-longer be read through its cached route, V179 first revalidates the most recent
+MCST-Watchdog includes Tracker Bridge V180. When a Tracker object can no
+longer be read through its cached route, it first revalidates the most recent
 object address, then scans its allocator neighborhood, and finally performs a
 bounded process-wide RTTI fallback. Long failure streaks use progressively
 longer retry intervals to keep monitoring overhead low.
@@ -51,9 +51,9 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.20.14**
+- MCST-Watchdog: **1.20.15**
 - MCST Tracker Bridge: **1.0**
-- Tracker Bridge internal build: **V179**
+- Tracker Bridge internal build: **V180**
 - Bridge protocol: **V2**
 - Build target: **Release x64**
 - C/C++ runtime linkage: **static `/MT`**
@@ -69,7 +69,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.20.14` runs the Windows Release x64 build, executes
+Pushing tag `v1.20.15` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

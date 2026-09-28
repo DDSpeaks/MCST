@@ -44,7 +44,7 @@ namespace
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\MCTrackerBridge";
     constexpr wchar_t kSingletonMutexName[] = L"Local\\MCTrackerBridgeSingleton_V150";
     constexpr wchar_t kOutputDirectory[] = L"C:\\Temp";
-    constexpr int kBridgeVersion = 179;
+    constexpr int kBridgeVersion = 180;
     constexpr DWORD kPipeBufferBytes = 1024u * 1024u;
 
     enum class RuntimeState : LONG
@@ -7007,6 +7007,77 @@ DWORD sehCode = 0;
         return manifestOk && successfulReads>0;
     }
 
+    bool WriteDynamicTrackerLocatorResearch(
+        const Snapshot& snapshot,
+        std::wstring& reportPath,
+        std::string& summaryJson)
+    {
+        reportPath = ReportPath(L"MCST_Tracker_Dynamic_Locator", snapshot.processId);
+
+        std::string rttiDiagnostic;
+        const std::vector<RttiVtableRecord> vtables = ResolveRttiVtables(
+            snapshot, ".?AVCATPTTabView@ATOnPTracker@@", rttiDiagnostic);
+
+        std::string scanDiagnostic;
+        const std::vector<TabViewCandidate> candidates =
+            FindRttiVtableObjectsProcessWide(
+                snapshot, vtables, scanDiagnostic, 15000, 512ull * 1024ull * 1024ull);
+
+        std::ostringstream out;
+        out << "MCST-Watchdog Dynamic Tracker Locator Research\r\n"
+            << "================================================\r\n\r\n"
+            << "Passive research only: no clicks, no input, no function calls and no writes to MultiCharts memory.\r\n\r\n"
+            << "process_id=" << snapshot.processId << "\r\n"
+            << "tracker_found=" << (snapshot.trackerFound ? "yes" : "no") << "\r\n"
+            << "tracker_same_process=" << (snapshot.trackerInSameProcess ? "yes" : "no") << "\r\n"
+            << "atonptracker_pe_timestamp=" << HexValue(snapshot.atonpTrackerPeTimestamp) << "\r\n"
+            << "atonptracker_image_size=" << snapshot.atonpTrackerSize << "\r\n"
+            << "atonptracker_base=" << HexValue(snapshot.atonpTrackerBase) << "\r\n\r\n"
+            << "CATPTTabView RTTI\r\n-----------------\r\n"
+            << rttiDiagnostic << "\r\n\r\n"
+            << "PROCESS-WIDE OBJECT SEARCH\r\n--------------------------\r\n"
+            << scanDiagnostic << "\r\n\r\n"
+            << "CANDIDATES\r\n----------\r\n";
+
+        if (candidates.empty())
+            out << "(no exact CATPTTabView RTTI-vtable objects found)\r\n";
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            const TabViewCandidate& candidate = candidates[i];
+            out << "candidate=" << (i + 1)
+                << " object=" << HexValue(candidate.object)
+                << " vtable_rva=" << (candidate.vtable >= snapshot.atonpTrackerBase
+                    ? HexValue(candidate.vtable - snapshot.atonpTrackerBase) : "n/a")
+                << " score=" << candidate.score
+                << " stable_vtable=" << (candidate.stableVtable ? "yes" : "no")
+                << " secondary_at_0x48=" << (candidate.secondaryTabViewVtableAt48 ? "yes" : "no")
+                << " tracker_layout=" << (candidate.trackerLayoutSignature ? "yes" : "no")
+                << " tracker_hwnd_refs=" << candidate.trackerWindowReferences
+                << " page_hwnd_refs=" << candidate.pageWindowReferences
+                << " grid_hwnd_refs=" << candidate.flexGridReferences
+                << " rejected=" << (candidate.rejected ? "yes" : "no");
+            if (!candidate.rejectedReason.empty())
+                out << " reason=" << candidate.rejectedReason;
+            out << "\r\n";
+        }
+
+        out << "\r\nALL ATOnPTracker RTTI TYPE NAMES\r\n"
+            << "--------------------------------\r\n"
+            << DiscoverRttiNames(snapshot) << "\r\n"
+            << "INTERPRETATION\r\n--------------\r\n"
+            << "This report is evidence only. Do not promote a candidate to a production profile until its exact fingerprint and object structure have been independently verified.\r\n";
+
+        const bool written = WriteUtf8File(reportPath, out.str());
+        std::ostringstream summary;
+        summary << "{\"capture\":\"dynamic_tracker_locator\",\"version\":180,"
+                << "\"read_only\":true,\"rtti_vtables\":" << vtables.size() << ','
+                << "\"candidates\":" << candidates.size() << ','
+                << "\"report_written\":" << (written ? "true" : "false") << ','
+                << "\"report_path\":" << JsonString(reportPath) << '}';
+        summaryJson = summary.str();
+        return written;
+    }
+
     bool WriteResearchCaptureBundle(
         const Snapshot& snapshot,
         std::string& summaryJson)
@@ -7046,8 +7117,13 @@ DWORD sehCode = 0;
         const bool imageOk = WriteLoadedModuleMemoryImage(
             snapshot, imagePath, regionPath, manifestPath, imageDiagnostic);
 
+        std::wstring dynamicLocatorPath;
+        std::string dynamicLocatorSummary;
+        const bool dynamicLocatorOk = WriteDynamicTrackerLocatorResearch(
+            snapshot, dynamicLocatorPath, dynamicLocatorSummary);
+
         const bool allOk = snapshotOk && contractOk && callerOk && anchorsOk &&
-            pageMethodsOk && slot17Ok && imageOk;
+            pageMethodsOk && slot17Ok && imageOk && dynamicLocatorOk;
         std::ostringstream json;
         json << "{\"capture\":\"research_bundle\",\"version\":143,"
              << "\"read_only\":true,\"live_function_calls\":false,"
@@ -7058,6 +7134,9 @@ DWORD sehCode = 0;
              << "\"page_methods_ok\":" << (pageMethodsOk ? "true" : "false") << ','
              << "\"slot17_ok\":" << (slot17Ok ? "true" : "false") << ','
              << "\"loaded_image_ok\":" << (imageOk ? "true" : "false") << ','
+             << "\"dynamic_locator_ok\":" << (dynamicLocatorOk ? "true" : "false") << ','
+             << "\"dynamic_locator_path\":" << JsonString(dynamicLocatorPath) << ','
+             << "\"dynamic_locator_summary\":" << dynamicLocatorSummary << ','
              << "\"image_diagnostic\":" << JsonString(imageDiagnostic) << ','
              << "\"manifest_path\":" << JsonString(manifestPath) << ','
              << "\"loaded_image_path\":" << JsonString(imagePath) << ','
@@ -7069,7 +7148,10 @@ DWORD sehCode = 0;
              << "\"slot17_path\":" << JsonString(slot17Path) << ','
              << "\"slot17_csv_path\":" << JsonString(slot17CsvPath) << "}";
         summaryJson = json.str();
-        return allOk;
+        // A new MultiCharts build may make the legacy extractors fail. The
+        // research request still succeeds when the dynamic locator report was
+        // written, so the evidence needed for a new fingerprint can be returned.
+        return dynamicLocatorOk || allOk;
     }
 
 

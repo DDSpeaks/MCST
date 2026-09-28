@@ -1,9 +1,25 @@
-# MCST 1.20.14 GitHub Publication-Ready Package
+# MCST 1.20.15 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
-Tracker Bridge internal build: V179  
+Tracker Bridge internal build: V180  
 Bridge protocol: Protocol V2
+
+## MC17 Tracker research and clearer Help access
+
+- Extends the existing `Tracker Capture` action; no additional Developer Mode
+  button is required.
+- Writes `MCST_Tracker_Dynamic_Locator_<pid>.txt` with the exact
+  `ATOnPTracker.dll` fingerprint, RTTI evidence, bounded process-wide candidate
+  results and all discovered RTTI type names.
+- Keeps the investigation passive and read-only: it performs no clicks, input,
+  unknown function calls or writes to MultiCharts memory.
+- Returns the useful research bundle even when the old MC16 table extractors
+  cannot read the changed MC17 structure.
+- Highlights the rightmost `? Help` button with a light-blue background,
+  stronger blue border and circled question mark.
+- Tracker Bridge is now internal V180. Protocol V2 and the verified MC16
+  production compatibility remain unchanged.
 
 ## Embedded Watchdog header logo
 
@@ -12,7 +28,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.20.14 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.20.15 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 

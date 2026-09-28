@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.20.14'
-$currentBridgeBuild = 179
+$currentVersion = '1.20.15'
+$currentBridgeBuild = 180
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
 $currentProtocolVersion = 2
@@ -65,7 +65,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.20.14.txt',
+    'BUILD_VALIDATION_1.20.15.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -525,9 +525,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,20,14,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,14,0') {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.14.'
+if ($watchdogRc -notmatch 'FILEVERSION 1,20,15,0' -or
+    $watchdogRc -notmatch 'PRODUCTVERSION 1,20,15,0') {
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.20.15.'
 }
 if ($watchdogRc -notmatch 'IDR_WATCHDOG_HEADER_LOGO' -or
     $watchdogRc -notmatch 'Assets\\\\WatchdogHeaderLogo\.png') {
@@ -542,9 +542,27 @@ if ($bridgeSource -match [regex]::Escape('return (std::filesystem::path(path).pa
 if ($bridgeSource -notmatch "constexpr int kBridgeVersion = $currentBridgeBuild;") {
     throw "Tracker Bridge internal source build is not V$currentBridgeBuild."
 }
-if ($bridgeRc -notmatch 'FILEVERSION 1,0,179,0' -or
-    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.179.0\0"')) {
-    throw 'Tracker Bridge Windows file version is not aligned with internal V179.'
+foreach ($trackerResearchToken in @(
+    'WriteDynamicTrackerLocatorResearch',
+    'MCST_Tracker_Dynamic_Locator',
+    'dynamic_tracker_locator',
+    'FindRttiVtableObjectsProcessWide',
+    'Passive research only: no clicks, no input, no function calls and no writes to MultiCharts memory.'
+)) {
+    if ($bridgeSource -notmatch [regex]::Escape($trackerResearchToken)) {
+        throw "Dynamic Tracker research token is missing: $trackerResearchToken"
+    }
+}
+
+$watchdogMain = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Watchdog\main.cpp') -Raw
+foreach ($helpButtonToken in @('BS_OWNERDRAW', 'DrawDeveloperHelpButton', 'L"?  Help"')) {
+    if ($watchdogMain -notmatch [regex]::Escape($helpButtonToken)) {
+        throw "Highlighted Developer Help button token is missing: $helpButtonToken"
+    }
+}
+if ($bridgeRc -notmatch 'FILEVERSION 1,0,180,0' -or
+    $bridgeRc -notmatch [regex]::Escape('VALUE "FileVersion", "1.0.180.0\0"')) {
+    throw 'Tracker Bridge Windows file version is not aligned with internal V180.'
 }
 foreach ($recoveryToken in @(
     'InvalidateTabViewCaches',
@@ -816,7 +834,7 @@ $publisher = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Publish-G
 foreach ($publisherToken in @(
     'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe',
     'Tools\Validate-Release.ps1',
-    'v1.20.14',
+    'v1.20.15',
     'git.exe',
     'push',
     'tag'
@@ -832,7 +850,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.20.14-Windows-x64',
+    'MCST-Watchdog-1.20.15-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -848,7 +866,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.20.14',
+    '1.20.15',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

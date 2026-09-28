@@ -190,7 +190,7 @@ int RunLogicTests()
     status.lastReport = L"2026-08-22 11:00";
     status.lastAlert = L"None";
     TrackerStatusSnapshot snapshot;
-    snapshot.bridgeVersion = 179;
+    snapshot.bridgeVersion = 180;
 
     const auto initialRecovery = mcst::SelectTrackerRecoveryPolicy({ 0 });
     if (initialRecovery.retryCooldownMs != 30ull * 1000ull ||

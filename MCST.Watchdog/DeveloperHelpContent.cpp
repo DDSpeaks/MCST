@@ -54,6 +54,7 @@ const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
             L"3. AT Capture\r\n"
             L"4. Repeat one controlled change and one capture as needed\r\n"
             L"5. AT Finish\r\n\r\n"
+            L"The blue ? Help button opens these instructions at any time.\r\n\r\n"
             L"If you did not deliberately start a compatibility investigation, leave these controls alone and use the normal Refresh and report controls."
         },
         {
@@ -103,12 +104,12 @@ const std::vector<DeveloperHelpTopic>& GetDeveloperHelpTopics()
             Topic(
                 L"TRACKER CAPTURE",
                 L"Collect evidence needed to diagnose an unreadable Order and Position Tracker after a MultiCharts update.",
-                L"Requests a passive research bundle from the Bridge for Accounts, Open Positions, Position History, Recent Logs, object candidates, and compatibility metadata.",
+                L"Requests a passive research bundle from the Bridge for Accounts, Open Positions, Position History, Recent Logs, object candidates, compatibility metadata, and a dynamic MC17 Tracker locator report.",
                 L"Use when Tracker Snapshot or Recent Logs remains Warning/Critical, or when a new ATOnPTracker.dll fingerprint has no verified profile.",
                 L"1. Start MultiCharts and Watchdog.\r\n2. Open Order and Position Tracker.\r\n3. Make Accounts, Open Positions, Positions History, and Logs tabs available.\r\n4. Leave the Tracker window open and stable.\r\n5. If possible, keep representative accounts and positions visible.",
                 L"Click Tracker Capture once. Keep MultiCharts and Tracker open until the completion message appears.",
-                L"A completion message summarizes the capture and Windows opens C:\\Temp, where the timestamped Tracker research files are stored.",
-                L"Send the entire capture bundle and the displayed ATOnPTracker fingerprint to the developer. Do not enable a generated Candidate profile yourself.",
+                L"A completion message summarizes the capture and Windows opens C:\\Temp. The bundle includes MCST_Tracker_Dynamic_Locator_<pid>.txt and a loaded ATOnPTracker image when available.",
+                L"Send the entire capture bundle, especially the dynamic locator report and loaded-module files, together with the displayed ATOnPTracker fingerprint. Do not enable a generated Candidate profile yourself.",
                 L"Confirm that the Bridge is green and the correct Bridge DLL is loaded. Reopen Order and Position Tracker, wait briefly, and try once more. Preserve the exact error message if it still fails.",
                 L"Passive and read-only. It does not click Tracker, alter orders, or write to MultiCharts memory.")
         },

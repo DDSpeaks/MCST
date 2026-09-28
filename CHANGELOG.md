@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 1.20.15
+
+- Extended the existing Developer Mode `Tracker Capture` action with a
+  fingerprint-independent, passive MC17 locator report.
+- The new report records the ATOnPTracker fingerprint, RTTI resolution,
+  bounded process-wide object candidates and all discovered RTTI type names.
+- Made a research capture useful even when legacy table extraction fails, so
+  an updated production profile can be developed from a changed MC build.
+- Raised Tracker Bridge to internal V180 while retaining Protocol V2 and all
+  verified MC16 production behavior.
+- Highlighted the rightmost Developer Help button with a blue owner-drawn
+  style and a universally recognizable circled question mark.
+
 ## 1.20.14
 
 - Added the doctor-and-patient artwork as an embedded transparent header logo
