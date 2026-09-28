@@ -1,9 +1,21 @@
-# MCST 1.21.0 GitHub Publication-Ready Package
+# MCST 1.21.2 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
+
+## Click-to-read long dashboard text
+
+- Corrects the MSVC type mismatch found in the initial 1.21.1 implementation;
+  popup dimensions now use explicit `int` values throughout Win32 layout.
+- Truncated descriptions in `SYSTEM STATUS` and `LATEST ACTIVITY` can now be
+  clicked to open a lightweight rounded detail bubble.
+- The bubble shows the complete wrapped text; Latest Activity details also
+  include the event timestamp.
+- Text can be selected and copied. The bubble closes by pressing Esc or by
+  clicking elsewhere and is automatically kept inside the current screen.
+- Only genuinely truncated rows use the hand pointer and open a bubble.
 
 ## Automatic compatibility status and ordinary-user interface
 
@@ -74,7 +86,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.21.0 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.21.2 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 

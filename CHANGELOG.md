@@ -1,5 +1,24 @@
 ﻿# Changelog
 
+## 1.21.2
+
+- Corrected the Win32 `LONG` versus C++ `int` type mismatch in detail-bubble
+  sizing that prevented version 1.21.1 from compiling with MSVC.
+- Popup client dimensions and measured text dimensions are now converted
+  explicitly before `std::min`, `std::max`, and `MoveWindow` calls.
+
+## 1.21.1
+
+- Added a lightweight rounded detail bubble for truncated `SYSTEM STATUS`
+  descriptions.
+- Added the same click-to-read behavior to truncated `LATEST ACTIVITY` detail
+  rows, including the event timestamp in the expanded view.
+- The bubble wraps the complete text, supports selection and copying, stays
+  inside the active monitor and closes when focus moves elsewhere or Esc is
+  pressed.
+- The mouse pointer changes to a hand only over text that is actually
+  truncated and can be expanded.
+
 ## 1.21.0
 
 - Added a continuously visible `MC Compatibility` status and a compact

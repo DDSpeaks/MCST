@@ -1,0 +1,29 @@
+MCST-Watchdog 1.21.1 - source validation, 28 September 2026
+================================================================
+
+Change scope
+------------
+- Rounded click-to-read detail bubble for truncated System Status text.
+- The same expansion behavior for Latest Activity detail rows.
+- Full wrapped, selectable and copyable text.
+- Monitor-aware popup placement, outside-click dismissal and Esc dismissal.
+- Hand cursor only for genuinely truncated text.
+
+Retained compatibility
+----------------------
+- Version 1.21.0 automatic MC16/MC17 compatibility validation is unchanged.
+- Verified MC16 and MC17 AutoTrading and Tracker profiles remain unchanged.
+- Tracker Bridge internal V181 and Protocol V2 remain unchanged.
+- Normal Release and separate ReleaseDeveloper configurations remain intact.
+
+Validation performed in this workspace
+--------------------------------------
+- Confirmed hit regions are rebuilt from the same rectangles used for drawing.
+- Confirmed only measured overflow text receives a clickable region.
+- Confirmed popup content supports selection and clipboard copying.
+- Confirmed System Status and Latest Activity both register overflow details.
+- Confirmed version resources, report version and publication scripts use
+  1.21.1.
+
+Windows Release x64 and ReleaseDeveloper x64 builds plus a live interaction
+test are still required.

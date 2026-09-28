@@ -105,7 +105,7 @@ autotrading_offset=0x18
 verification=Controlled dynamic research: 4/4 exact responses with both toggle directions
 ```
 
-Version 1.21.0 retains the MC16 profile unchanged and adds the independently
+Version 1.21.2 retains the MC16 profile unchanged and adds the independently
 fingerprinted MC17 profile beside it. The MC17 field was the only candidate to
 match every one of four controlled transitions, with two `1 -> 0` and two
 `0 -> 1` responses and no unchanged or ambiguous transition. For any later

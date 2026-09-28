@@ -89,7 +89,9 @@ const std::vector<DeveloperHelpTopic>& GetUserHelpTopics()
             L"Open Folder: opens the reports and logs folder.\r\n\r\n"
             L"Open Settings: opens the Watchdog settings file.\r\n\r\n"
             L"Reload Settings: reloads supported settings without restarting.\r\n\r\n"
-            L"? Help: opens this help window."
+            L"? Help: opens this help window.\r\n\r\n"
+            L"LONG ROW TEXT\r\n"
+            L"When a System Status or Latest Activity description ends with an ellipsis, move the pointer over it and click. A light detail bubble shows the complete text. You can select and copy its contents. Click elsewhere or press Esc to close it."
         },
         {
             L"Warnings",

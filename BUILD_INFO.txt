@@ -1,15 +1,15 @@
 MCST Build Information
 ======================
 
-MCST-Watchdog version: 1.21.0
+MCST-Watchdog version: 1.21.2
 Base production:       1.114
 Build:                 Release x64, static /MT
 Tracker Bridge:        Product 1.0, internal V181, Protocol V2
-Current change:        Automatic compatibility status and split user/developer UI
+Current change:        Click-to-read System Status and Latest Activity detail bubbles
 Windows validation:    NOT run; source validation performed in this workspace
 Research command:      R16 CapturePositionCurrencyDirectResearch (50), retained
 
-Retained Tracker recovery method (unchanged in 1.21.0)
+Retained Tracker recovery method (unchanged in 1.21.2)
 ------------------------
 1. Revalidate the most recently accepted CATPTTabView address first.
 2. Scan the remembered allocator neighborhood first and in 256 KiB blocks.

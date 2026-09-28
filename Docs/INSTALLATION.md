@@ -73,7 +73,7 @@ A stop helper is also supplied:
 MCST.TrackerBridgeHost\PowerLanguage\MCST_Tracker_Bridge_Stop.txt
 ```
 
-Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.21.0 production Tracker snapshots require Bridge V156 or newer; this package includes Bridge V181 with retained hint-first recovery and a new passive MC17 dynamic Tracker locator. The retained R16 Position Currency research action requires V171 or newer. Existing MC16 and MC17 AutoTrading profiles remain supported. Because this release changes the Bridge DLL, MultiCharts must be restarted after installation.
+Restart MultiCharts after installing or replacing the Bridge DLL so the intended build is loaded cleanly. MCST-Watchdog 1.21.2 production Tracker snapshots require Bridge V156 or newer; this package includes Bridge V181 with retained hint-first recovery and a new passive MC17 dynamic Tracker locator. The retained R16 Position Currency research action requires V171 or newer. Existing MC16 and MC17 AutoTrading profiles remain supported. Because this release changes the Bridge DLL, MultiCharts must be restarted after installation.
 
 Keep Developer mode disabled during normal operation. Enable its research
 controls only after a MultiCharts/module update has produced an unrecognized

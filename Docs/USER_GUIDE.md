@@ -1,5 +1,12 @@
 ﻿# MCST-Watchdog User Guide
 
+## Reading truncated dashboard text
+
+When a description in `SYSTEM STATUS` or `LATEST ACTIVITY` ends with an
+ellipsis, click the text to open a lightweight rounded detail bubble. The
+complete text is wrapped inside the bubble and can be selected and copied.
+Click elsewhere or press Esc to close it. Only truncated text is clickable.
+
 ## Purpose
 
 The Dashboard is designed to answer one operational question quickly: **Is MultiCharts healthy?**

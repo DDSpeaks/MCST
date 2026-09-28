@@ -1,0 +1,24 @@
+MCST-Watchdog 1.21.2 - source validation, 28 September 2026
+================================================================
+
+Change scope
+------------
+- Corrected all new detail-popup layout calculations to use explicit int
+  dimensions instead of mixing Win32 LONG and int template arguments.
+- Retains rounded click-to-read bubbles for truncated System Status and Latest
+  Activity text.
+- Retains selectable, copyable and wrapped popup content.
+
+Compiler-error correction
+-------------------------
+- WM_SIZE converts the RECT client width and height to int before MoveWindow.
+- Measured DrawText dimensions are converted to int before std::min/std::max.
+- This removes the C2672, C2660 and C2737 cascade reported by Visual Studio.
+
+Retained compatibility
+----------------------
+- Version 1.21.0 automatic MC16/MC17 compatibility validation is unchanged.
+- Verified MC16 and MC17 profiles, Bridge V181 and Protocol V2 are unchanged.
+
+Windows Release x64 and ReleaseDeveloper x64 builds plus a live interaction
+test are still required.

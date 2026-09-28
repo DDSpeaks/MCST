@@ -45,6 +45,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -55,6 +56,7 @@ namespace
 #endif
 
     constexpr wchar_t kWindowClass[] = L"MCSTWatchdogDashboardWindow";
+    constexpr wchar_t kDetailPopupClass[] = L"MCSTWatchdogDetailPopup";
     constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\MCST-Watchdog-SingleInstance";
     constexpr UINT WM_APP_REFRESH_COMPLETE = WM_APP + 1;
     constexpr UINT WM_APP_EMAIL_COMPLETE = WM_APP + 2;
@@ -178,6 +180,26 @@ namespace
     HWND g_heartbeatMenuButton = nullptr;
     ULONG_PTR g_gdiplusToken = 0;
     std::unique_ptr<Gdiplus::Image> g_headerLogo;
+
+    struct DetailTextRegion
+    {
+        RECT bounds{};
+        std::wstring title;
+        std::wstring text;
+    };
+
+    struct DetailPopupState
+    {
+        std::wstring title;
+        std::wstring text;
+        HWND titleControl = nullptr;
+        HWND textControl = nullptr;
+        HBRUSH background = nullptr;
+        WNDPROC originalEditProc = nullptr;
+    };
+
+    std::vector<DetailTextRegion> g_detailTextRegions;
+    HWND g_detailPopup = nullptr;
 
     std::unique_ptr<Gdiplus::Image> LoadPngResource(HINSTANCE instance, int resourceId)
     {
@@ -1570,6 +1592,205 @@ namespace
         graphics.DrawEllipse(&rim, indicatorRect);
     }
 
+    bool TextIsTruncated(HDC dc, HFONT font, const RECT& bounds, const std::wstring& text)
+    {
+        if (text.empty() || bounds.right <= bounds.left)
+            return false;
+        HGDIOBJ oldFont = SelectObject(dc, font);
+        SIZE size{};
+        const BOOL measured = GetTextExtentPoint32W(dc, text.c_str(),
+            static_cast<int>(text.size()), &size);
+        SelectObject(dc, oldFont);
+        return measured && size.cx > bounds.right - bounds.left;
+    }
+
+    void AddDetailTextRegion(HDC dc, const RECT& bounds, const std::wstring& title,
+        const std::wstring& text)
+    {
+        if (TextIsTruncated(dc, g_bodyFont, bounds, text))
+            g_detailTextRegions.push_back({ bounds, title, text });
+    }
+
+    const DetailTextRegion* FindDetailTextRegion(POINT point)
+    {
+        for (const auto& region : g_detailTextRegions)
+        {
+            if (PtInRect(&region.bounds, point))
+                return &region;
+        }
+        return nullptr;
+    }
+
+    LRESULT CALLBACK DetailPopupEditProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<DetailPopupState*>(GetWindowLongPtrW(GetParent(hwnd), GWLP_USERDATA));
+        if (message == WM_KEYDOWN && wParam == VK_ESCAPE)
+        {
+            DestroyWindow(GetParent(hwnd));
+            return 0;
+        }
+        return state && state->originalEditProc
+            ? CallWindowProcW(state->originalEditProc, hwnd, message, wParam, lParam)
+            : DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    LRESULT CALLBACK DetailPopupWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<DetailPopupState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (message == WM_NCCREATE)
+        {
+            const auto* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+            state = static_cast<DetailPopupState*>(create->lpCreateParams);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+        }
+
+        switch (message)
+        {
+        case WM_CREATE:
+            state->background = CreateSolidBrush(RGB(250, 252, 255));
+            state->titleControl = CreateWindowW(L"STATIC", state->title.c_str(),
+                WS_CHILD | WS_VISIBLE | SS_LEFT,
+                18, 13, 100, 22, hwnd, nullptr, nullptr, nullptr);
+            state->textControl = CreateWindowW(L"EDIT", state->text.c_str(),
+                WS_CHILD | WS_VISIBLE | ES_LEFT | ES_MULTILINE | ES_READONLY |
+                ES_AUTOVSCROLL | WS_VSCROLL,
+                16, 42, 100, 100, hwnd, nullptr, nullptr, nullptr);
+            SendMessageW(state->titleControl, WM_SETFONT,
+                reinterpret_cast<WPARAM>(g_labelFont), TRUE);
+            SendMessageW(state->textControl, WM_SETFONT,
+                reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
+            SendMessageW(state->textControl, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                MAKELPARAM(3, 3));
+            state->originalEditProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
+                state->textControl, GWLP_WNDPROC,
+                reinterpret_cast<LONG_PTR>(DetailPopupEditProc)));
+            SetFocus(state->textControl);
+            return 0;
+
+        case WM_SIZE:
+        {
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            const int clientWidth = static_cast<int>(client.right - client.left);
+            const int clientHeight = static_cast<int>(client.bottom - client.top);
+            if (state && state->titleControl)
+                MoveWindow(state->titleControl, 18, 12,
+                    (std::max)(1, clientWidth - 36), 24, TRUE);
+            if (state && state->textControl)
+                MoveWindow(state->textControl, 15, 40,
+                    (std::max)(1, clientWidth - 30),
+                    (std::max)(44, clientHeight - 55), TRUE);
+            return 0;
+        }
+
+        case WM_CTLCOLORSTATIC:
+            if (state && state->background)
+            {
+                SetBkColor(reinterpret_cast<HDC>(wParam), RGB(250, 252, 255));
+                SetTextColor(reinterpret_cast<HDC>(wParam), RGB(31, 43, 58));
+                return reinterpret_cast<LRESULT>(state->background);
+            }
+            break;
+
+        case WM_ACTIVATE:
+            if (LOWORD(wParam) == WA_INACTIVE)
+                DestroyWindow(hwnd);
+            return 0;
+
+        case WM_KEYDOWN:
+            if (wParam == VK_ESCAPE)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+
+        case WM_PAINT:
+        {
+            PAINTSTRUCT paint{};
+            HDC dc = BeginPaint(hwnd, &paint);
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            FillRect(dc, &client, state && state->background
+                ? state->background : static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+            HPEN accent = CreatePen(PS_SOLID, 3, RGB(92, 142, 199));
+            HGDIOBJ oldPen = SelectObject(dc, accent);
+            MoveToEx(dc, 17, 37, nullptr);
+            LineTo(dc, client.right - 17, 37);
+            SelectObject(dc, oldPen);
+            DeleteObject(accent);
+            EndPaint(hwnd, &paint);
+            return 0;
+        }
+
+        case WM_DESTROY:
+            if (state)
+            {
+                if (state->background) DeleteObject(state->background);
+                delete state;
+            }
+            if (g_detailPopup == hwnd)
+                g_detailPopup = nullptr;
+            return 0;
+        }
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    void ShowDetailPopup(HWND owner, const DetailTextRegion& region, POINT clientPoint)
+    {
+        if (g_detailPopup)
+            DestroyWindow(g_detailPopup);
+
+        constexpr int preferredTextWidth = 470;
+        HDC dc = GetDC(owner);
+        HGDIOBJ oldFont = SelectObject(dc, g_bodyFont);
+        RECT measured{ 0, 0, preferredTextWidth, 0 };
+        DrawTextW(dc, region.text.c_str(), -1, &measured,
+            DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        SelectObject(dc, oldFont);
+        ReleaseDC(owner, dc);
+
+        const int measuredWidth = static_cast<int>(measured.right - measured.left);
+        const int measuredHeight = static_cast<int>(measured.bottom - measured.top);
+        const int width = (std::max)(320, (std::min)(540, measuredWidth + 38));
+        const int height = (std::max)(125, (std::min)(380, measuredHeight + 72));
+        ClientToScreen(owner, &clientPoint);
+
+        HMONITOR monitor = MonitorFromPoint(clientPoint, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        GetMonitorInfoW(monitor, &monitorInfo);
+        const RECT work = monitorInfo.rcWork;
+
+        int x = clientPoint.x + 12;
+        int y = clientPoint.y + 12;
+        if (x + width > work.right)
+            x = work.right - width - 8;
+        if (x < work.left)
+            x = work.left + 8;
+        if (y + height > work.bottom)
+            y = clientPoint.y - height - 12;
+        if (y < work.top)
+            y = work.top + 8;
+
+        auto* state = new DetailPopupState{};
+        state->title = region.title;
+        state->text = region.text;
+        g_detailPopup = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            kDetailPopupClass, L"", WS_POPUP,
+            x, y, width, height, owner, nullptr, nullptr, state);
+        if (!g_detailPopup)
+        {
+            delete state;
+            return;
+        }
+        SetWindowRgn(g_detailPopup, CreateRoundRectRgn(0, 0, width + 1, height + 1, 18, 18), TRUE);
+        ShowWindow(g_detailPopup, SW_SHOWNORMAL);
+        if (state->textControl)
+            SetFocus(state->textControl);
+        UpdateWindow(g_detailPopup);
+    }
+
     void DrawStatusRow(HDC dc, int y, const wchar_t* label, const mcst::MonitorStatus& item, int width)
     {
         const DashboardRowLayout layout = CalculateDashboardRowLayout(width);
@@ -1577,10 +1798,13 @@ namespace
 
         DrawTextSimple(dc, { layout.labelLeft, y, layout.labelRight, y + 28 }, label, g_labelFont, RGB(28, 31, 36), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { layout.stateLeft, y, layout.stateRight, y + 28 }, mcst::HealthStateText(item.state), g_statusFont, StateColor(item.state), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { layout.descriptionLeft, y, layout.descriptionRight, y + 28 },
-            item.value + (item.detail.empty() ? L"" : L"  -  " + item.detail),
+        const RECT descriptionBounds{ layout.descriptionLeft, y, layout.descriptionRight, y + 28 };
+        const std::wstring description = item.value + (item.detail.empty() ? L"" : L"  -  " + item.detail);
+        DrawTextSimple(dc, descriptionBounds,
+            description,
             g_bodyFont, RGB(45, 49, 56),
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        AddDetailTextRegion(dc, descriptionBounds, label, description);
     }
 
     void DrawDeveloperToolsPanel(HDC dc, int clientWidth, int productionButtonY)
@@ -1683,15 +1907,22 @@ namespace
             DrawTextSimple(dc, { valueLeft, y, detailLeft - 10, y + rowHeight }, FormatLocalTime(item.time),
                 g_bodyFont, RGB(35, 39, 47),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            DrawTextSimple(dc, { detailLeft, y, width - 28, y + rowHeight }, item.text,
+            const RECT detailBounds{ detailLeft, y, width - 28, y + rowHeight };
+            DrawTextSimple(dc, detailBounds, item.text,
                 g_bodyFont, RGB(35, 39, 47),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            if (TextIsTruncated(dc, g_bodyFont, detailBounds, item.text))
+            {
+                g_detailTextRegions.push_back({ detailBounds, L"Latest Activity",
+                    FormatLocalTime(item.time) + L"\r\n\r\n" + item.text });
+            }
             y += rowHeight;
         }
     }
 
     void PaintDashboard(HWND hwnd, HDC dc)
     {
+        g_detailTextRegions.clear();
         RECT client{};
         GetClientRect(hwnd, &client);
         FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
@@ -1709,7 +1940,7 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.0", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.2", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         std::wstring compatibilityBanner = L"MC";
         if (!status.multiChartsVersion.empty()) compatibilityBanner += L" " + status.multiChartsVersion;
@@ -1780,11 +2011,17 @@ namespace
         y += latestRowHeight;
         DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestDetailLeft, y, client.right - 28, y + latestRowHeight }, L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        const RECT snapshotDetailBounds{ latestDetailLeft, y, client.right - 28, y + latestRowHeight };
+        const std::wstring snapshotDetail = L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows);
+        DrawTextSimple(dc, snapshotDetailBounds, snapshotDetail, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        AddDetailTextRegion(dc, snapshotDetailBounds, L"Last complete snapshot", snapshotDetail);
         y += latestRowHeight;
         DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        DrawTextSimple(dc, { latestDetailLeft, y, client.right - 28, y + latestRowHeight }, L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount), g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        const RECT resourceDetailBounds{ latestDetailLeft, y, client.right - 28, y + latestRowHeight };
+        const std::wstring resourceDetail = L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount);
+        DrawTextSimple(dc, resourceDetailBounds, resourceDetail, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        AddDetailTextRegion(dc, resourceDetailBounds, L"Last AutoTrading Read", resourceDetail);
 
         const int productionButtonY = (std::max)(620, static_cast<int>(client.bottom) - 58);
 
@@ -1899,6 +2136,35 @@ namespace
             info->ptMinTrackSize.x = 920;
             info->ptMinTrackSize.y = 720;
             return 0;
+        }
+
+        case WM_SETCURSOR:
+            if (LOWORD(lParam) == HTCLIENT)
+            {
+                POINT point{};
+                GetCursorPos(&point);
+                ScreenToClient(hwnd, &point);
+                if (FindDetailTextRegion(point))
+                {
+                    SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                    return TRUE;
+                }
+            }
+            break;
+
+        case WM_LBUTTONUP:
+        {
+            POINT point{
+                static_cast<short>(LOWORD(lParam)),
+                static_cast<short>(HIWORD(lParam))
+            };
+            if (const DetailTextRegion* region = FindDetailTextRegion(point))
+            {
+                const DetailTextRegion selected = *region;
+                ShowDetailPopup(hwnd, selected, point);
+                return 0;
+            }
+            break;
         }
 
         case WM_COMMAND:
@@ -2067,7 +2333,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.0", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.2", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2676,7 +2942,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.0 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.2 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -2740,6 +3006,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         windowClass.lpszClassName = kWindowClass;
         if (!RegisterClassExW(&windowClass))
             throw std::runtime_error("RegisterClassExW failed");
+
+        WNDCLASSEXW popupClass{};
+        popupClass.cbSize = sizeof(popupClass);
+        popupClass.style = CS_DROPSHADOW;
+        popupClass.lpfnWndProc = DetailPopupWindowProc;
+        popupClass.hInstance = instance;
+        popupClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        popupClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+        popupClass.lpszClassName = kDetailPopupClass;
+        if (!RegisterClassExW(&popupClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+            throw std::runtime_error("Detail popup class registration failed");
         AppendStartupLogSafe(L"Startup 7: window class OK");
 
         const RECT initialRect = ResolveInitialWindowRect(g_app.config);
@@ -2749,7 +3026,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.21.0 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.21.2 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

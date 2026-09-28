@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$version = '1.21.0'
+$version = '1.21.2'
 $releaseTag = "v$version"
 $packageName = "MCST-Watchdog-$version-Windows-x64"
 
