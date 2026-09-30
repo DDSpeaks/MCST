@@ -1,9 +1,32 @@
-# MCST 1.21.2 GitHub Publication-Ready Package
+# MCST 1.21.4 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
+
+## Visual Studio compilation correction
+
+- Corrects the `std::max` template type mismatch reported at the new
+  `visibleRows` calculation.
+- Both Win32 `RECT` coordinates are now converted explicitly to `int` before
+  the row-count expression, removing the C2672/C2737 error cascade.
+
+## Session history tabs and separated Developer tools
+
+- Replaces the fixed Latest Activity block with `Latest Activity` and
+  `Latest Emails` tabs.
+- Retains up to 1,000 events of each type from the current Watchdog startup and
+  provides mouse-wheel scrolling with a visible position indicator.
+- `Latest Emails` lists Watchdog send results only; it does not connect to or
+  read the user's mailbox.
+- Adds `Developer Tools` as a third tab only in
+  `MCST-Watchdog-Developer.exe`. The normal user build never displays it.
+- Keeps research controls out of the normal monitoring view and shows them
+  only while the Developer Tools tab is selected.
+- Gives ordinary `? Help` the same light-blue, bordered and circled-question-
+  mark appearance as Developer Help.
+- Long Activity and Email rows retain the rounded click-to-read detail bubble.
 
 ## Click-to-read long dashboard text
 
@@ -86,7 +109,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.21.2 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.21.4 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 
