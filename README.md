@@ -1,8 +1,8 @@
 ﻿# MCST
 
-## Package: 1.21.4 — MultiCharts 16 + 17 AutoTrading
+## Package: 1.21.5 — MultiCharts 16 + 17 AutoTrading
 
-Version 1.21.4 adds click-to-read detail bubbles for truncated System Status
+Version 1.21.5 adds click-to-read detail bubbles for truncated System Status
 and Latest Activity text. It also retains the visible MC compatibility state
 and conservative automatic adaptation for nearby MC16/MC17 AutoTrading layouts. A family candidate is
 accepted only after passive live validation finds at least two strategy objects,
@@ -54,7 +54,7 @@ MCST is a Windows monitoring suite for MultiCharts. Its production application, 
 
 ## Current production versions
 
-- MCST-Watchdog: **1.21.4**
+- MCST-Watchdog: **1.21.5**
 - MCST Tracker Bridge: **1.0**
 - Tracker Bridge internal build: **V181**
 - Bridge protocol: **V2**
@@ -72,7 +72,7 @@ and bounded process-wide stages. Protocol V2 is unchanged. The retained R16
 
 ## Prebuilt GitHub Release
 
-Pushing tag `v1.21.4` runs the Windows Release x64 build, executes
+Pushing tag `v1.21.5` runs the Windows Release x64 build, executes
 `MCST-LogicTests.exe`, and publishes a portable ZIP plus its SHA-256 checksum.
 The ZIP contains only the Watchdog EXE, Tracker Bridge DLL, PowerLanguage host
 files, inert `.ini.example` templates, installation instructions, release

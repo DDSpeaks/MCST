@@ -326,7 +326,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
         WriteValue(path, L"StatusReport", L"send_on_startup", L"true");
 
     // Version is owned by the program and is always updated to the current build.
-    WriteValue(path, L"General", L"version", L"1.21.4");
+    WriteValue(path, L"General", L"version", L"1.21.5");
 
     EnsureIntKey(path, L"Dashboard", L"refresh_seconds", 10, 2, 3600, changes);
     EnsureBoolKey(path, L"Developer", L"enabled", false, changes);
@@ -414,7 +414,7 @@ std::vector<std::wstring> NormalizeConfigFile(const std::wstring& path)
     EnsureIntKey(path, L"Window", L"left", -1, -32000, 32000, changes);
     EnsureIntKey(path, L"Window", L"top", -1, -32000, 32000, changes);
     EnsureIntKey(path, L"Window", L"width", 980, 760, 3840, changes);
-    EnsureIntKey(path, L"Window", L"height", 790, 620, 2160, changes);
+    EnsureIntKey(path, L"Window", L"height", 960, 880, 2160, changes);
     EnsureBoolKey(path, L"Window", L"maximized", false, changes);
 
     EnsureStringKey(path, L"Files", L"report_path", L"", changes);
@@ -501,7 +501,7 @@ AppConfig LoadAppConfig()
     config.windowLeft = ReadInt(path, L"Window", L"left", -1, -32000, 32000);
     config.windowTop = ReadInt(path, L"Window", L"top", -1, -32000, 32000);
     config.windowWidth = ReadInt(path, L"Window", L"width", 980, 760, 3840);
-    config.windowHeight = ReadInt(path, L"Window", L"height", 810, 720, 2160);
+    config.windowHeight = ReadInt(path, L"Window", L"height", 960, 880, 2160);
     config.windowMaximized = ReadBool(path, L"Window", L"maximized", false);
 
     const std::filesystem::path appDir(GetApplicationDirectory());

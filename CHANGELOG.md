@@ -1,7 +1,13 @@
 ﻿# Changelog
 
-## 1.21.4
+## 1.21.5
 
+- Stopped the rounded history tabs exactly at the horizontal panel separator.
+- Aligned the differently sized compatibility and overall-health indicators
+  to the same horizontal center in the upper-right header.
+- Increased the normal dashboard height from 810 to 960 pixels and the minimum
+  window height from 720 to 880 pixels, giving the history tabs substantially
+  more room for visible events.
 - Corrected the MSVC `std::max` type mismatch in the history-row calculation
   by converting Win32 `RECT` coordinates explicitly to `int`.
 - Added `Latest Activity` and `Latest Emails` tabs with a visible scroll

@@ -1,9 +1,19 @@
-# MCST 1.21.4 GitHub Publication-Ready Package
+# MCST 1.21.5 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
+
+## Dashboard visual refinement
+
+- History-tab outlines now stop exactly at the horizontal panel separator.
+- The small compatibility indicator and larger overall-health indicator use
+  one shared horizontal center in the upper-right header.
+- The default dashboard height is now 960 pixels and its minimum height is
+  880 pixels, providing substantially more visible Activity and Email rows.
+- Existing smaller saved window heights are normalized to the new usable
+  default when settings are loaded.
 
 ## Visual Studio compilation correction
 
@@ -109,7 +119,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.21.4 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.21.5 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 

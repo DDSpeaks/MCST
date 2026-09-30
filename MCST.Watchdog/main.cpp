@@ -1957,7 +1957,10 @@ namespace
         HPEN pen = CreatePen(PS_SOLID, 1, selected ? RGB(77, 126, 184) : RGB(209, 214, 221));
         HGDIOBJ oldBrush = SelectObject(dc, brush);
         HGDIOBJ oldPen = SelectObject(dc, pen);
-        RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom + 8, 8, 8);
+        // The tab ends exactly at the separator line. Extending the rounded
+        // rectangle below rect.bottom makes the tab appear to leak through
+        // the history-panel boundary.
+        RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, 8, 8);
         SelectObject(dc, oldPen);
         SelectObject(dc, oldBrush);
         DeleteObject(pen);
@@ -2104,7 +2107,7 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.4", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.5", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         std::wstring compatibilityBanner = L"MC";
         if (!status.multiChartsVersion.empty()) compatibilityBanner += L" " + status.multiChartsVersion;
@@ -2114,15 +2117,21 @@ namespace
         else if (status.compatibility.value == L"Limited") compatibilityBanner += L"COMPATIBILITY LIMITED";
         else if (status.compatibility.value == L"Update required") compatibilityBanner += L"COMPATIBILITY UPDATE REQUIRED";
         else compatibilityBanner += L"COMPATIBILITY CHECKING...";
-        DrawModernIndicator(dc, client.right - 500, 5, 12, status.compatibility.state);
-        DrawTextSimple(dc, { client.right - 480, 0, client.right - 28, 22 }, compatibilityBanner,
+        // Both header indicators share one horizontal center line even though
+        // the Overall indicator is deliberately larger.
+        const int headerIndicatorCenterX = static_cast<int>(client.right) - 336;
+        constexpr int compatibilityDotSize = 12;
+        constexpr int overallDotSize = 28;
+        const int compatibilityDotLeft = headerIndicatorCenterX - compatibilityDotSize / 2;
+        DrawModernIndicator(dc, compatibilityDotLeft, 5, compatibilityDotSize, status.compatibility.state);
+        DrawTextSimple(dc, { headerIndicatorCenterX + 20, 0, client.right - 28, 22 }, compatibilityBanner,
             g_statusFont, StateColor(status.compatibility.state),
             DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
         const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
 
-        const int overallDotLeft = client.right - 350;
+        const int overallDotLeft = headerIndicatorCenterX - overallDotSize / 2;
         const int overallDotTop = 27;
         BYTE overallAlpha = 255;
         if (status.overall == mcst::HealthState::Healthy)
@@ -2131,9 +2140,9 @@ namespace
             const double wave = (1.0 - std::cos(phase * 6.283185307179586)) * 0.5;
             overallAlpha = static_cast<BYTE>(235 + static_cast<int>(20.0 * wave));
         }
-        DrawModernIndicator(dc, overallDotLeft, overallDotTop, 27, status.overall, overallAlpha);
+        DrawModernIndicator(dc, overallDotLeft, overallDotTop, overallDotSize, status.overall, overallAlpha);
 
-        DrawTextSimple(dc, { client.right - 318, 22, client.right - 28, 60 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { headerIndicatorCenterX + 20, 22, client.right - 28, 60 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
         HPEN divider = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
         HGDIOBJ oldPen = SelectObject(dc, divider);
@@ -2262,7 +2271,7 @@ namespace
         {
             auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
             info->ptMinTrackSize.x = 920;
-            info->ptMinTrackSize.y = 720;
+            info->ptMinTrackSize.y = 880;
             return 0;
         }
 
@@ -2493,7 +2502,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.4", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.5", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -3109,7 +3118,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.4 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.5 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -3193,7 +3202,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.21.4 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.21.5 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);
