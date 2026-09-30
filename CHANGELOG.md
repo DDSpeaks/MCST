@@ -1,18 +1,11 @@
 ﻿# Changelog
 
-## 1.21.4
+## 1.21.2
 
-- Corrected the MSVC `std::max` type mismatch in the history-row calculation
-  by converting Win32 `RECT` coordinates explicitly to `int`.
-- Added `Latest Activity` and `Latest Emails` tabs with a visible scroll
-  position and mouse-wheel navigation.
-- Both histories retain up to 1,000 entries from the current Watchdog session.
-  Email history records completed sends and failures without reading an inbox.
-- Added a third `Developer Tools` tab only to the Developer build and removed
-  research controls from the ordinary monitoring view.
-- Restyled ordinary `? Help` with the same blue circled-question-mark treatment
-  as Developer Help.
-- Retained the rounded click-to-read detail bubble for long history rows.
+- Corrected the Win32 `LONG` versus C++ `int` type mismatch in detail-bubble
+  sizing that prevented version 1.21.1 from compiling with MSVC.
+- Popup client dimensions and measured text dimensions are now converted
+  explicitly before `std::min`, `std::max`, and `MoveWindow` calls.
 
 ## 1.21.1
 

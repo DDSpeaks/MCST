@@ -90,10 +90,8 @@ const std::vector<DeveloperHelpTopic>& GetUserHelpTopics()
             L"Open Settings: opens the Watchdog settings file.\r\n\r\n"
             L"Reload Settings: reloads supported settings without restarting.\r\n\r\n"
             L"? Help: opens this help window.\r\n\r\n"
-            L"HISTORY TABS\r\n"
-            L"Latest Activity contains Watchdog events recorded since this program start. Latest Emails contains completed email sends and failures from the same session; it does not read your inbox. Point at the history and use the mouse wheel to browse older entries.\r\n\r\n"
             L"LONG ROW TEXT\r\n"
-            L"When a System Status, Latest Activity or Latest Emails description ends with an ellipsis, move the pointer over it and click. A light detail bubble shows the complete text. You can select and copy its contents. Click elsewhere or press Esc to close it."
+            L"When a System Status or Latest Activity description ends with an ellipsis, move the pointer over it and click. A light detail bubble shows the complete text. You can select and copy its contents. Click elsewhere or press Esc to close it."
         },
         {
             L"Warnings",

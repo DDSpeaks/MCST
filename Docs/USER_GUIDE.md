@@ -2,7 +2,7 @@
 
 ## Reading truncated dashboard text
 
-When a description in `SYSTEM STATUS`, `Latest Activity`, or `Latest Emails` ends with an
+When a description in `SYSTEM STATUS` or `LATEST ACTIVITY` ends with an
 ellipsis, click the text to open a lightweight rounded detail bubble. The
 complete text is wrapped inside the bubble and can be selected and copied.
 Click elsewhere or press Esc to close it. Only truncated text is clickable.
@@ -20,10 +20,14 @@ The overall status summarizes the subsystem rows. Green/OK represents a verified
 3. Confirm the expected status for MultiCharts Health, Bridge, Tracker Snapshot, AutoTrading, Broker, Recent Logs, Status Reports, Email, and Heartbeat.
 4. Leave Watchdog running during trading operation.
 
-The Dashboard has two normal history tabs. **Latest Activity** contains events
-from the current Watchdog startup. **Latest Emails** contains completed sends
-and failures from the same session; it does not read an inbox. Each history is
-bounded to 1,000 newest entries and can be browsed with the mouse wheel.
+The Dashboard uses **Latest Activity** as its single activity summary. There is no separate Recent Activity section.
+
+System Status uses compact but readable rows. Latest Activity is intentionally
+tighter because its timestamps and counters are short. When Developer mode is
+enabled, its controls appear in a separate pale blue-grey panel labelled
+**DEVELOPER TOOLS · READ-ONLY DIAGNOSTICS** above the normal production buttons.
+The panel is visually distinct because these controls are maintenance and
+compatibility tools rather than normal monitoring actions.
 
 AutoTrading counts are described to the user as **charts**. The source code may
 still use the word `object` where it specifically refers to an internal C++
@@ -164,24 +168,33 @@ For Tracker compatibility, a new `ATOnPTracker.dll` build without a verified pro
 
 ## Ordinary and Developer builds
 
-The normal `Release|x64` package does not contain a Developer Tools tab or
-research controls. Its highlighted `? Help` button contains only normal startup,
+The normal `Release|x64` package does not contain an accessible Developer Mode
+selector or research toolbar. Its `? Help` button contains only normal startup,
 compatibility, updating, warning, safety and privacy guidance.
 
 The maintainer can build `ReleaseDeveloper|x64`, which produces
 `MCST-Watchdog-Developer.exe` and retains the controls described below.
 
-> **Use Developer Tools only for controlled maintenance research.** These tools are generally
+> **Normally leave Developer mode off.** These research tools are generally
 > needed only after MultiCharts has been updated, when the exact `Charting.dll`
 > or `ATOnPTracker.dll` fingerprint has changed, or when a developer explicitly
 > asks you to collect compatibility evidence. Do not use them as part of normal
 > daily monitoring.
 
-The Developer executable adds a third **Developer Tools** history-area tab.
-Selecting it shows the compact research controls; returning to Activity or
-Emails hides them. No Developer-mode checkbox is needed.
+Developer Mode is disabled by default:
 
-The Developer Tools tab contains the following controls.
+```ini
+[Developer]
+enabled=false
+```
+
+The Developer executable shows an unchecked **Developer mode** box at the right of
+**Reload Settings**. Check it to show the compact research toolbar; clear it to
+hide the toolbar again. The choice is saved to `[Developer] enabled` in
+`MCST-Watchdog.ini`. The research buttons are only 22 pixels high, clearly
+smaller than the normal 34-pixel production buttons.
+
+When enabled, the labelled Developer toolbar contains the following controls.
 The **Help** button opens a two-pane beginner guide. Choose a button name on
 the left; the right pane then explains its goal, preparation, exact action,
 success result, next step, failure handling, and safety boundary.
@@ -202,8 +215,7 @@ window and on every individual button page.
 - **Reload Compat** — re-reads verified compatibility data, bypasses the AutoTrading cache, and requests a fresh Tracker snapshot. Replacing the Bridge DLL still requires restarting MultiCharts.
 - **Help** — opens the selectable Developer Mode guide without starting any research operation.
 
-These controls are intentionally smaller than normal production buttons and
-are absent from the normal user build.
+These controls are intentionally smaller than normal production buttons and are hidden in normal operation.
 
 The normal AutoTrading sequence is therefore **AT Start → change only one
 chart strategy's AutoTrading ON/OFF state → AT Capture** (repeat as needed)

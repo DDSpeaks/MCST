@@ -41,7 +41,7 @@ run must:
 
 Download and inspect that artifact before tagging the release.
 
-## 4. Publish version 1.21.4
+## 4. Publish version 1.21.2
 
 From a terminal opened in the repository root:
 
@@ -50,7 +50,7 @@ From a terminal opened in the repository root:
 ```
 
 The helper runs the release validator, commits and pushes any pending release
-source changes, verifies that `v1.21.4` does not already exist, and then
+source changes, verifies that `v1.21.2` does not already exist, and then
 creates and pushes the annotated tag. It stops without overwriting an existing
 local or remote tag.
 
@@ -58,8 +58,8 @@ Do not create the Release manually in the GitHub web interface. The tag starts
 the validated workflow, which creates the Release and attaches:
 
 ```text
-MCST-Watchdog-1.21.4-Windows-x64.zip
-MCST-Watchdog-1.21.4-SHA256SUMS.txt
+MCST-Watchdog-1.21.2-Windows-x64.zip
+MCST-Watchdog-1.21.2-SHA256SUMS.txt
 ```
 
 ## 5. Confirm the MIT License

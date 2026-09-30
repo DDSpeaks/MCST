@@ -83,7 +83,6 @@ namespace
     constexpr int kButtonPositionCurrencyResearch = 1018;
     constexpr int kButtonDeveloperHelp = 1019;
     constexpr int kCheckDeveloperMode = 1020;
-    constexpr std::size_t kMaximumSessionHistoryItems = 1000;
     constexpr int kMenuConfigure = 3001;
     constexpr int kMenuAction1 = 3002;
     constexpr int kMenuAction2 = 3003;
@@ -149,20 +148,6 @@ namespace
         unsigned long lastLogsProcessId = 0;
         bool hasGoodLogs = false;
         std::wstring lastLogsRead = L"Never";
-        struct EmailHistoryItem
-        {
-            std::chrono::system_clock::time_point time{};
-            bool ok = false;
-            std::wstring text;
-        };
-        std::vector<EmailHistoryItem> emailHistory;
-    };
-
-    enum class HistoryTab
-    {
-        Activity,
-        Emails,
-        DeveloperTools
     };
 
     AppState g_app;
@@ -215,12 +200,6 @@ namespace
 
     std::vector<DetailTextRegion> g_detailTextRegions;
     HWND g_detailPopup = nullptr;
-    HistoryTab g_historyTab = HistoryTab::Activity;
-    int g_historyScrollOffset = 0;
-    RECT g_activityTabRect{};
-    RECT g_emailTabRect{};
-    RECT g_developerTabRect{};
-    RECT g_historyContentRect{};
 
     std::unique_ptr<Gdiplus::Image> LoadPngResource(HINSTANCE instance, int resourceId)
     {
@@ -424,9 +403,9 @@ namespace
         if (g_openSettingsButton) MoveWindow(g_openSettingsButton, 408, y, 130, 34, TRUE);
         if (g_reloadSettingsButton) MoveWindow(g_reloadSettingsButton, 548, y, 150, 34, TRUE);
         if (g_developerModeCheckbox)
-            ShowWindow(g_developerModeCheckbox, SW_HIDE);
+            MoveWindow(g_developerModeCheckbox, (std::max)(730, static_cast<int>(client.right) - 190), y + 7, 162, 22, TRUE);
         const DeveloperToolbarLayout developerLayout = CalculateDeveloperToolbarLayout(y);
-        if (kDeveloperBuild && g_historyTab == HistoryTab::DeveloperTools)
+        if (kDeveloperBuild && g_app.config.developerModeEnabled)
         {
             const RECT startRect = CalculateDeveloperToolbarButtonRect(developerLayout, 0);
             const RECT captureRect = CalculateDeveloperToolbarButtonRect(developerLayout, 1);
@@ -443,13 +422,13 @@ namespace
             if (g_positionCurrencyResearchButton) MoveWindow(g_positionCurrencyResearchButton, positionCurrencyRect.left, positionCurrencyRect.top, positionCurrencyRect.right - positionCurrencyRect.left, positionCurrencyRect.bottom - positionCurrencyRect.top, TRUE);
             if (g_openCompatibilityButton) MoveWindow(g_openCompatibilityButton, openCompatRect.left, openCompatRect.top, openCompatRect.right - openCompatRect.left, openCompatRect.bottom - openCompatRect.top, TRUE);
             if (g_reloadCompatibilityButton) MoveWindow(g_reloadCompatibilityButton, reloadCompatRect.left, reloadCompatRect.top, reloadCompatRect.right - reloadCompatRect.left, reloadCompatRect.bottom - reloadCompatRect.top, TRUE);
-            if (g_developerHelpButton) MoveWindow(g_developerHelpButton, helpRect.left, helpRect.top, 104, helpRect.bottom - helpRect.top, TRUE);
+            if (g_developerHelpButton) MoveWindow(g_developerHelpButton, helpRect.left, helpRect.top, 86, helpRect.bottom - helpRect.top, TRUE);
         }
         else
         {
             if (g_developerHelpButton)
                 MoveWindow(g_developerHelpButton,
-                    (std::max)(686, static_cast<int>(client.right) - 136), y, 108, 34, TRUE);
+                    (std::max)(708, static_cast<int>(client.right) - 114), y, 86, 34, TRUE);
         }
         const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
         const int menuX = rowLayout.overflowButtonX;
@@ -461,7 +440,7 @@ namespace
 
     void UpdateDeveloperControlVisibility(HWND hwnd)
     {
-        const int showResearch = kDeveloperBuild && g_historyTab == HistoryTab::DeveloperTools ? SW_SHOW : SW_HIDE;
+        const int showResearch = kDeveloperBuild && g_app.config.developerModeEnabled ? SW_SHOW : SW_HIDE;
         if (g_settingsButton) ShowWindow(g_settingsButton, SW_HIDE);
         if (g_testEmailButton) ShowWindow(g_testEmailButton, SW_HIDE);
         for (HWND control : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton,
@@ -471,13 +450,12 @@ namespace
                 ShowWindow(control, showResearch);
         }
         if (g_developerHelpButton)
-        {
             ShowWindow(g_developerHelpButton, SW_SHOW);
-            SetWindowTextW(g_developerHelpButton,
-                g_historyTab == HistoryTab::DeveloperTools ? L"?  Developer Help" : L"?  Help");
-        }
         if (g_developerModeCheckbox)
-            ShowWindow(g_developerModeCheckbox, SW_HIDE);
+            ShowWindow(g_developerModeCheckbox, kDeveloperBuild ? SW_SHOW : SW_HIDE);
+        if (g_developerModeCheckbox)
+            SendMessageW(g_developerModeCheckbox, BM_SETCHECK,
+                g_app.config.developerModeEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
         LayoutButtons(hwnd);
         InvalidateRect(hwnd, nullptr, FALSE);
     }
@@ -767,8 +745,8 @@ namespace
     void AddActivity(mcst::WatchdogSystemStatus& status, mcst::HealthState state, const std::wstring& text)
     {
         status.activity.insert(status.activity.begin(), { std::chrono::system_clock::now(), state, text });
-        if (status.activity.size() > kMaximumSessionHistoryItems)
-            status.activity.resize(kMaximumSessionHistoryItems);
+        if (status.activity.size() > 10)
+            status.activity.resize(10);
     }
 
     unsigned long long FileTimeToUInt64(const FILETIME& value)
@@ -1361,7 +1339,7 @@ namespace
     {
         HMENU menu = CreatePopupMenu();
         AppendMenuW(menu, MF_STRING, kMenuConfigure, L"Configure...");
-        if (rowId == kButtonAutoMenu && kDeveloperBuild && g_historyTab == HistoryTab::DeveloperTools)
+        if (rowId == kButtonAutoMenu && kDeveloperBuild && g_app.config.developerModeEnabled)
         {
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kMenuAction1, L"Start AutoTrading research");
@@ -1423,7 +1401,7 @@ namespace
 
     const std::vector<DeveloperHelpTopic>& ActiveHelpTopics()
     {
-        return kDeveloperBuild && g_historyTab == HistoryTab::DeveloperTools
+        return kDeveloperBuild && g_app.config.developerModeEnabled
             ? GetDeveloperHelpTopics() : GetUserHelpTopics();
     }
 
@@ -1446,7 +1424,7 @@ namespace
         {
         case WM_CREATE:
         {
-            const bool developerHelp = kDeveloperBuild && g_historyTab == HistoryTab::DeveloperTools;
+            const bool developerHelp = kDeveloperBuild && g_app.config.developerModeEnabled;
             HWND heading = CreateWindowW(L"STATIC", developerHelp
                     ? L"Developer Mode Help - choose a research control"
                     : L"MCST-Watchdog Help - choose a topic",
@@ -1540,7 +1518,7 @@ namespace
         }
 
         HWND window = CreateWindowExW(WS_EX_DLGMODALFRAME, className,
-            kDeveloperBuild && g_historyTab == HistoryTab::DeveloperTools
+            kDeveloperBuild && g_app.config.developerModeEnabled
                 ? L"MCST-Watchdog Developer Mode Help" : L"MCST-Watchdog Help",
             WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | WS_POPUP,
             CW_USEDEFAULT, CW_USEDEFAULT, 1000, 660,
@@ -1897,10 +1875,7 @@ namespace
         RECT label = item.rcItem;
         label.left = icon.right + 4;
         label.right -= 5;
-        wchar_t buttonText[64]{};
-        GetWindowTextW(item.hwndItem, buttonText, _countof(buttonText));
-        const wchar_t* labelText = wcsstr(buttonText, L"Developer") ? L"Developer Help" : L"Help";
-        DrawTextW(item.hDC, labelText, -1, &label,
+        DrawTextW(item.hDC, L"Help", -1, &label,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         SelectObject(item.hDC, oldFont);
 
@@ -1945,143 +1920,6 @@ namespace
         }
     }
 
-    bool PointInside(const RECT& rect, POINT point)
-    {
-        return point.x >= rect.left && point.x < rect.right &&
-            point.y >= rect.top && point.y < rect.bottom;
-    }
-
-    void DrawHistoryTab(HDC dc, const RECT& rect, const std::wstring& text, bool selected)
-    {
-        HBRUSH brush = CreateSolidBrush(selected ? RGB(235, 243, 253) : RGB(247, 248, 250));
-        HPEN pen = CreatePen(PS_SOLID, 1, selected ? RGB(77, 126, 184) : RGB(209, 214, 221));
-        HGDIOBJ oldBrush = SelectObject(dc, brush);
-        HGDIOBJ oldPen = SelectObject(dc, pen);
-        RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom + 8, 8, 8);
-        SelectObject(dc, oldPen);
-        SelectObject(dc, oldBrush);
-        DeleteObject(pen);
-        DeleteObject(brush);
-        DrawTextSimple(dc, rect, text, selected ? g_labelFont : g_bodyFont,
-            selected ? RGB(35, 82, 139) : RGB(79, 84, 93),
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    }
-
-    void DrawHistoryScrollbar(HDC dc, int itemCount, int visibleRows)
-    {
-        if (itemCount <= visibleRows || visibleRows <= 0)
-            return;
-        RECT track{ g_historyContentRect.right - 8, g_historyContentRect.top + 4,
-            g_historyContentRect.right - 3, g_historyContentRect.bottom - 4 };
-        HBRUSH trackBrush = CreateSolidBrush(RGB(235, 237, 241));
-        FillRect(dc, &track, trackBrush);
-        DeleteObject(trackBrush);
-
-        const int trackHeight = track.bottom - track.top;
-        const int thumbHeight = (std::max)(24, trackHeight * visibleRows / itemCount);
-        const int maximumOffset = (std::max)(1, itemCount - visibleRows);
-        const int thumbTravel = (std::max)(0, trackHeight - thumbHeight);
-        const int thumbTop = track.top + thumbTravel * g_historyScrollOffset / maximumOffset;
-        RECT thumb{ track.left, thumbTop, track.right, thumbTop + thumbHeight };
-        HBRUSH thumbBrush = CreateSolidBrush(RGB(132, 150, 174));
-        FillRect(dc, &thumb, thumbBrush);
-        DeleteObject(thumbBrush);
-    }
-
-    void ClampHistoryScrollOffset(int itemCount, int visibleRows)
-    {
-        const int maximumOffset = (std::max)(0, itemCount - visibleRows);
-        g_historyScrollOffset = (std::max)(0, (std::min)(g_historyScrollOffset, maximumOffset));
-    }
-
-    void DrawTabbedHistory(HDC dc, int top, int bottom, int width,
-        const mcst::WatchdogSystemStatus& status,
-        const std::vector<AppState::EmailHistoryItem>& emails)
-    {
-        const int tabTop = top;
-        const int tabHeight = 30;
-        g_activityTabRect = { 28, tabTop, 184, tabTop + tabHeight };
-        g_emailTabRect = { 190, tabTop, 346, tabTop + tabHeight };
-        g_developerTabRect = kDeveloperBuild
-            ? RECT{ width - 202, tabTop, width - 28, tabTop + tabHeight }
-            : RECT{};
-        g_historyContentRect = { 28, tabTop + tabHeight - 1, width - 28, bottom };
-
-        DrawHistoryTab(dc, g_activityTabRect,
-            L"Latest Activity (" + std::to_wstring(status.activity.size()) + L")",
-            g_historyTab == HistoryTab::Activity);
-        DrawHistoryTab(dc, g_emailTabRect,
-            L"Latest Emails (" + std::to_wstring(emails.size()) + L")",
-            g_historyTab == HistoryTab::Emails);
-        if (kDeveloperBuild)
-            DrawHistoryTab(dc, g_developerTabRect, L"Developer Tools",
-                g_historyTab == HistoryTab::DeveloperTools);
-
-        HPEN border = CreatePen(PS_SOLID, 1, RGB(209, 214, 221));
-        HGDIOBJ oldPen = SelectObject(dc, border);
-        MoveToEx(dc, g_historyContentRect.left, g_historyContentRect.top, nullptr);
-        LineTo(dc, g_historyContentRect.right, g_historyContentRect.top);
-        SelectObject(dc, oldPen);
-        DeleteObject(border);
-
-        constexpr int rowHeight = 22;
-        const int visibleRows = (std::max)(1,
-            (static_cast<int>(g_historyContentRect.bottom) -
-             static_cast<int>(g_historyContentRect.top) - 8) / rowHeight);
-
-        if (g_historyTab == HistoryTab::DeveloperTools)
-        {
-            g_historyScrollOffset = 0;
-            DrawDeveloperToolsPanel(dc, width, bottom + 18);
-            return;
-        }
-
-        const int itemCount = g_historyTab == HistoryTab::Activity
-            ? static_cast<int>(status.activity.size()) : static_cast<int>(emails.size());
-        ClampHistoryScrollOffset(itemCount, visibleRows);
-        int y = g_historyContentRect.top + 5;
-        const int right = g_historyContentRect.right - (itemCount > visibleRows ? 18 : 4);
-
-        for (int visibleIndex = 0; visibleIndex < visibleRows; ++visibleIndex)
-        {
-            const int itemIndex = g_historyScrollOffset + visibleIndex;
-            if (itemIndex >= itemCount)
-                break;
-
-            std::chrono::system_clock::time_point time;
-            mcst::HealthState state = mcst::HealthState::Unknown;
-            std::wstring text;
-            std::wstring title;
-            if (g_historyTab == HistoryTab::Activity)
-            {
-                const auto& item = status.activity[static_cast<std::size_t>(itemIndex)];
-                time = item.time;
-                state = item.state;
-                text = item.text;
-                title = L"Latest Activity";
-            }
-            else
-            {
-                const auto& item = emails[static_cast<std::size_t>(itemIndex)];
-                time = item.time;
-                state = item.ok ? mcst::HealthState::Healthy : mcst::HealthState::Critical;
-                text = item.text;
-                title = L"Latest Emails";
-            }
-
-            DrawModernIndicator(dc, 36, y + 5, 12, state);
-            DrawTextSimple(dc, { 56, y, 126, y + rowHeight }, FormatClock(time),
-                g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            const RECT textBounds{ 132, y, right, y + rowHeight };
-            DrawTextSimple(dc, textBounds, text, g_bodyFont, RGB(35, 39, 47),
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            AddDetailTextRegion(dc, textBounds, title,
-                FormatLocalTime(time) + L"\r\n\r\n" + text);
-            y += rowHeight;
-        }
-        DrawHistoryScrollbar(dc, itemCount, visibleRows);
-    }
-
     void PaintDashboard(HWND hwnd, HDC dc)
     {
         g_detailTextRegions.clear();
@@ -2090,11 +1928,9 @@ namespace
         FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
 
         mcst::WatchdogSystemStatus status;
-        std::vector<AppState::EmailHistoryItem> emailHistory;
         {
             std::lock_guard<std::mutex> lock(g_app.mutex);
             status = g_app.status;
-            emailHistory = g_app.emailHistory;
         }
 
         if (g_headerLogo && g_headerLogo->GetLastStatus() == Gdiplus::Ok)
@@ -2104,7 +1940,7 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.4", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.2", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         std::wstring compatibilityBanner = L"MC";
         if (!status.multiChartsVersion.empty()) compatibilityBanner += L" " + status.multiChartsVersion;
@@ -2161,8 +1997,44 @@ namespace
         DrawStatusRow(dc, y, L"Email", status.email, client.right); y += 30;
         DrawStatusRow(dc, y, L"Heartbeat", status.heartbeat, client.right); y += 36;
 
+        DrawTextSimple(dc, { 28, y, client.right - 28, y + 24 }, L"LATEST ACTIVITY", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += 26;
+        const int middle = client.right / 2;
+        constexpr int latestLabelLeft = 34;
+        constexpr int latestLabelRight = 184;
+        constexpr int latestRowHeight = 20;
+        const DashboardRowLayout latestLayout = CalculateDashboardRowLayout(client.right);
+        const int latestValueLeft = latestLayout.stateLeft;
+        const int latestDetailLeft = latestLayout.descriptionLeft;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last Tracker attempt", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastTrackerAttempt, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        y += latestRowHeight;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last complete snapshot", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastCompleteTrackerSnapshot, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        const RECT snapshotDetailBounds{ latestDetailLeft, y, client.right - 28, y + latestRowHeight };
+        const std::wstring snapshotDetail = L"Accounts  " + std::to_wstring(status.accountRows) + L"    Positions  " + std::to_wstring(status.openPositionRows) + L"    Logs  " + std::to_wstring(status.recentLogRows);
+        DrawTextSimple(dc, snapshotDetailBounds, snapshotDetail, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        AddDetailTextRegion(dc, snapshotDetailBounds, L"Last complete snapshot", snapshotDetail);
+        y += latestRowHeight;
+        DrawTextSimple(dc, { latestLabelLeft, y, latestLabelRight, y + latestRowHeight }, L"Last AutoTrading Read", g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { latestValueLeft, y, middle - 10, y + latestRowHeight }, status.lastAutoTradingRead.empty() ? L"Never" : status.lastAutoTradingRead, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        const RECT resourceDetailBounds{ latestDetailLeft, y, client.right - 28, y + latestRowHeight };
+        const std::wstring resourceDetail = L"Uptime  " + status.uptime + L"    Memory  " + std::to_wstring(status.privateMemoryBytes / (1024 * 1024)) + L" MB    Handles  " + std::to_wstring(status.handleCount);
+        DrawTextSimple(dc, resourceDetailBounds, resourceDetail, g_bodyFont, RGB(35, 39, 47), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        AddDetailTextRegion(dc, resourceDetailBounds, L"Last AutoTrading Read", resourceDetail);
+
         const int productionButtonY = (std::max)(620, static_cast<int>(client.bottom) - 58);
-        DrawTabbedHistory(dc, y, productionButtonY - 10, client.right, status, emailHistory);
+
+        if (kDeveloperBuild && g_app.config.developerModeEnabled)
+        {
+            DrawDeveloperToolsPanel(dc, client.right, productionButtonY);
+        }
+        else
+        {
+            y += latestRowHeight;
+            DrawLatestActivityRows(dc, status.activity, y, productionButtonY - 10,
+                client.right, latestRowHeight);
+        }
     }
 
     HFONT CreateUiFont(int pointSize, int weight, const wchar_t* faceName, DWORD pitchAndFamily = DEFAULT_PITCH)
@@ -2286,42 +2158,10 @@ namespace
                 static_cast<short>(LOWORD(lParam)),
                 static_cast<short>(HIWORD(lParam))
             };
-            HistoryTab requestedTab = g_historyTab;
-            if (PointInside(g_activityTabRect, point))
-                requestedTab = HistoryTab::Activity;
-            else if (PointInside(g_emailTabRect, point))
-                requestedTab = HistoryTab::Emails;
-            else if (kDeveloperBuild && PointInside(g_developerTabRect, point))
-                requestedTab = HistoryTab::DeveloperTools;
-            if (requestedTab != g_historyTab)
-            {
-                g_historyTab = requestedTab;
-                g_historyScrollOffset = 0;
-                UpdateDeveloperControlVisibility(hwnd);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return 0;
-            }
             if (const DetailTextRegion* region = FindDetailTextRegion(point))
             {
                 const DetailTextRegion selected = *region;
                 ShowDetailPopup(hwnd, selected, point);
-                return 0;
-            }
-            break;
-        }
-
-        case WM_MOUSEWHEEL:
-        {
-            POINT point{
-                static_cast<short>(LOWORD(lParam)),
-                static_cast<short>(HIWORD(lParam))
-            };
-            ScreenToClient(hwnd, &point);
-            if (g_historyTab != HistoryTab::DeveloperTools && PointInside(g_historyContentRect, point))
-            {
-                const int wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
-                g_historyScrollOffset += wheelDelta < 0 ? 3 : -3;
-                InvalidateRect(hwnd, &g_historyContentRect, FALSE);
                 return 0;
             }
             break;
@@ -2493,7 +2333,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.4", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.2", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -3018,8 +2858,7 @@ namespace
                     }
                 }
 
-                mcst::MergeActivityHistory(g_app.status.activity, previousActivity,
-                    kMaximumSessionHistoryItems);
+                mcst::MergeActivityHistory(g_app.status.activity, previousActivity, 10);
                 g_app.refreshRunning = false;
             }
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -3045,12 +2884,6 @@ namespace
                     : mcst::MonitorStatus{ mcst::HealthState::Critical, L"Send failed", result->message };
                 AddActivity(g_app.status, result->ok ? mcst::HealthState::Healthy : mcst::HealthState::Critical,
                     result->eventText + (result->ok ? L" sent" : L" failed: " + result->message));
-                g_app.emailHistory.insert(g_app.emailHistory.begin(), {
-                    std::chrono::system_clock::now(), result->ok,
-                    result->eventText + (result->ok ? L" sent" : L" failed: " + result->message)
-                });
-                if (g_app.emailHistory.size() > kMaximumSessionHistoryItems)
-                    g_app.emailHistory.resize(kMaximumSessionHistoryItems);
                 if (!result->ok) g_app.status.lastError = result->message;
             }
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -3109,7 +2942,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.4 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.2 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -3193,7 +3026,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.21.4 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.21.2 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);
