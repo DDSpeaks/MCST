@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## 1.21.8
+
+- Replaced the five-pixel painted Activity/Email scroll marker with a native
+  18-pixel Windows vertical scrollbar.
+- Added thumb dragging, line arrows, page-area navigation and continuous thumb
+  tracking for both normal history tabs.
+- Expanded mouse-wheel scrolling to work over the tab headers and content.
+- Hides the scrollbar automatically when all session entries fit and on the
+  Developer Tools tab.
+- Retained the 1.21.7 compatibility-strip and main-header layout unchanged.
+
 ## 1.21.7
 
 - Moved MultiCharts compatibility information into a dedicated narrow strip

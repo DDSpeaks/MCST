@@ -83,6 +83,7 @@ namespace
     constexpr int kButtonPositionCurrencyResearch = 1018;
     constexpr int kButtonDeveloperHelp = 1019;
     constexpr int kCheckDeveloperMode = 1020;
+    constexpr int kHistoryScrollbar = 1021;
     constexpr std::size_t kMaximumSessionHistoryItems = 1000;
     constexpr int kMenuConfigure = 3001;
     constexpr int kMenuAction1 = 3002;
@@ -193,6 +194,7 @@ namespace
     HWND g_statusMenuButton = nullptr;
     HWND g_emailMenuButton = nullptr;
     HWND g_heartbeatMenuButton = nullptr;
+    HWND g_historyScrollbar = nullptr;
     ULONG_PTR g_gdiplusToken = 0;
     std::unique_ptr<Gdiplus::Image> g_headerLogo;
 
@@ -217,6 +219,8 @@ namespace
     HWND g_detailPopup = nullptr;
     HistoryTab g_historyTab = HistoryTab::Activity;
     int g_historyScrollOffset = 0;
+    int g_historyItemCount = 0;
+    int g_historyVisibleRows = 1;
     RECT g_activityTabRect{};
     RECT g_emailTabRect{};
     RECT g_developerTabRect{};
@@ -1970,34 +1974,62 @@ namespace
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
-    void DrawHistoryScrollbar(HDC dc, int itemCount, int visibleRows)
-    {
-        if (itemCount <= visibleRows || visibleRows <= 0)
-            return;
-        RECT track{ g_historyContentRect.right - 8, g_historyContentRect.top + 4,
-            g_historyContentRect.right - 3, g_historyContentRect.bottom - 4 };
-        HBRUSH trackBrush = CreateSolidBrush(RGB(235, 237, 241));
-        FillRect(dc, &track, trackBrush);
-        DeleteObject(trackBrush);
-
-        const int trackHeight = track.bottom - track.top;
-        const int thumbHeight = (std::max)(24, trackHeight * visibleRows / itemCount);
-        const int maximumOffset = (std::max)(1, itemCount - visibleRows);
-        const int thumbTravel = (std::max)(0, trackHeight - thumbHeight);
-        const int thumbTop = track.top + thumbTravel * g_historyScrollOffset / maximumOffset;
-        RECT thumb{ track.left, thumbTop, track.right, thumbTop + thumbHeight };
-        HBRUSH thumbBrush = CreateSolidBrush(RGB(132, 150, 174));
-        FillRect(dc, &thumb, thumbBrush);
-        DeleteObject(thumbBrush);
-    }
-
     void ClampHistoryScrollOffset(int itemCount, int visibleRows)
     {
         const int maximumOffset = (std::max)(0, itemCount - visibleRows);
         g_historyScrollOffset = (std::max)(0, (std::min)(g_historyScrollOffset, maximumOffset));
     }
 
-    void DrawTabbedHistory(HDC dc, int top, int bottom, int width,
+    void UpdateHistoryScrollbar(HWND hwnd, int itemCount, int visibleRows)
+    {
+        g_historyItemCount = itemCount;
+        g_historyVisibleRows = (std::max)(1, visibleRows);
+        ClampHistoryScrollOffset(g_historyItemCount, g_historyVisibleRows);
+
+        if (!g_historyScrollbar || g_historyTab == HistoryTab::DeveloperTools ||
+            g_historyItemCount <= g_historyVisibleRows)
+        {
+            if (g_historyScrollbar)
+                ShowWindow(g_historyScrollbar, SW_HIDE);
+            return;
+        }
+
+        constexpr int scrollbarWidth = 18;
+        MoveWindow(g_historyScrollbar,
+            g_historyContentRect.right - scrollbarWidth,
+            g_historyContentRect.top + 1,
+            scrollbarWidth,
+            (std::max)(1, static_cast<int>(g_historyContentRect.bottom - g_historyContentRect.top - 1)),
+            TRUE);
+
+        SCROLLINFO info{};
+        info.cbSize = sizeof(info);
+        info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        info.nMin = 0;
+        info.nMax = g_historyItemCount - 1;
+        info.nPage = static_cast<UINT>(g_historyVisibleRows);
+        info.nPos = g_historyScrollOffset;
+        SetScrollInfo(g_historyScrollbar, SB_CTL, &info, TRUE);
+        ShowWindow(g_historyScrollbar, SW_SHOWNA);
+        (void)hwnd;
+    }
+
+    void SetHistoryScrollOffset(HWND hwnd, int requestedOffset)
+    {
+        g_historyScrollOffset = requestedOffset;
+        ClampHistoryScrollOffset(g_historyItemCount, g_historyVisibleRows);
+        if (g_historyScrollbar && IsWindowVisible(g_historyScrollbar))
+        {
+            SCROLLINFO info{};
+            info.cbSize = sizeof(info);
+            info.fMask = SIF_POS;
+            info.nPos = g_historyScrollOffset;
+            SetScrollInfo(g_historyScrollbar, SB_CTL, &info, TRUE);
+        }
+        InvalidateRect(hwnd, &g_historyContentRect, FALSE);
+    }
+
+    void DrawTabbedHistory(HWND hwnd, HDC dc, int top, int bottom, int width,
         const mcst::WatchdogSystemStatus& status,
         const std::vector<AppState::EmailHistoryItem>& emails)
     {
@@ -2035,15 +2067,16 @@ namespace
         if (g_historyTab == HistoryTab::DeveloperTools)
         {
             g_historyScrollOffset = 0;
+            UpdateHistoryScrollbar(hwnd, 0, visibleRows);
             DrawDeveloperToolsPanel(dc, width, bottom + 18);
             return;
         }
 
         const int itemCount = g_historyTab == HistoryTab::Activity
             ? static_cast<int>(status.activity.size()) : static_cast<int>(emails.size());
-        ClampHistoryScrollOffset(itemCount, visibleRows);
+        UpdateHistoryScrollbar(hwnd, itemCount, visibleRows);
         int y = g_historyContentRect.top + 5;
-        const int right = g_historyContentRect.right - (itemCount > visibleRows ? 18 : 4);
+        const int right = g_historyContentRect.right - (itemCount > visibleRows ? 26 : 4);
 
         for (int visibleIndex = 0; visibleIndex < visibleRows; ++visibleIndex)
         {
@@ -2082,7 +2115,6 @@ namespace
                 FormatLocalTime(time) + L"\r\n\r\n" + text);
             y += rowHeight;
         }
-        DrawHistoryScrollbar(dc, itemCount, visibleRows);
     }
 
     void PaintDashboard(HWND hwnd, HDC dc)
@@ -2107,7 +2139,7 @@ namespace
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 35, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 36, client.right - 520, 80 }, L"MCST-Watchdog 1.21.7", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 36, client.right - 520, 80 }, L"MCST-Watchdog 1.21.8", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         std::wstring compatibilityBanner = L"MC";
         if (!status.multiChartsVersion.empty()) compatibilityBanner += L" " + status.multiChartsVersion;
@@ -2183,7 +2215,7 @@ namespace
         DrawStatusRow(dc, y, L"Heartbeat", status.heartbeat, client.right); y += 36;
 
         const int productionButtonY = (std::max)(620, static_cast<int>(client.bottom) - 58);
-        DrawTabbedHistory(dc, y, productionButtonY - 10, client.right, status, emailHistory);
+        DrawTabbedHistory(hwnd, dc, y, productionButtonY - 10, client.right, status, emailHistory);
     }
 
     HFONT CreateUiFont(int pointSize, int weight, const wchar_t* faceName, DWORD pitchAndFamily = DEFAULT_PITCH)
@@ -2244,6 +2276,10 @@ namespace
             g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 368, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
             g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 398, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
             g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 428, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
+            g_historyScrollbar = CreateWindowExW(0, L"SCROLLBAR", nullptr,
+                WS_CHILD | SBS_VERT,
+                0, 0, 18, 100, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kHistoryScrollbar)), nullptr, nullptr);
             for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton, g_developerModeCheckbox, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 if (button) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton })
@@ -2338,15 +2374,59 @@ namespace
                 static_cast<short>(HIWORD(lParam))
             };
             ScreenToClient(hwnd, &point);
-            if (g_historyTab != HistoryTab::DeveloperTools && PointInside(g_historyContentRect, point))
+            const bool overHistory = PointInside(g_historyContentRect, point) ||
+                PointInside(g_activityTabRect, point) || PointInside(g_emailTabRect, point);
+            if (g_historyTab != HistoryTab::DeveloperTools && overHistory)
             {
                 const int wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
-                g_historyScrollOffset += wheelDelta < 0 ? 3 : -3;
-                InvalidateRect(hwnd, &g_historyContentRect, FALSE);
+                SetHistoryScrollOffset(hwnd,
+                    g_historyScrollOffset + (wheelDelta < 0 ? 3 : -3));
                 return 0;
             }
             break;
         }
+
+        case WM_VSCROLL:
+            if (reinterpret_cast<HWND>(lParam) == g_historyScrollbar)
+            {
+                int requestedOffset = g_historyScrollOffset;
+                switch (LOWORD(wParam))
+                {
+                case SB_LINEUP:
+                    --requestedOffset;
+                    break;
+                case SB_LINEDOWN:
+                    ++requestedOffset;
+                    break;
+                case SB_PAGEUP:
+                    requestedOffset -= g_historyVisibleRows;
+                    break;
+                case SB_PAGEDOWN:
+                    requestedOffset += g_historyVisibleRows;
+                    break;
+                case SB_THUMBPOSITION:
+                case SB_THUMBTRACK:
+                {
+                    SCROLLINFO info{};
+                    info.cbSize = sizeof(info);
+                    info.fMask = SIF_TRACKPOS;
+                    if (GetScrollInfo(g_historyScrollbar, SB_CTL, &info))
+                        requestedOffset = info.nTrackPos;
+                    break;
+                }
+                case SB_TOP:
+                    requestedOffset = 0;
+                    break;
+                case SB_BOTTOM:
+                    requestedOffset = g_historyItemCount;
+                    break;
+                default:
+                    return 0;
+                }
+                SetHistoryScrollOffset(hwnd, requestedOffset);
+                return 0;
+            }
+            break;
 
         case WM_COMMAND:
             if (!kDeveloperBuild)
@@ -2514,7 +2594,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.7", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.8", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -3130,7 +3210,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.7 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.8 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -3214,7 +3294,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.21.7 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.21.8 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

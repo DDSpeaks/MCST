@@ -23,7 +23,10 @@ The overall status summarizes the subsystem rows. Green/OK represents a verified
 The Dashboard has two normal history tabs. **Latest Activity** contains events
 from the current Watchdog startup. **Latest Emails** contains completed sends
 and failures from the same session; it does not read an inbox. Each history is
-bounded to 1,000 newest entries and can be browsed with the mouse wheel.
+bounded to 1,000 newest entries. When the entries do not fit, a standard wide
+vertical scrollbar appears at the right edge. Drag its thumb, click its arrows
+or track, or use the mouse wheel while the pointer is over the history or its
+tab. The scrollbar is hidden automatically when all entries fit.
 
 AutoTrading counts are described to the user as **charts**. The source code may
 still use the word `object` where it specifically refers to an internal C++

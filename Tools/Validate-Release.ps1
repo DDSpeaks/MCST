@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$currentVersion = '1.21.7'
+$currentVersion = '1.21.8'
 $currentBridgeBuild = 181
 $minimumProductionBridgeBuild = 156
 $positionCurrencyResearchBridgeBuild = 171
@@ -65,7 +65,7 @@ $required = @(
     'CODING_STANDARD.md',
     'RELEASE_NOTES.md',
     'BUILD_INFO.txt',
-    'BUILD_VALIDATION_1.21.7.txt',
+    'BUILD_VALIDATION_1.21.8.txt',
     'COVERED_QUEUE_PROBE_TRIAL.txt',
     'CHANGELOG.md',
     '.github\workflows\release.yml',
@@ -273,6 +273,20 @@ if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
     $watchdogMain -notmatch 'Charts found' -or
     $watchdogMain -match 'Objects found') {
     throw 'The retained activity deduplication/alignment, Developer panel, or user-facing AutoTrading chart terminology is missing.'
+}
+foreach ($historyScrollbarToken in @(
+    'L"SCROLLBAR"',
+    'SBS_VERT',
+    'UpdateHistoryScrollbar',
+    'SetScrollInfo',
+    'WM_VSCROLL',
+    'SB_THUMBTRACK',
+    'SB_PAGEUP',
+    'SB_PAGEDOWN'
+)) {
+    if ($watchdogMain -notmatch [regex]::Escape($historyScrollbarToken)) {
+        throw "Native history scrollbar token is missing: $historyScrollbarToken"
+    }
 }
 $activityHistory = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'MCST.Shared\ActivityHistory.h') -Raw
 if ($activityHistory -notmatch 'IsSameActivity' -or
@@ -524,7 +538,7 @@ if (-not $watchdogRc.Contains($expectedProductVersion)) {
 $expectedNumericVersion = $currentVersion.Replace('.', ',') + ',0'
 if ($watchdogRc -notmatch [regex]::Escape("FILEVERSION $expectedNumericVersion") -or
     $watchdogRc -notmatch [regex]::Escape("PRODUCTVERSION $expectedNumericVersion")) {
-    throw 'Watchdog numeric Windows version resource is not aligned with 1.21.7.'
+    throw 'Watchdog numeric Windows version resource is not aligned with 1.21.8.'
 }
 if ($watchdogRc -notmatch 'IDR_WATCHDOG_HEADER_LOGO' -or
     $watchdogRc -notmatch 'Assets\\\\WatchdogHeaderLogo\.png') {
@@ -874,7 +888,7 @@ $publisher = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Publish-G
 foreach ($publisherToken in @(
     'C:\Users\Administrator\AppData\Local\GitHubDesktop\app-3.6.4\resources\app\git\mingw64\bin\git.exe',
     'Tools\Validate-Release.ps1',
-    'v1.21.7',
+    'v1.21.8',
     'git.exe',
     'push',
     'tag'
@@ -890,7 +904,7 @@ foreach ($workflowToken in @(
     'actions/checkout@v5',
     'microsoft/setup-msbuild@v3',
     'actions/upload-artifact@v4',
-    'MCST-Watchdog-1.21.7-Windows-x64',
+    'MCST-Watchdog-1.21.8-Windows-x64',
     'contents: write',
     'Validate-Release.ps1',
     'MCST-LogicTests.exe',
@@ -906,7 +920,7 @@ foreach ($workflowToken in @(
 
 $portableBuilder = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $root 'Tools\Build-PortableRelease.ps1') -Raw
 foreach ($packageToken in @(
-    '1.21.7',
+    '1.21.8',
     'MCST-Watchdog.exe',
     'MCST-TrackerBridge.dll',
     'MCST_Tracker_Bridge_Host.txt',

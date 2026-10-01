@@ -1,16 +1,26 @@
-# MCST 1.21.7 GitHub Publication-Ready Package
+# MCST 1.21.8 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
 
+## Usable Activity and Email history scrolling
+
+- Replaces the narrow painted scroll marker with a native 18-pixel Windows
+  vertical scrollbar on `Latest Activity` and `Latest Emails`.
+- Supports dragging the thumb, line-up/line-down arrows, page-up/page-down
+  track clicks and continuous thumb tracking.
+- Mouse-wheel scrolling works over both the selected tab and its content.
+- The control is hidden automatically when all session entries fit on screen
+  and is never shown on the Developer Tools tab.
+
 ## Dedicated compatibility strip and main header
 
 - Places the compatibility state in a dedicated narrow strip at the very top
   of the dashboard.
 - Draws a light separator across the full inner width below that strip.
-- Keeps the logo, `MCST-Watchdog 1.21.7` title and overall-health headline
+- Keeps the logo, `MCST-Watchdog 1.21.8` title and overall-health headline
   together in the main header below the separator.
 - Retains the shared horizontal center of the differently sized compatibility
   and overall-health indicators while leaving room for the complete text.
@@ -39,7 +49,7 @@ Bridge protocol: Protocol V2
 - Replaces the fixed Latest Activity block with `Latest Activity` and
   `Latest Emails` tabs.
 - Retains up to 1,000 events of each type from the current Watchdog startup and
-  provides mouse-wheel scrolling with a visible position indicator.
+  provides mouse-wheel scrolling plus a native draggable scrollbar.
 - `Latest Emails` lists Watchdog send results only; it does not connect to or
   read the user's mailbox.
 - Adds `Developer Tools` as a third tab only in
@@ -131,7 +141,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.21.7 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.21.8 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 
