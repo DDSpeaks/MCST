@@ -1,9 +1,21 @@
-# MCST 1.21.5 GitHub Publication-Ready Package
+# MCST 1.21.7 GitHub Publication-Ready Package
 
 MultiCharts 16 + 17 AutoTrading support
 
 Tracker Bridge internal build: V181  
 Bridge protocol: Protocol V2
+
+## Dedicated compatibility strip and main header
+
+- Places the compatibility state in a dedicated narrow strip at the very top
+  of the dashboard.
+- Draws a light separator across the full inner width below that strip.
+- Keeps the logo, `MCST-Watchdog 1.21.7` title and overall-health headline
+  together in the main header below the separator.
+- Retains the shared horizontal center of the differently sized compatibility
+  and overall-health indicators while leaving room for the complete text.
+- Moves the update row, System Status rows, history panel and their fixed row
+  menu controls down together, preserving their visual and click alignment.
 
 ## Dashboard visual refinement
 
@@ -119,7 +131,7 @@ Bridge protocol: Protocol V2
 - Embeds the transparent PNG in `MCST-Watchdog.exe`; users do not need to copy
   or retain a separate logo file.
 - Keeps the compact Windows title bar with the descriptive text
-  `MCST-Watchdog 1.21.5 - MC16 + MC17 AutoTrading`.
+  `MCST-Watchdog 1.21.7 - MC16 + MC17 AutoTrading`.
 
 ## MultiCharts 17 production AutoTrading support
 

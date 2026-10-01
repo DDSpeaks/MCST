@@ -453,10 +453,10 @@ namespace
         }
         const DashboardRowLayout rowLayout = CalculateDashboardRowLayout(static_cast<int>(client.right));
         const int menuX = rowLayout.overflowButtonX;
-        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 250, 30, 24, TRUE);
-        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 340, 30, 24, TRUE);
-        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 370, 30, 24, TRUE);
-        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 400, 30, 24, TRUE);
+        if (g_autoMenuButton) MoveWindow(g_autoMenuButton, menuX, 278, 30, 24, TRUE);
+        if (g_statusMenuButton) MoveWindow(g_statusMenuButton, menuX, 368, 30, 24, TRUE);
+        if (g_emailMenuButton) MoveWindow(g_emailMenuButton, menuX, 398, 30, 24, TRUE);
+        if (g_heartbeatMenuButton) MoveWindow(g_heartbeatMenuButton, menuX, 428, 30, 24, TRUE);
     }
 
     void UpdateDeveloperControlVisibility(HWND hwnd)
@@ -2105,9 +2105,9 @@ namespace
             Gdiplus::Graphics graphics(dc);
             graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-            graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 7, 58, 44));
+            graphics.DrawImage(g_headerLogo.get(), Gdiplus::Rect(28, 35, 58, 44));
         }
-        DrawTextSimple(dc, { 98, 8, client.right - 520, 52 }, L"MCST-Watchdog 1.21.5", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { 98, 36, client.right - 520, 80 }, L"MCST-Watchdog 1.21.7", g_titleFont, RGB(25, 28, 34), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         std::wstring compatibilityBanner = L"MC";
         if (!status.multiChartsVersion.empty()) compatibilityBanner += L" " + status.multiChartsVersion;
@@ -2119,20 +2119,32 @@ namespace
         else compatibilityBanner += L"COMPATIBILITY CHECKING...";
         // Both header indicators share one horizontal center line even though
         // the Overall indicator is deliberately larger.
-        const int headerIndicatorCenterX = static_cast<int>(client.right) - 336;
+        // Leave enough room for the full compatibility wording on the narrow
+        // top row. Both dots move together so their shared center is retained.
+        const int headerIndicatorCenterX = static_cast<int>(client.right) - 420;
         constexpr int compatibilityDotSize = 12;
         constexpr int overallDotSize = 28;
         const int compatibilityDotLeft = headerIndicatorCenterX - compatibilityDotSize / 2;
-        DrawModernIndicator(dc, compatibilityDotLeft, 5, compatibilityDotSize, status.compatibility.state);
-        DrawTextSimple(dc, { headerIndicatorCenterX + 20, 0, client.right - 28, 22 }, compatibilityBanner,
+        DrawModernIndicator(dc, compatibilityDotLeft, 7, compatibilityDotSize, status.compatibility.state);
+        DrawTextSimple(dc, { headerIndicatorCenterX + 20, 0, client.right - 28, 27 }, compatibilityBanner,
             g_statusFont, StateColor(status.compatibility.state),
             DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        // The compatibility state owns a separate narrow top strip. The full
+        // width separator makes the hierarchy unambiguous: logo, product name
+        // and overall health all belong to the main header below it.
+        HPEN headerSeparatorPen = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
+        HGDIOBJ headerOldPen = SelectObject(dc, headerSeparatorPen);
+        MoveToEx(dc, 28, 27, nullptr);
+        LineTo(dc, client.right - 28, 27);
+        SelectObject(dc, headerOldPen);
+        DeleteObject(headerSeparatorPen);
 
         const bool firstUpdateCompleted = status.lastSuccessfulUpdate.time_since_epoch().count() != 0;
         const wchar_t* overallText = mcst::OverallHeadline(status.overall, firstUpdateCompleted);
 
         const int overallDotLeft = headerIndicatorCenterX - overallDotSize / 2;
-        const int overallDotTop = 27;
+        const int overallDotTop = 42;
         BYTE overallAlpha = 255;
         if (status.overall == mcst::HealthState::Healthy)
         {
@@ -2142,11 +2154,11 @@ namespace
         }
         DrawModernIndicator(dc, overallDotLeft, overallDotTop, overallDotSize, status.overall, overallAlpha);
 
-        DrawTextSimple(dc, { headerIndicatorCenterX + 20, 22, client.right - 28, 60 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { headerIndicatorCenterX + 20, 28, client.right - 28, 87 }, overallText, g_titleFont, StateColor(status.overall), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
         HPEN divider = CreatePen(PS_SOLID, 1, RGB(229, 232, 237));
         HGDIOBJ oldPen = SelectObject(dc, divider);
-        MoveToEx(dc, 28, 62, nullptr); LineTo(dc, client.right - 28, 62);
+        MoveToEx(dc, 28, 90, nullptr); LineTo(dc, client.right - 28, 90);
         SelectObject(dc, oldPen);
         DeleteObject(divider);
 
@@ -2154,11 +2166,11 @@ namespace
         const std::wstring updateText = status.lastSuccessfulUpdate.time_since_epoch().count() == 0
             ? L"Last successful system update: waiting for first successful update"
             : L"Last successful system update: " + FormatClock(status.lastSuccessfulUpdate) + L"  (" + FormatAge(status.lastSuccessfulUpdate) + L")" + mcSuffix;
-        DrawTextSimple(dc, { 28, 66, client.right - 250, 92 }, updateText, g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        DrawTextSimple(dc, { client.right - 245, 66, client.right - 28, 92 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextSimple(dc, { 28, 94, client.right - 250, 120 }, updateText, g_bodyFont, RGB(68, 73, 82), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextSimple(dc, { client.right - 245, 94, client.right - 28, 120 }, L"Uptime  " + status.uptime, g_bodyFont, RGB(68, 73, 82), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-        DrawTextSimple(dc, { 28, 94, client.right - 28, 124 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        int y = 128;
+        DrawTextSimple(dc, { 28, 122, client.right - 28, 152 }, L"SYSTEM STATUS", g_headerFont, RGB(43, 47, 54), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        int y = 156;
         DrawStatusRow(dc, y, L"MultiCharts Health", status.multiChartsHealth, client.right); y += 30;
         DrawStatusRow(dc, y, L"MC Compatibility", status.compatibility, client.right); y += 30;
         DrawStatusRow(dc, y, L"Bridge", status.bridge, client.right); y += 30;
@@ -2228,10 +2240,10 @@ namespace
             g_developerHelpButton = CreateWindowW(L"BUTTON", L"?  Help", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | WS_TABSTOP, 934, 648, 86, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonDeveloperHelp)), nullptr, nullptr);
             g_reloadSettingsButton = CreateWindowW(L"BUTTON", L"Reload Settings", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 628, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonReloadSettings)), nullptr, nullptr);
             g_testEmailButton = CreateWindowW(L"BUTTON", L"Send Test Email", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 788, 648, 150, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonTestEmail)), nullptr, nullptr);
-            g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 220, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
-            g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 310, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
-            g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 340, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
-            g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 370, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
+            g_autoMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 278, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonAutoMenu)), nullptr, nullptr);
+            g_statusMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 368, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonStatusMenu)), nullptr, nullptr);
+            g_emailMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 398, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonEmailMenu)), nullptr, nullptr);
+            g_heartbeatMenuButton = CreateWindowW(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 930, 428, 30, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonHeartbeatMenu)), nullptr, nullptr);
             for (HWND button : { g_refreshButton, g_reportButton, g_settingsButton, g_openFolderButton, g_openSettingsButton, g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton, g_developerModeCheckbox, g_reloadSettingsButton, g_testEmailButton, g_autoMenuButton, g_statusMenuButton, g_emailMenuButton, g_heartbeatMenuButton })
                 if (button) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(g_bodyFont), TRUE);
             for (HWND button : { g_autoTradingDiagnosticsButton, g_autoTradingCaptureButton, g_autoTradingFinishButton, g_trackerResearchButton, g_positionCurrencyResearchButton, g_openCompatibilityButton, g_reloadCompatibilityButton, g_developerHelpButton })
@@ -2250,7 +2262,7 @@ namespace
                 InvalidateRect(hwnd, nullptr, FALSE);
             else if (wParam == kAnimationTimer)
             {
-                RECT pulseArea{ 0, 12, 10000, 70 };
+                RECT pulseArea{ 0, 28, 10000, 92 };
                 InvalidateRect(hwnd, &pulseArea, FALSE);
             }
             return 0;
@@ -2502,7 +2514,7 @@ namespace
                     MessageBoxW(hwnd, reason.c_str(), L"Email configuration", MB_OK | MB_ICONWARNING);
                     return 0;
                 }
-                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.5", false, L"Test email", false, g_app.config.alertEmailTo);
+                SendEmailAsync(hwnd, WM_APP_EMAIL_COMPLETE, g_app.config, L"MCST-Watchdog Test Email", L"MCST-Watchdog email configuration is working.\r\n\r\nVersion: 1.21.7", false, L"Test email", false, g_app.config.alertEmailTo);
                 MessageBoxW(hwnd, L"Test email is being sent.", L"Email", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -3118,7 +3130,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     try
     {
-        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.5 process entered protected startup");
+        AppendStartupLogSafe(L"Startup 0: MCST-Watchdog 1.21.7 process entered protected startup");
 
         singleInstanceMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
         if (!singleInstanceMutex)
@@ -3202,7 +3214,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         const int initialHeight = initialRect.top == CW_USEDEFAULT ? g_app.config.windowHeight : initialRect.bottom - initialRect.top;
 
         HWND window = CreateWindowExW(
-            0, kWindowClass, L"MCST-Watchdog 1.21.5 - MC16 + MC17 AutoTrading",
+            0, kWindowClass, L"MCST-Watchdog 1.21.7 - MC16 + MC17 AutoTrading",
             WS_OVERLAPPEDWINDOW,
             initialX, initialY, initialWidth, initialHeight,
             nullptr, nullptr, instance, nullptr);

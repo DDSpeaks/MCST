@@ -1,7 +1,25 @@
 ﻿# Changelog
 
-## 1.21.5
+## 1.21.7
 
+- Moved MultiCharts compatibility information into a dedicated narrow strip
+  above the logo and application name.
+- Added a full-width horizontal separator below the compatibility strip.
+- Kept the logo, product title and larger overall-health status together in
+  the main header below the separator.
+- Preserved one horizontal center for the small compatibility indicator and
+  larger overall-health indicator.
+- Shifted the remaining dashboard content and fixed status-row menu controls
+  down by 28 pixels so drawing and interaction remain aligned.
+- Retained the taller history panel, bounded session histories, build-gated
+  Developer Tools tab and MC16/MC17 compatibility behavior from 1.21.6.
+
+## 1.21.6
+
+- Shifted both upper-right status indicators left while retaining their shared
+  center, giving the compatibility text substantially more horizontal space.
+- Restored the subtle separator below the narrow compatibility row without
+  drawing it through the logo or application title.
 - Stopped the rounded history tabs exactly at the horizontal panel separator.
 - Aligned the differently sized compatibility and overall-health indicators
   to the same horizontal center in the upper-right header.
