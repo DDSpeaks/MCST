@@ -261,17 +261,13 @@ if ($watchdogMain -notmatch 'kCheckDeveloperMode' -or
     throw 'Persistent Dashboard Developer mode checkbox is missing.'
 }
 if ($watchdogMain -notmatch 'DrawDeveloperToolsPanel' -or
-    $watchdogMain -notmatch 'DrawLatestActivityRows' -or
-    $watchdogMain -notmatch 'status.activity' -or
-    $watchdogMain -notmatch 'constexpr int latestRowHeight = 20' -or
-    $watchdogMain -notmatch 'labelRight, y \+ rowHeight \}, item.text' -or
-    $watchdogMain -notmatch 'valueLeft = rowLayout.stateLeft' -or
-    $watchdogMain -notmatch 'detailLeft = rowLayout.descriptionLeft' -or
-    $watchdogMain -notmatch 'detailLeft - 10, y \+ rowHeight \}, FormatLocalTime\(item.time\)' -or
-    $watchdogMain -notmatch 'detailLeft, y, width - 28, y \+ rowHeight \}, item.text' -or
-    $watchdogMain -notmatch 'latestValueLeft = latestLayout.stateLeft' -or
-    $watchdogMain -notmatch 'latestDetailLeft = latestLayout.descriptionLeft' -or
-    $watchdogMain -notmatch 'MergeActivityHistory\(g_app.status.activity, previousActivity, 10\)' -or
+    $watchdogMain -notmatch 'DrawTabbedHistory' -or
+    $watchdogMain -notmatch 'DrawHistoryTab' -or
+    $watchdogMain -notmatch 'HistoryTab::DeveloperTools' -or
+    $watchdogMain -notmatch 'constexpr int rowHeight = 22' -or
+    $watchdogMain -notmatch 'g_historyContentRect' -or
+    $watchdogMain -notmatch 'MergeActivityHistory\(g_app.status.activity, previousActivity,' -or
+    $watchdogMain -notmatch 'kMaximumSessionHistoryItems' -or
     $watchdogMain -notmatch 'productionButtonY - 10' -or
     $watchdogMain -notmatch 'DEVELOPER TOOLS  ·  READ-ONLY DIAGNOSTICS' -or
     $watchdogMain -notmatch 'Charts found' -or
@@ -525,8 +521,9 @@ $expectedProductVersion = 'VALUE "ProductVersion", "' + $currentVersion + '\0"'
 if (-not $watchdogRc.Contains($expectedProductVersion)) {
     throw "Watchdog Windows product version is not $currentVersion."
 }
-if ($watchdogRc -notmatch 'FILEVERSION 1,21,2,0' -or
-    $watchdogRc -notmatch 'PRODUCTVERSION 1,21,2,0') {
+$expectedNumericVersion = $currentVersion.Replace('.', ',') + ',0'
+if ($watchdogRc -notmatch [regex]::Escape("FILEVERSION $expectedNumericVersion") -or
+    $watchdogRc -notmatch [regex]::Escape("PRODUCTVERSION $expectedNumericVersion")) {
     throw 'Watchdog numeric Windows version resource is not aligned with 1.21.7.'
 }
 if ($watchdogRc -notmatch 'IDR_WATCHDOG_HEADER_LOGO' -or
